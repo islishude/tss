@@ -343,11 +343,16 @@ func (s *PresignSession) buildAcceptPresignRound1PayloadTx(env tss.Envelope) (*a
 		}
 		verified = true
 	}
-	return &acceptPresignRound1PayloadTx{
+	tx := &acceptPresignRound1PayloadTx{
 		from:     env.From,
 		payload:  p,
 		verified: verified,
-	}, nil
+	}
+	if err := tx.prepare(s); err != nil {
+		tx.cleanupOnReject()
+		return nil, err
+	}
+	return tx, nil
 }
 
 func (s *PresignSession) buildAcceptPresignRound1ProofTx(env tss.Envelope) (*acceptPresignRound1ProofTx, error) {
@@ -391,12 +396,17 @@ func (s *PresignSession) buildAcceptPresignRound1ProofTx(env tss.Envelope) (*acc
 		}
 		verified = true
 	}
-	return &acceptPresignRound1ProofTx{
+	tx := &acceptPresignRound1ProofTx{
 		from:          env.From,
 		proof:         p,
 		proofEnvelope: env.Clone(),
 		verified:      verified,
-	}, nil
+	}
+	if err := tx.prepare(s); err != nil {
+		tx.cleanupOnReject()
+		return nil, err
+	}
+	return tx, nil
 }
 
 func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {

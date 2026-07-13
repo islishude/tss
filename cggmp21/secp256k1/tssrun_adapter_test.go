@@ -2,6 +2,34 @@ package secp256k1
 
 import "testing"
 
+func TestLifecycleSessionCompletedUsesTerminalState(t *testing.T) {
+	t.Parallel()
+
+	var nilKeygen *KeygenSession
+	var nilRefresh *RefreshSession
+	var nilReshare *ReshareSession
+	if nilKeygen.Completed() || nilRefresh.Completed() || nilReshare.Completed() {
+		t.Fatal("nil lifecycle session reported completion")
+	}
+
+	keygen := &KeygenSession{completed: true, state: keygenConfirmed}
+	refresh := &RefreshSession{completed: true}
+	reshareDealer := &ReshareSession{completed: true, isDealer: true, isReceiver: false}
+	if !keygen.Completed() || !refresh.Completed() || !reshareDealer.Completed() {
+		t.Fatal("terminal lifecycle state reported incomplete without an accessor result")
+	}
+	if share, ok := reshareDealer.KeyShare(); ok || share != nil {
+		t.Fatal("dealer-only reshare unexpectedly produced a replacement key share")
+	}
+
+	keygen.Destroy()
+	refresh.Destroy()
+	reshareDealer.Destroy()
+	if keygen.Completed() || refresh.Completed() || reshareDealer.Completed() {
+		t.Fatal("destroyed lifecycle session retained completion state")
+	}
+}
+
 func TestPresignSessionCompletedDoesNotTransferPresign(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
 	session := &PresignSession{

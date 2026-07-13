@@ -563,7 +563,12 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*accept
 
 // Complete returns the confirmed local key share when keygen has finished.
 func (s *KeygenSession) Complete() (*KeyShare, bool) {
-	if s == nil || s.state != keygenConfirmed || !s.completed {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != keygenConfirmed || !s.completed {
 		return nil, false
 	}
 	return cloneKeyShareValue(s.keyShare), true

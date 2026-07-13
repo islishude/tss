@@ -126,6 +126,7 @@ func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *tes
 		t.Fatal(err)
 	}
 	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
+	guard.AckVerifier = testBroadcastAckVerifier()
 	resumed, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, store, guard)
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +136,26 @@ func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *tes
 	}
 	if len(resumedOut) != 0 {
 		t.Fatal("ResumeSign replayed outbox after durable delivery completion")
+	}
+	contentID, err := restored.contentIDWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	tampered := store.attempts[string(contentID)]
+	tampered.DeliveryState.Acks[0].Signature[0] ^= 1
+	store.attempts[string(contentID)] = tampered
+	store.mu.Unlock()
+	secondRestored, err := tss.DecodeBinary[Presign](rawPresign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(secondRestored.Destroy)
+	strictGuard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
+	strictGuard.AckVerifier = testBroadcastAckVerifier()
+	badSession, badOut, err := ResumeSign(context.Background(), shares[1], secondRestored, store, strictGuard)
+	if !errors.Is(err, ErrSignAttemptCorrupt) || badSession != nil || badOut != nil {
+		t.Fatalf("ResumeSign unauthenticated delivery state = session:%v out:%d err:%v", badSession != nil, len(badOut), err)
 	}
 }
 
@@ -198,8 +219,30 @@ func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 	if !ok || !bytes.Equal(signature.R, resumedSignature.R) || !bytes.Equal(signature.S, resumedSignature.S) {
 		t.Fatal("completed signature did not survive restart")
 	}
-	if len(restored.state.sigmaOpenings) != 0 || len(restored.state.SigmaOpeningRecords) != 0 {
-		t.Fatal("completed attempt recovery retained sigma identification witnesses")
+	if len(resumed.sigmaOpenings) != 0 {
+		t.Fatal("completed attempt recovery retained attempt-owned sigma identification witnesses")
+	}
+	if len(restored.state.sigmaOpenings) != 0 || len(restored.state.SigmaOpeningRecords) != 1 {
+		t.Fatal("completed attempt recovery mutated caller-owned presign witness records")
+	}
+	contentID, err := restored.contentIDWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stores[1].mu.Lock()
+	tampered := stores[1].attempts[string(contentID)]
+	tampered.SignatureRecoveryID ^= 1
+	stores[1].attempts[string(contentID)] = tampered
+	stores[1].mu.Unlock()
+	secondRestored, err := tss.DecodeBinary[Presign](rawPresign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(secondRestored.Destroy)
+	strictGuard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
+	badSession, badOut, err := ResumeSign(context.Background(), shares[1], secondRestored, stores[1], strictGuard)
+	if !errors.Is(err, ErrSignAttemptCorrupt) || badSession != nil || badOut != nil {
+		t.Fatalf("ResumeSign mismatched recovery ID = session:%v out:%d err:%v", badSession != nil, len(badOut), err)
 	}
 }
 

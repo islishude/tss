@@ -206,7 +206,14 @@ return independently owned shares that must each be destroyed separately.
 
 ### MPC Material Requirement
 
-CGGMP21 key shares require full Paillier/ZK material and a complete keygen confirmation evidence set for the signing path. `requireMPCMaterial()` calls `Validate()`, which verifies every embedded `KeygenConfirmation` against the local keygen transcript, then checks that every party's Paillier public key is deserializable. Unconfirmed shares are rejected.
+CGGMP21 key shares require full Paillier/ZK material and a complete keygen
+confirmation evidence set for the signing path. `requireMPCMaterial()` calls
+`Validate()`, which requires commitment zero to equal the group public key,
+recomputes every party verification share by evaluating the public commitment
+polynomial, verifies every embedded `KeygenConfirmation`, and checks that the
+keygen confirmation chain-code reveals XOR to the stored chain code. It then
+revalidates the Paillier/Ring-Pedersen material and proofs. Unconfirmed or
+internally inconsistent shares are rejected.
 
 ## Keygen
 
@@ -415,7 +422,11 @@ not as a curve scalar. The implementation rejects Paillier moduli that cannot
 hold `k_i·b_j + β` without plaintext wraparound. Only the responder's final
 additive share is reduced modulo the curve order. This width is required to
 statistically hide `b_j` from an initiator that chooses its MtA input
-maliciously.
+maliciously. After decryption, the initiator first maps the Paillier plaintext
+to its centered representative (`m` when `m <= N/2`, otherwise `m-N`) and only
+then reduces modulo the curve order. This preserves negative Πaff-g masks; using
+the unsigned representative modulo `N` changes the required delta/sigma
+relation.
 
 Each Πaff-g proof additionally publishes and proves the curve relations
 `YPoint = β·G` and `AlphaPoint = b·KPoint + YPoint`, using the same integer
@@ -523,9 +534,21 @@ If all partial equations verify but the final ECDSA self-check fails, signing
 enters a conditional identification round. Every signer re-proves its sigma MtA
 responses, proves `Hhat_i = Enc_i(k_i·xbar_i)` with Πmul\*, reconstructs
 `Cσ_i = K_i^m · Cχ_i^r`, and proves its partial with Πdec. Sigma response
-openings are private one-attempt state: they are included only in the encrypted
-private Presign record, are never restored as reusable handles after a wire
-round trip, and are destroyed on success, abort, burn, or session destruction.
+openings are private one-attempt state included only in the encrypted private
+Presign record. A multi-signer Presign must contain exactly one local opening
+record for every peer, and one canonically ordered public identification
+transcript for every signer. Before any durable signing-attempt claim or load,
+self-verification recomputes each contribution-set digest against the value
+bound by that signer's signprep proof. It then decodes a temporary local opening
+copy and checks the exact transcript response plus the Paillier and curve
+relations for `(x, y, rho, rhoY)`, including the AffG parameter-bound witness
+widths and ranges, then destroys it. After the durable sign-attempt and presign
+bindings validate, each live or resumed `SignSession` activates its own
+independent opening copy.
+Destroying one exact-attempt session cannot erase another session's witness or
+mutate the caller-owned Presign. Session-owned copies are destroyed on success,
+abort, or session destruction; they are never exposed as reusable application
+handles.
 
 Before any outbound partial is constructed, `StartSign` verifies that the
 presign is bound to the same security parameters, key public key, keygen
@@ -545,6 +568,11 @@ s = Σ_i s_i  mod q
 ```
 
 Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the bound verification key, including the derived child public key when a derivation path is set, before being returned.
+
+Completed-attempt recovery also validates the stored recovery ID semantically:
+the selected nonce point must recover `Q = r^-1(sR-zG)` equal to the public key
+bound to the attempt. Ordinary ECDSA verification alone does not authenticate
+that recovery selector.
 
 Because Round1 binds `EncK_i` to `KPoint_i`, Πaff-g binds every pairwise mask to
 public curve points, and SignPrep binds both delta and sigma correction sums,
@@ -644,7 +672,9 @@ the exact `AttemptHash`; duplicate partial ACKs are idempotent, and certificate
 completion records the verified certificate ACK set. `ResumeSign` returns the
 exact base envelope only while delivery is incomplete. Once the final
 certificate is durable, `ResumeSign` rebuilds the session without returning
-outbound replay.
+outbound replay. At load time it reauthenticates every stored ACK and the final
+certificate with the resumed guard's ACK verifier; structurally valid but
+unauthenticated delivery state is treated as a corrupt attempt.
 
 Signature completion is persisted through `CompleteSignAttempt` before
 `Signature()` becomes available. If completion persistence fails or times out,
@@ -667,7 +697,19 @@ metric label, placed in plaintext metadata, or used directly as a filename.
 `FileSignAttemptStore` derives `storeKey = HMAC(storeSecret, contentID)` from
 store-local Argon2id key material, uses only `storeKey` for paths, encrypts burn
 tombstones and attempt objects, authenticates their bindings through AEAD AAD,
-and stores only ciphertext hashes in sidecar metadata.
+and stores only ciphertext hashes in sidecar metadata. Its constructor rejects
+an explicit symlink root and every non-volume-root ancestor symlink; only
+administrator-controlled volume-root aliases such as macOS `/var` are
+canonicalized and their target chains are revalidated before descendants are
+created. The complete existing ancestor chain must have trusted ownership.
+Writable ancestors are rejected except for
+an upper sticky directory protecting an already-existing trusted-owner child;
+the nearest existing directory may not be writable because creation adds
+entries inside it. This prevents an untrusted local principal from replacing a
+private ancestor or inserting a suffix symlink. Platforms without usable
+ownership metadata cannot use the reference store. It restricts every owned
+directory to mode `0700`, requires the salt to be a private regular file, and
+caps Argon2id time, memory, and parallelism before allocating work.
 External stores should run `secp256k1test.RunSignAttemptStoreSuite` and add
 backend-specific crash, transaction, encryption, and key-management tests.
 
@@ -706,10 +748,13 @@ Refresh commitment validation rejects any non-empty degree-zero commitment. Afte
 Reshare allows changing the participant set and threshold while preserving the
 group public key and chain code. `NewResharePlan` returns an opaque
 `*ResharePlan` fixing the old party set, dealer subset, new receiver set,
-thresholds, old commitments, old verification shares, chain code, and session
-id before any message is accepted. `Snapshot()` returns global plan metadata,
-and `OldVerificationShare(party)` returns old-party verification material by
-party ID. The canonical `ResharePlan.Digest()` is bound into new-receiver
+thresholds, old commitments, old verification shares, chain code, reshare
+session ID, and the exact source generation's Paillier-proof lifecycle session
+ID, keygen transcript hash, and lifecycle plan hash before any message is
+accepted. `Snapshot()` returns global plan metadata, and
+`OldVerificationShare(party)` returns old-party verification material by party
+ID. Each dealer checks those source anchors against its local old share. The
+canonical `ResharePlan.Digest()` binds them into new-receiver
 Paillier/Ring-Pedersen proofs and into the final reshare `KeyShare` proof
 domains.
 
@@ -825,6 +870,17 @@ Identification messages received before the conditional phase is active are
 fully authenticated and policy-checked without committing replay state, then
 rejected with `ErrCodeRound`. The exact message can be retried after activation;
 once accepted, normal duplicate/equivocation semantics apply.
+
+The same retry rule applies to keygen/refresh/reshare encrypted shares that
+arrive before their sender's commitments and to presign Round 2/3 messages whose
+prior-round state is incomplete. Active handlers first perform stateless policy
+validation, prepare cryptographic verification, state changes, and all outbound
+envelopes on staged state, then commit replay, and only then install the prepared
+transition. Structured log effects produced by staged keygen, refresh, and
+reshare transitions are buffered and flushed only after that commit. A
+preparation or replay-commit failure therefore accepts neither the message slot
+nor its state, emits no completion log, and leaves the exact envelope retryable
+unless the failure is terminal by policy.
 
 ## Sequence Diagrams
 

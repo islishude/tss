@@ -257,8 +257,16 @@ func (p *Presign) VerifyCryptographicMaterialWithLimits(limits Limits) error {
 	for i, id := range p.state.Signers {
 		entry := p.state.Verification.Entries[i]
 		verifyShare := p.state.VerifyShares[i]
+		identification := p.state.IdentificationTranscripts[i]
 		if entry.Party != id || verifyShare.Party != id {
 			return errors.New("presign verification material is not in signer order")
+		}
+		contributionsHash, err := mtaContributionsDigest(identification.Contributions)
+		if err != nil {
+			return fmt.Errorf("presign identification transcript for party %d: %w", id, err)
+		}
+		if !bytes.Equal(contributionsHash, verifyShare.MTAContributionsHash) {
+			return fmt.Errorf("presign identification transcript for party %d does not match signprep binding", id)
 		}
 		kPointBytes, chiPointBytes, _, err := signVerifyShareBytes(verifyShare)
 		if err != nil {
@@ -361,6 +369,9 @@ func (p *Presign) VerifyCryptographicMaterialWithLimits(limits Limits) error {
 	}
 	if !secp.ScalarFromFieldElement(recomputedR.X).Equal(p.state.LittleR) {
 		return errors.New("presign little r does not match R")
+	}
+	if err := verifyPresignSigmaOpeningRecords(p); err != nil {
+		return fmt.Errorf("presign sigma identification witnesses: %w", err)
 	}
 	return nil
 }

@@ -4,8 +4,71 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
+
+func TestFast_PresignSigmaOpeningRecordsRequireEveryPeer(t *testing.T) {
+	t.Parallel()
+
+	multi := minimalCGGMP21Presign(t)
+	defer multi.Destroy()
+	destroyPresignSigmaOpeningRecords(multi.state.SigmaOpeningRecords)
+	multi.state.SigmaOpeningRecords = nil
+	if err := multi.ValidateWithLimits(testLimits()); err == nil {
+		t.Fatal("multi-signer presign accepted an empty sigma opening record set")
+	}
+
+	single := minimalCGGMP21Presign(t)
+	defer single.Destroy()
+	destroyPresignSigmaOpeningRecords(single.state.SigmaOpeningRecords)
+	single.state.SigmaOpeningRecords = nil
+	single.state.Threshold = 1
+	single.state.Signers = tss.NewPartySet(1)
+	single.state.VerifyShares = single.state.VerifyShares[:1]
+	single.state.Verification.Entries = single.state.Verification.Entries[:1]
+	destroyMTAContributions(single.state.IdentificationTranscripts[0].Contributions)
+	single.state.IdentificationTranscripts[1].destroy()
+	single.state.IdentificationTranscripts = single.state.IdentificationTranscripts[:1]
+	single.state.IdentificationTranscripts[0].Contributions = nil
+	if err := single.ValidateWithLimits(testLimits()); err != nil {
+		t.Fatalf("single-signer presign rejected an empty sigma opening record set: %v", err)
+	}
+}
+
+func TestFast_PresignIdentificationTranscriptsRequireCanonicalCompleteSet(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*Presign)
+	}{
+		{name: "missing party", mutate: func(p *Presign) {
+			p.state.IdentificationTranscripts[1].destroy()
+			p.state.IdentificationTranscripts = p.state.IdentificationTranscripts[:1]
+		}},
+		{name: "wrong party order", mutate: func(p *Presign) {
+			p.state.IdentificationTranscripts[0].Party = 2
+		}},
+		{name: "missing peer", mutate: func(p *Presign) {
+			destroyMTAContributions(p.state.IdentificationTranscripts[0].Contributions)
+			p.state.IdentificationTranscripts[0].Contributions = nil
+		}},
+		{name: "wrong peer", mutate: func(p *Presign) {
+			p.state.IdentificationTranscripts[0].Contributions[0].Peer = 1
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			presign := minimalCGGMP21Presign(t)
+			defer presign.Destroy()
+			tc.mutate(presign)
+			if err := presign.ValidateWithLimits(testLimits()); err == nil {
+				t.Fatal("invalid identification transcript set was accepted")
+			}
+		})
+	}
+}
 
 func TestFast_PresignContentIDDeterministicAndConsumedIndependent(t *testing.T) {
 	t.Parallel()

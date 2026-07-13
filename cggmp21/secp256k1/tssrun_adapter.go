@@ -10,10 +10,14 @@ var (
 	_ tssrun.ProtocolSession = (*ReshareSession)(nil)
 )
 
-// Completed reports whether the keygen session has produced a confirmed share.
+// Completed reports whether the keygen lifecycle reached terminal success.
 func (s *KeygenSession) Completed() bool {
-	_, ok := s.KeyShare()
-	return ok
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.completed
 }
 
 // Identifying reports whether keygen is in an extra identification round.
@@ -60,20 +64,29 @@ func (s *SignSession) Identifying() bool {
 	return s.identifying && !s.completed && !s.aborted
 }
 
-// Completed reports whether the refresh session has produced a key share.
+// Completed reports whether the refresh lifecycle reached terminal success.
 func (s *RefreshSession) Completed() bool {
-	_, ok := s.KeyShare()
-	return ok
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.completed
 }
 
 // Identifying reports whether refresh is in an extra identification round.
 // Refresh deviations are verified and attributed in their originating round.
 func (s *RefreshSession) Identifying() bool { return false }
 
-// Completed reports whether the reshare session has produced a key share.
+// Completed reports whether the reshare lifecycle reached terminal success.
+// Dealer-only participants complete without producing a replacement key share.
 func (s *ReshareSession) Completed() bool {
-	_, ok := s.KeyShare()
-	return ok
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.completed
 }
 
 // Identifying reports whether reshare is in an extra identification round.

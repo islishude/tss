@@ -2,11 +2,95 @@ package secp256k1
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 )
+
+func TestCGGMP21KeygenEarlyShareRejectsWithoutReplayAndRetries(t *testing.T) {
+	session1, out1, session2, out2 := cggmpTwoPartyKeygenSessions(t)
+	defer session1.Destroy()
+	defer session2.Destroy()
+
+	sharesFrom2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := mustCGGMPEnvelope(t, sharesFrom2, payloadKeygenShare, session1.cfg.Self)
+	before := snapshotCGGMPKeygenSession(session1)
+	out, err := session1.Handle(testutil.DeliverEnvelope(share))
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeRound {
+		t.Fatalf("early keygen share error = %v, want round error", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("early keygen share emitted %d envelopes", len(out))
+	}
+	assertCGGMPSnapshotUnchanged(t, before, snapshotCGGMPKeygenSession(session1))
+
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err != nil {
+		t.Fatalf("keygen share retry after commitments: %v", err)
+	}
+}
+
+func TestCGGMP21KeygenOutboundFailureLeavesStateAndReplayUncommitted(t *testing.T) {
+	session1, out1, session2, out2 := cggmpTwoPartyKeygenSessions(t)
+	defer session1.Destroy()
+	defer session2.Destroy()
+	if _, err := session2.Handle(testutil.DeliverEnvelope(out1[0])); err != nil {
+		t.Fatal(err)
+	}
+
+	originalSigner := session1.cfg.EnvelopeSigner
+	session1.cfg.EnvelopeSigner = failingPresignEnvelopeSigner{}
+	before := snapshotCGGMPKeygenSession(session1)
+	if out, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil || len(out) != 0 {
+		t.Fatalf("keygen outbound construction failure = out:%d err:%v", len(out), err)
+	}
+	assertCGGMPSnapshotUnchanged(t, before, snapshotCGGMPKeygenSession(session1))
+
+	session1.cfg.EnvelopeSigner = originalSigner
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+		t.Fatalf("retry after keygen outbound construction failure: %v", err)
+	}
+}
+
+func TestCGGMP21KeygenAcceptedSlotUsesReplayClassification(t *testing.T) {
+	t.Run("exact duplicate", func(t *testing.T) {
+		session1, _, session2, out2 := cggmpTwoPartyKeygenSessions(t)
+		defer session1.Destroy()
+		defer session2.Destroy()
+		in := testutil.DeliverEnvelope(out2[0])
+		if _, err := session1.Handle(in); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := session1.Handle(in); !errors.Is(err, tss.ErrDuplicateMessage) {
+			t.Fatalf("accepted exact duplicate = %v, want ErrDuplicateMessage", err)
+		}
+	})
+
+	t.Run("conflicting duplicate", func(t *testing.T) {
+		session1, _, session2, out2 := cggmpTwoPartyKeygenSessions(t)
+		defer session1.Destroy()
+		defer session2.Destroy()
+		if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+			t.Fatal(err)
+		}
+		conflict := out2[0]
+		conflict.Payload = bytes.Clone(conflict.Payload)
+		conflict.Payload[len(conflict.Payload)-1] ^= 1
+		_, err := session1.Handle(testutil.DeliverEnvelope(conflict))
+		var protocolErr *tss.ProtocolError
+		if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeVerification || !session1.aborted {
+			t.Fatalf("accepted conflicting duplicate = err:%v aborted:%v", err, session1.aborted)
+		}
+	})
+}
 
 func TestCGGMP21KeygenMalformedCommitmentRejectDoesNotMutate(t *testing.T) {
 	session1, _, session2, out2 := cggmpTwoPartyKeygenSessions(t)

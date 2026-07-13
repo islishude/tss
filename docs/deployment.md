@@ -294,7 +294,10 @@ durably complete. An at-least-once dispatcher should keep replaying it until
 `UpdateSignAttemptDelivery` has persisted acknowledgments from every recipient
 and the required verifier-backed broadcast certificate. After the delivery
 certificate is durable, `ResumeSign` rebuilds the session without returning
-outbound replay. Signature completion alone is not a delivery acknowledgment.
+outbound replay. Recovery re-verifies every stored ACK and certificate with the
+resumed `EnvelopeGuard.AckVerifier`; callers must restore the same authenticated
+party-key mapping, and must treat authentication failure as store corruption.
+Signature completion alone is not a delivery acknowledgment.
 
 `SignAttemptStore` protects the one-use presign claim, local outbound replay,
 delivery progress, and completion persistence. It is not a complete online
@@ -307,9 +310,21 @@ It fsyncs immutable encrypted objects, creates the presign claim or burn
 tombstone with an atomic hard link, records delivery ACKs/certificates and
 completion as append-only objects, and fsyncs directories. It stores plaintext
 hash metadata separately from randomized ciphertext and authenticates object
-kind/binding data through the passphrase-encryption AAD. Production systems
-should normally implement the interface with a transactional database and
-KMS/HSM encryption.
+kind/binding data through the passphrase-encryption AAD. Construction rejects a
+symlink store root, every non-volume-root ancestor symlink, and Argon2id
+parameters above fixed resource caps. Administrator-controlled volume-root
+aliases such as macOS `/var` are canonicalized; lower path indirection fails
+closed, and the canonical alias target chain is revalidated independently. The
+complete existing ancestor chain must be owned by the current user or
+administrator. Group- or other-writable ancestors fail closed except for an
+upper sticky directory protecting an already-existing trusted-owner child; the
+nearest existing directory is never allowed to be writable because creation
+adds entries inside it. These checks prevent another local principal from
+replacing a private ancestor or inserting a suffix symlink. Platforms without
+usable ownership metadata cannot use this reference file store. The store
+creates or tightens its directories to mode `0700`; the salt must be a regular
+file without group/other access. Production systems should normally implement
+the interface with a transactional database and KMS/HSM encryption.
 
 ### 6. Destruction
 
@@ -424,6 +439,13 @@ confirmation binding but never expose a new key share. The control plane must
 not retire the old key generation until the required new-generation commit
 condition is satisfied, and target-holder cutover does not require every removed
 dealer to report local completion.
+
+For CGGMP21, persist and distribute the canonical `ResharePlan`, not a
+hand-assembled subset of old public metadata. Its source binding includes the
+old Paillier-proof lifecycle session ID, keygen transcript hash, lifecycle plan
+hash, group commitments, verification shares, public key, party set, threshold,
+and chain code. Every dealer must validate that complete binding against its
+local old-generation share before emitting reshare material.
 
 ## Proactive Refresh Scheduling
 
@@ -541,7 +563,11 @@ The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` h
 
 ### Log-Based Monitoring
 
-Set the `Logger` interface on `LocalConfig` to capture structured logs. Protocol completion/failure events include `party_id` and `session_id` for cross-party correlation.
+Set the `Logger` interface on `LocalConfig` to capture structured logs. Protocol
+completion/failure events include `party_id` and `session_id` for cross-party
+correlation. Keygen, refresh, and reshare completion events are emitted only
+after replay and live lifecycle state commit; rejected staged transitions do
+not emit success events.
 
 ```go
 local := tss.LocalConfig{

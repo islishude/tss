@@ -356,6 +356,238 @@ func TestFast_FileSignAttemptStoreKeyStableAcrossInstances(t *testing.T) {
 	}
 }
 
+func TestFast_FileSignAttemptStoreRejectsExcessiveKDFBeforeAllocation(t *testing.T) {
+	t.Parallel()
+	store, err := NewFileSignAttemptStore(t.TempDir(), []byte("bounded-kdf-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: signAttemptStoreMaxKDFMemory + 1, Threads: 1,
+	})
+	if err == nil {
+		if store != nil {
+			store.Destroy()
+		}
+		t.Fatal("excessive KDF parameters were accepted")
+	}
+	if store != nil {
+		store.Destroy()
+		t.Fatal("excessive KDF rejection returned a store")
+	}
+}
+
+func TestFast_FileSignAttemptStoreFixesUnsafeDirectoryPermissions(t *testing.T) {
+	t.Parallel()
+	directory := filepath.Join(t.TempDir(), "store")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(directory, 0o755); err != nil { //nolint:gosec // deliberately create an unsafe test fixture
+		t.Fatal(err)
+	}
+	store, err := NewFileSignAttemptStore(directory, []byte("private-directory-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: 1024, Threads: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Destroy()
+	info, err := os.Stat(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("secured directory permissions = %04o, want 0700", info.Mode().Perm())
+	}
+}
+
+func TestFast_FileSignAttemptStoreRejectsSymlinkPath(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	target := filepath.Join(parent, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "store-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewFileSignAttemptStore(link, []byte("no-symlink-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: 1024, Threads: 1,
+	})
+	if err == nil {
+		if store != nil {
+			store.Destroy()
+		}
+		t.Fatal("symlink store path was accepted")
+	}
+	if store != nil {
+		store.Destroy()
+		t.Fatal("symlink path rejection returned a store")
+	}
+}
+
+func TestFast_FileSignAttemptStoreRejectsNonRootSymlinkAncestor(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	target := filepath.Join(parent, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "parent-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	requested := filepath.Join(link, "store")
+	store, err := NewFileSignAttemptStore(requested, []byte("canonical-parent-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: 1024, Threads: 1,
+	})
+	if err == nil {
+		if store != nil {
+			store.Destroy()
+		}
+		t.Fatal("non-root symlink ancestor was accepted")
+	}
+	if store != nil {
+		store.Destroy()
+		t.Fatal("symlink ancestor rejection returned a store")
+	}
+	if _, err := os.Lstat(filepath.Join(target, "store")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected symlink ancestor created target store: %v", err)
+	}
+}
+
+func TestFast_FileSignAttemptStoreRejectsSymlinkAncestorUnderWritableParent(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	shared := filepath.Join(parent, "shared")
+	if err := os.Mkdir(shared, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil { //nolint:gosec // deliberately create an attacker-writable fixture
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(shared, "parent-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewFileSignAttemptStore(filepath.Join(link, "store"), []byte("writable-parent-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: 1024, Threads: 1,
+	})
+	if err == nil {
+		if store != nil {
+			store.Destroy()
+		}
+		t.Fatal("symlink ancestor under writable parent was accepted")
+	}
+	if store != nil {
+		store.Destroy()
+		t.Fatal("writable symlink ancestor rejection returned a store")
+	}
+	if _, err := os.Lstat(filepath.Join(target, "store")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected writable symlink ancestor created target store: %v", err)
+	}
+}
+
+func TestFast_FileSignAttemptStoreRejectsMissingRootBelowWritableAncestor(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	shared := filepath.Join(parent, "shared")
+	if err := os.Mkdir(shared, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil { //nolint:gosec // deliberately create an attacker-writable fixture
+		t.Fatal(err)
+	}
+	requested := filepath.Join(shared, "missing", "store")
+	store, err := NewFileSignAttemptStore(requested, []byte("writable-missing-parent-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: 1024, Threads: 1,
+	})
+	if err == nil {
+		if store != nil {
+			store.Destroy()
+		}
+		t.Fatal("missing store root below writable ancestor was accepted")
+	}
+	if store != nil {
+		store.Destroy()
+		t.Fatal("writable creation ancestor rejection returned a store")
+	}
+	if _, err := os.Lstat(filepath.Join(shared, "missing")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected missing root created a writable suffix: %v", err)
+	}
+}
+
+func TestFast_FileSignAttemptStoreRejectsMissingRootBelowWritableGrandparent(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	shared := filepath.Join(parent, "shared")
+	if err := os.Mkdir(shared, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil { //nolint:gosec // deliberately create an attacker-writable fixture
+		t.Fatal(err)
+	}
+	anchor := filepath.Join(shared, "anchor")
+	if err := os.Mkdir(anchor, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	requested := filepath.Join(anchor, "missing", "store")
+	store, err := NewFileSignAttemptStore(requested, []byte("writable-grandparent-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: 1024, Threads: 1,
+	})
+	if err == nil {
+		if store != nil {
+			store.Destroy()
+		}
+		t.Fatal("missing store root below writable grandparent was accepted")
+	}
+	if store != nil {
+		store.Destroy()
+		t.Fatal("writable grandparent rejection returned a store")
+	}
+	if _, err := os.Lstat(filepath.Join(anchor, "missing")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected missing root created a suffix below replaceable anchor: %v", err)
+	}
+}
+
+func TestFast_FileSignAttemptStoreRejectsExistingRootBelowWritableParent(t *testing.T) {
+	t.Parallel()
+	parent := t.TempDir()
+	shared := filepath.Join(parent, "shared")
+	if err := os.Mkdir(shared, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil { //nolint:gosec // deliberately create an attacker-writable fixture
+		t.Fatal(err)
+	}
+	storeRoot := filepath.Join(shared, "store")
+	if err := os.Mkdir(storeRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewFileSignAttemptStore(storeRoot, []byte("writable-existing-parent-passphrase"), &tss.PassphraseParams{
+		Time: 1, Memory: 1024, Threads: 1,
+	})
+	if err == nil {
+		if store != nil {
+			store.Destroy()
+		}
+		t.Fatal("existing store root below writable parent was accepted")
+	}
+	if store != nil {
+		store.Destroy()
+		t.Fatal("writable existing parent rejection returned a store")
+	}
+	entries, readErr := os.ReadDir(storeRoot)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("rejected existing root was mutated: %v", entries)
+	}
+}
+
 func TestFast_FileSignAttemptStoreMetadataDoesNotExposePlaintextHashOrContentID(t *testing.T) {
 	t.Parallel()
 	store := newFastFileSignAttemptStore(t)

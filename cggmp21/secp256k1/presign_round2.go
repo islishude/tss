@@ -48,12 +48,17 @@ func (s *PresignSession) buildAcceptPresignRound2Tx(env tss.Envelope) (*acceptPr
 		)
 	}
 
-	return &acceptPresignRound2Tx{
+	tx := &acceptPresignRound2Tx{
 		from:     env.From,
 		payload:  p,
 		envelope: env.Clone(),
 		material: material,
-	}, nil
+	}
+	if err := tx.prepare(s); err != nil {
+		tx.cleanupOnReject()
+		return nil, err
+	}
+	return tx, nil
 }
 
 func (s *PresignSession) presignRound2EvidenceFields(p presignRound2Payload) []tss.EvidenceField {

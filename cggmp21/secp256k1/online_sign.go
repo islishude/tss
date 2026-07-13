@@ -362,6 +362,13 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	if err := validateSignAttemptBindings(key, presign, record, limits); err != nil {
 		return nil, nil, err
 	}
+	var ackVerifier tss.BroadcastAckVerifier
+	if guard != nil {
+		ackVerifier = guard.AckVerifier
+	}
+	if err := validateSignAttemptDeliveryAuthentication(record, ackVerifier); err != nil {
+		return nil, nil, err
+	}
 	env, payload, err := decodeSignAttemptEnvelopeWithLimits(record.CanonicalBaseEnvelopeBytes, limits)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
@@ -392,7 +399,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	s.partialEnvelopes[key.state.Party] = env.Clone()
 	if record.Completed {
 		sig := &Signature{R: slices.Clone(record.SignatureR), S: slices.Clone(record.SignatureS), RecoveryID: record.SignatureRecoveryID}
-		if !VerifyDigest(verifyKey, record.Digest, sig) {
+		if !VerifyDigest(verifyKey, record.Digest, sig) || !signatureRecoveryIDMatchesPublicKey(verifyKey, record.Digest, sig) {
 			return nil, nil, fmt.Errorf("%w: stored signature verification failed", ErrSignAttemptCorrupt)
 		}
 		s.signature = sig
@@ -404,8 +411,15 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 		return s, []tss.Envelope{env}, nil
 	}
 	if coordinator != nil {
+		s.sigmaOpenings, err = activatePresignSigmaOpeningRecords(presign)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%w: restore online identification witnesses: %w", ErrSignAttemptCorrupt, err)
+		}
+	}
+	if coordinator != nil {
 		identificationOut, err := s.tryCompleteSign(s.coordinatorCtx)
 		if err != nil {
+			s.destroyOnlineIdentificationOpenings()
 			return nil, nil, err
 		}
 		if len(identificationOut) > 0 {

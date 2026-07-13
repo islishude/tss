@@ -45,8 +45,10 @@ Callers must provide:
 - durable delivery state for CGGMP21 online signing. The exact committed
   envelope may be replayed at least once until ACKs from all recipients and the
   final broadcast certificate are durable. After delivery completion, resume
-  must not return outbound replay. Signature completion is a separate durable
-  visibility decision;
+  must not return outbound replay. `ResumeSign` reauthenticates every persisted
+  ACK and the final certificate with the resumed guard's ACK verifier; a store
+  record that is only structurally valid is rejected. Signature completion is
+  a separate durable visibility decision;
 - secure deletion or `Destroy` calls for no-longer-needed local shares;
 - operational monitoring for protocol errors and blame evidence.
 
@@ -189,10 +191,12 @@ key derivation.
 
 CGGMP21/secp256k1 resharing also sends confidential old-dealer shares to the
 new receiver set. New-only receivers must be provisioned with authenticated old
-key metadata, including the old group public key, chain code, keygen transcript
-hash, and old party set. Substituting any of that metadata can produce a share
-for the wrong key context even when the final public-key preservation check
-passes.
+key metadata, including the old group public key, chain code, lifecycle session
+ID, keygen transcript hash, lifecycle plan hash, commitments, and old party set.
+The canonical `ResharePlan` binds those exact source-generation anchors and a
+dealer rejects a plan whose anchors do not match its local old share.
+Substituting any of that metadata can produce a share for the wrong key context
+even when the final public-key preservation check passes.
 
 CGGMP21 refresh binds the source generation's lifecycle session, keygen
 transcript hash, lifecycle plan hash, and group commitments hash into its plan.
@@ -308,7 +312,10 @@ The Paillier/ZK proof layer has been rewritten to use CGGMP-compatible construct
 - MtA affine masks use fixed-width `EllPrime`-bit secret integers rather than
   curve scalars. The responder reduces only its final additive share modulo the
   curve order, and rejects a Paillier modulus too small to avoid plaintext
-  wraparound.
+  wraparound. After decryption, the initiator interprets the Paillier plaintext
+  through the centered interval around zero before reducing modulo the curve
+  order; treating a negative mask as its unsigned residue modulo `N` changes
+  the delta/sigma relation.
 - **Πlog\***: Group element vs Paillier encryption in range. Presign Round 1
   uses verifier-specific Πlog\* proofs to bind `EncK` to `KPoint`; keygen,
   refresh, and reshare use the same primitive for stored-share validation.
@@ -424,10 +431,21 @@ envelope before consuming the presign. It atomically commits the immutable
 intent and exact envelope through `SignRuntime.AttemptStore`. Only a committed
 envelope may be returned or transmitted. A commit error has an unknown outcome:
 the presign remains bound and callers may only retry or `ResumeSign` the same
-attempt. `MarshalBinary` persists a consumed snapshot, while the durable attempt
-record is the restart and outbox boundary. Presigns remain bound to the key
-share, security parameters, and all `tss.SigningContext` fields, including
-requested and resolved derivation paths.
+attempt. Multi-signer Presigns require exactly one private sigma-opening record
+for every peer and one canonical public identification transcript for every
+signer. Before a durable signing-attempt claim or load, self-verification binds
+each transcript digest to the corresponding signprep proof, decodes a temporary
+witness copy, and validates its local transcript response plus the Paillier and
+curve opening relations and AffG parameter-bound witness ranges. The temporary
+copy is destroyed immediately.
+Session-owned records are activated only after the durable attempt and presign
+bindings validate. Each live or resumed `SignSession` owns an independent
+witness copy, so destroying one idempotent session cannot erase another
+session's recovery material or mutate the caller-owned presign.
+`MarshalBinary` persists a consumed snapshot, while the durable attempt record
+is the restart and outbox boundary. Presigns remain bound to the key share,
+security parameters, and all `tss.SigningContext` fields, including requested
+and resolved derivation paths.
 
 ## Blame Evidence
 
@@ -435,4 +453,6 @@ When a failure can be attributed, `ProtocolError.Blame` may include `Evidence`.
 Evidence binds protocol, session, round, sender, payload type, payload hash,
 envelope digest, reason, and selected public input hashes. Use
 `secp256k1.VerifyBlameEvidence` to validate CGGMP21 evidence against known public
-context.
+context. Broadcast certificates embedded in presign/sign evidence are verified
+against the exact signer set, while lifecycle evidence remains scoped to its
+full participant set.

@@ -338,7 +338,8 @@ func TestIdentificationPayloadSizeLimit(t *testing.T) {
 
 func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 	t.Parallel()
-	parties := tss.NewPartySet(1, 2)
+	parties := tss.NewPartySet(1, 2, 3)
+	signers := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -352,9 +353,9 @@ func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	publicKeys := make(map[tss.PartyID]ed25519.PublicKey, len(parties))
-	acks := make([]tss.BroadcastAck, 0, len(parties))
-	for _, party := range parties {
+	publicKeys := make(map[tss.PartyID]ed25519.PublicKey, len(signers))
+	acks := make([]tss.BroadcastAck, 0, len(signers))
+	for _, party := range signers {
 		publicKey, privateKey, keyErr := ed25519.GenerateKey(rand.Reader)
 		if keyErr != nil {
 			t.Fatal(keyErr)
@@ -369,7 +370,7 @@ func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 		}
 		acks = append(acks, ack)
 	}
-	certificate, err := tss.NewBroadcastCertificate(env, parties, acks)
+	certificate, err := tss.NewBroadcastCertificate(env, signers, acks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +385,7 @@ func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 
 	protocolErr := verificationErrorWithEvidence(env, tss.EvidenceKindSignPartial, "invalid certified sign partial", parties, errors.New("invalid partial"),
 		rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(parties, partySetHashLabel)),
-		rawEvidenceField(evidenceFieldSignerSetHash, tss.PartySetHash(parties, partySetHashLabel)))
+		rawEvidenceField(evidenceFieldSignerSetHash, tss.PartySetHash(signers, partySetHashLabel)))
 	boundErr := bindInboundAuthenticationEvidence(protocolErr, inbound)
 	var bound *tss.ProtocolError
 	if !errors.As(boundErr, &bound) || bound.Blame == nil {
@@ -404,7 +405,7 @@ func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 		return nil
 	})
 	ctx := EvidenceContext{
-		SessionID: sessionID, Parties: parties, Signers: parties,
+		SessionID: sessionID, Parties: parties, Signers: signers,
 		BroadcastACKVerifier: ackVerifier, IdentificationVerifier: proofVerifier,
 	}
 	if err := VerifyBlameEvidence(bound.Blame.Evidence, ctx); err != nil {

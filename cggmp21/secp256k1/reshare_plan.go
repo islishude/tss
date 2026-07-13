@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 
@@ -26,52 +27,61 @@ type ResharePlan struct {
 
 // ResharePlanSnapshot is a caller-owned copy of reshare plan metadata.
 type ResharePlanSnapshot struct {
-	SessionID           tss.SessionID
-	CurveID             string
-	OldGroupPublicKey   []byte
-	OldGroupCommitments [][]byte
-	OldParties          tss.PartySet
-	OldThreshold        int
-	DealerParties       tss.PartySet
-	NewParties          tss.PartySet
-	NewThreshold        int
-	ChainCode           []byte
-	PaillierBits        int
-	SecurityParams      SecurityParams
+	SessionID                 tss.SessionID
+	OldPaillierProofSessionID tss.SessionID
+	OldKeygenTranscriptHash   []byte
+	OldPlanHash               []byte
+	CurveID                   string
+	OldGroupPublicKey         []byte
+	OldGroupCommitments       [][]byte
+	OldParties                tss.PartySet
+	OldThreshold              int
+	DealerParties             tss.PartySet
+	NewParties                tss.PartySet
+	NewThreshold              int
+	ChainCode                 []byte
+	PaillierBits              int
+	SecurityParams            SecurityParams
 }
 
 // Clone returns a deep copy of the reshare plan snapshot.
 func (s ResharePlanSnapshot) Clone() ResharePlanSnapshot {
 	return ResharePlanSnapshot{
-		SessionID:           s.SessionID,
-		CurveID:             s.CurveID,
-		OldGroupPublicKey:   bytes.Clone(s.OldGroupPublicKey),
-		OldGroupCommitments: tss.CloneByteSlices(s.OldGroupCommitments),
-		OldParties:          s.OldParties.Clone(),
-		OldThreshold:        s.OldThreshold,
-		DealerParties:       s.DealerParties.Clone(),
-		NewParties:          s.NewParties.Clone(),
-		NewThreshold:        s.NewThreshold,
-		ChainCode:           bytes.Clone(s.ChainCode),
-		PaillierBits:        s.PaillierBits,
-		SecurityParams:      s.SecurityParams,
+		SessionID:                 s.SessionID,
+		OldPaillierProofSessionID: s.OldPaillierProofSessionID,
+		OldKeygenTranscriptHash:   bytes.Clone(s.OldKeygenTranscriptHash),
+		OldPlanHash:               bytes.Clone(s.OldPlanHash),
+		CurveID:                   s.CurveID,
+		OldGroupPublicKey:         bytes.Clone(s.OldGroupPublicKey),
+		OldGroupCommitments:       tss.CloneByteSlices(s.OldGroupCommitments),
+		OldParties:                s.OldParties.Clone(),
+		OldThreshold:              s.OldThreshold,
+		DealerParties:             s.DealerParties.Clone(),
+		NewParties:                s.NewParties.Clone(),
+		NewThreshold:              s.NewThreshold,
+		ChainCode:                 bytes.Clone(s.ChainCode),
+		PaillierBits:              s.PaillierBits,
+		SecurityParams:            s.SecurityParams,
 	}
 }
 
 type resharePlanState struct {
-	SessionID             tss.SessionID          `wire:"1,bytes,len=32"`                                  // Reshare protocol session; all dealer and receiver messages are scoped to it.
-	CurveID               string                 `wire:"2,string,max_bytes=curve_id"`                     // Canonical curve identifier bound into the plan digest.
-	OldGroupPublicKey     []byte                 `wire:"3,bytes,max_bytes=point"`                         // Existing parent group public key that resharing must preserve.
-	OldGroupCommitments   [][]byte               `wire:"4,byteslist,max_bytes=point,max_items=threshold"` // Existing public polynomial commitments for old shares.
-	OldVerificationShares map[tss.PartyID][]byte `wire:"5,map,max_items=parties,max_bytes=point"`         // Existing per-party public verification shares keyed by old party.
-	OldParties            tss.PartySet           `wire:"6,u32list,max_items=parties"`                     // Canonical old key-holder set.
-	OldThreshold          int                    `wire:"7,u32"`                                           // Signing threshold of the old key.
-	DealerParties         tss.PartySet           `wire:"8,u32list,max_items=parties"`                     // Old parties selected to contribute weighted dealer polynomials.
-	NewParties            tss.PartySet           `wire:"9,u32list,max_items=parties"`                     // Canonical target key-holder set.
-	NewThreshold          int                    `wire:"10,u32"`                                          // Signing threshold for the reshared key.
-	ChainCode             []byte                 `wire:"11,bytes,len=32"`                                 // HD chain code preserved across reshare.
-	PaillierBits          int                    `wire:"12,u32"`                                          // Shared modulus size for new receiver auxiliary material.
-	SecurityParams        SecurityParams         `wire:"13,record"`                                       // Cryptographic profile required for new auxiliary material.
+	SessionID                 tss.SessionID          `wire:"1,bytes,len=32"`                                  // Reshare protocol session; all dealer and receiver messages are scoped to it.
+	CurveID                   string                 `wire:"2,string,max_bytes=curve_id"`                     // Canonical curve identifier bound into the plan digest.
+	OldGroupPublicKey         []byte                 `wire:"3,bytes,max_bytes=point"`                         // Existing parent group public key that resharing must preserve.
+	OldGroupCommitments       [][]byte               `wire:"4,byteslist,max_bytes=point,max_items=threshold"` // Existing public polynomial commitments for old shares.
+	OldVerificationShares     map[tss.PartyID][]byte `wire:"5,map,max_items=parties,max_bytes=point"`         // Existing per-party public verification shares keyed by old party.
+	OldParties                tss.PartySet           `wire:"6,u32list,max_items=parties"`                     // Canonical old key-holder set.
+	OldThreshold              int                    `wire:"7,u32"`                                           // Signing threshold of the old key.
+	DealerParties             tss.PartySet           `wire:"8,u32list,max_items=parties"`                     // Old parties selected to contribute weighted dealer polynomials.
+	NewParties                tss.PartySet           `wire:"9,u32list,max_items=parties"`                     // Canonical target key-holder set.
+	NewThreshold              int                    `wire:"10,u32"`                                          // Signing threshold for the reshared key.
+	ChainCode                 []byte                 `wire:"11,bytes,len=32"`                                 // HD chain code preserved across reshare.
+	PaillierBits              int                    `wire:"12,u32"`                                          // Shared modulus size for new receiver auxiliary material.
+	SecurityParams            SecurityParams         `wire:"13,record"`                                       // Cryptographic profile required for new auxiliary material.
+	OldPaillierProofSessionID tss.SessionID          `wire:"14,bytes,len=32"`                                 // Exact lifecycle session that produced the old key generation.
+	OldKeygenTranscriptHash   []byte                 `wire:"15,bytes,len=32"`                                 // Exact transcript of the source key generation.
+	OldPlanHash               []byte                 `wire:"16,bytes,len=32"`                                 // Exact lifecycle plan that produced the source key generation.
 }
 
 // SessionID returns the reshare session identifier.
@@ -112,18 +122,21 @@ func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 		return ResharePlanSnapshot{}, false
 	}
 	return ResharePlanSnapshot{
-		SessionID:           p.state.SessionID,
-		CurveID:             p.state.CurveID,
-		OldGroupPublicKey:   bytes.Clone(p.state.OldGroupPublicKey),
-		OldGroupCommitments: tss.CloneByteSlices(p.state.OldGroupCommitments),
-		OldParties:          p.state.OldParties.Clone(),
-		OldThreshold:        p.state.OldThreshold,
-		DealerParties:       p.state.DealerParties.Clone(),
-		NewParties:          p.state.NewParties.Clone(),
-		NewThreshold:        p.state.NewThreshold,
-		ChainCode:           bytes.Clone(p.state.ChainCode),
-		PaillierBits:        p.state.PaillierBits,
-		SecurityParams:      p.state.SecurityParams,
+		SessionID:                 p.state.SessionID,
+		OldPaillierProofSessionID: p.state.OldPaillierProofSessionID,
+		OldKeygenTranscriptHash:   bytes.Clone(p.state.OldKeygenTranscriptHash),
+		OldPlanHash:               bytes.Clone(p.state.OldPlanHash),
+		CurveID:                   p.state.CurveID,
+		OldGroupPublicKey:         bytes.Clone(p.state.OldGroupPublicKey),
+		OldGroupCommitments:       tss.CloneByteSlices(p.state.OldGroupCommitments),
+		OldParties:                p.state.OldParties.Clone(),
+		OldThreshold:              p.state.OldThreshold,
+		DealerParties:             p.state.DealerParties.Clone(),
+		NewParties:                p.state.NewParties.Clone(),
+		NewThreshold:              p.state.NewThreshold,
+		ChainCode:                 bytes.Clone(p.state.ChainCode),
+		PaillierBits:              p.state.PaillierBits,
+		SecurityParams:            p.state.SecurityParams,
 	}, true
 }
 
@@ -263,19 +276,22 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old group commitments: %w", err))
 	}
 	plan := &ResharePlan{state: &resharePlanState{
-		SessionID:             option.SessionID,
-		CurveID:               reshareCurveID,
-		OldGroupPublicKey:     append([]byte(nil), oldKey.state.PublicKey...),
-		OldGroupCommitments:   oldGroupCommitments,
-		OldVerificationShares: verificationShares,
-		OldParties:            tss.SortParties(oldKey.state.Parties),
-		OldThreshold:          oldKey.state.Threshold,
-		DealerParties:         tss.SortParties(option.DealerParties),
-		NewParties:            tss.SortParties(option.NewParties),
-		NewThreshold:          option.NewThreshold,
-		ChainCode:             append([]byte(nil), oldKey.state.ChainCode...),
-		PaillierBits:          paillierBits,
-		SecurityParams:        securityParams,
+		SessionID:                 option.SessionID,
+		CurveID:                   reshareCurveID,
+		OldGroupPublicKey:         append([]byte(nil), oldKey.state.PublicKey...),
+		OldGroupCommitments:       oldGroupCommitments,
+		OldVerificationShares:     verificationShares,
+		OldParties:                tss.SortParties(oldKey.state.Parties),
+		OldThreshold:              oldKey.state.Threshold,
+		DealerParties:             tss.SortParties(option.DealerParties),
+		NewParties:                tss.SortParties(option.NewParties),
+		NewThreshold:              option.NewThreshold,
+		ChainCode:                 append([]byte(nil), oldKey.state.ChainCode...),
+		PaillierBits:              paillierBits,
+		SecurityParams:            securityParams,
+		OldPaillierProofSessionID: oldKey.state.PaillierProofSessionID,
+		OldKeygenTranscriptHash:   bytes.Clone(oldKey.state.KeygenTranscriptHash),
+		OldPlanHash:               bytes.Clone(oldKey.state.PlanHash),
 	}, limits: limits}
 	if len(plan.state.DealerParties) == 0 {
 		plan.state.DealerParties = plan.state.OldParties.Clone()
@@ -311,6 +327,15 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	}
 	if !p.state.SessionID.Valid() {
 		return errors.New("reshare plan session id must not be zero")
+	}
+	if !p.state.OldPaillierProofSessionID.Valid() {
+		return errors.New("reshare plan old Paillier proof session id must not be zero")
+	}
+	if len(p.state.OldKeygenTranscriptHash) != sha256.Size {
+		return errors.New("old keygen transcript hash must be 32 bytes")
+	}
+	if len(p.state.OldPlanHash) != sha256.Size {
+		return errors.New("old lifecycle plan hash must be 32 bytes")
 	}
 	if p.state.CurveID != reshareCurveID {
 		return fmt.Errorf("reshare plan curve id must be %q", reshareCurveID)
@@ -420,6 +445,9 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
 	t.AppendUint32("version", uint32(tss.ProtocolVersion))
 	t.AppendBytes("session_id", p.state.SessionID[:])
+	t.AppendBytes("old_paillier_proof_session_id", p.state.OldPaillierProofSessionID[:])
+	t.AppendBytes("old_keygen_transcript_hash", p.state.OldKeygenTranscriptHash)
+	t.AppendBytes("old_lifecycle_plan_hash", p.state.OldPlanHash)
 	t.AppendString("curve", p.state.CurveID)
 	t.AppendBytes("old_group_public_key", p.state.OldGroupPublicKey)
 	t.AppendBytesList("old_group_commitments", p.state.OldGroupCommitments)

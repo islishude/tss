@@ -15,7 +15,10 @@ import (
 	"github.com/islishude/tss"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/wire"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
@@ -173,28 +176,45 @@ func clonePresignForTest(p *Presign) *Presign {
 	if p == nil || p.state == nil {
 		return nil
 	}
+	identificationTranscripts := make([]presignIdentificationTranscript, len(p.state.IdentificationTranscripts))
+	for i := range p.state.IdentificationTranscripts {
+		identificationTranscripts[i] = presignIdentificationTranscript{
+			Party:         p.state.IdentificationTranscripts[i].Party,
+			Contributions: cloneMTAContributions(p.state.IdentificationTranscripts[i].Contributions),
+		}
+	}
+	sigmaOpeningRecords := make([]presignSigmaOpeningRecord, len(p.state.SigmaOpeningRecords))
+	for i := range p.state.SigmaOpeningRecords {
+		sigmaOpeningRecords[i] = presignSigmaOpeningRecord{
+			Peer:     p.state.SigmaOpeningRecords[i].Peer,
+			Response: p.state.SigmaOpeningRecords[i].Response.Clone(),
+			Opening:  slices.Clone(p.state.SigmaOpeningRecords[i].Opening),
+		}
+	}
 	return &Presign{state: &presignState{
-		Consumed:             p.state.Consumed,
-		attempt:              p.state.attempt,
-		SecurityParams:       p.state.SecurityParams,
-		Party:                p.state.Party,
-		Threshold:            p.state.Threshold,
-		Signers:              slices.Clone(p.state.Signers),
-		R:                    secp.Clone(p.state.R),
-		LittleR:              p.state.LittleR,
-		TranscriptHash:       slices.Clone(p.state.TranscriptHash),
-		Context:              p.state.Context.Clone(),
-		ContextHash:          slices.Clone(p.state.ContextHash),
-		Derivation:           p.state.Derivation.Clone(),
-		PlanHash:             slices.Clone(p.state.PlanHash),
-		PublicKey:            secp.Clone(p.state.PublicKey),
-		KeygenTranscriptHash: slices.Clone(p.state.KeygenTranscriptHash),
-		PartiesHash:          slices.Clone(p.state.PartiesHash),
-		VerifyShares:         tss.CloneSlice(p.state.VerifyShares),
-		Verification:         p.state.Verification.clone(),
-		KShare:               p.state.KShare.Clone(),
-		ChiShare:             p.state.ChiShare.Clone(),
-		DeltaAggregate:       p.state.DeltaAggregate.Clone(),
+		Consumed:                  p.state.Consumed,
+		attempt:                   p.state.attempt,
+		SecurityParams:            p.state.SecurityParams,
+		Party:                     p.state.Party,
+		Threshold:                 p.state.Threshold,
+		Signers:                   slices.Clone(p.state.Signers),
+		R:                         secp.Clone(p.state.R),
+		LittleR:                   p.state.LittleR,
+		TranscriptHash:            slices.Clone(p.state.TranscriptHash),
+		Context:                   p.state.Context.Clone(),
+		ContextHash:               slices.Clone(p.state.ContextHash),
+		Derivation:                p.state.Derivation.Clone(),
+		PlanHash:                  slices.Clone(p.state.PlanHash),
+		PublicKey:                 secp.Clone(p.state.PublicKey),
+		KeygenTranscriptHash:      slices.Clone(p.state.KeygenTranscriptHash),
+		PartiesHash:               slices.Clone(p.state.PartiesHash),
+		VerifyShares:              tss.CloneSlice(p.state.VerifyShares),
+		Verification:              p.state.Verification.clone(),
+		IdentificationTranscripts: identificationTranscripts,
+		SigmaOpeningRecords:       sigmaOpeningRecords,
+		KShare:                    p.state.KShare.Clone(),
+		ChiShare:                  p.state.ChiShare.Clone(),
+		DeltaAggregate:            p.state.DeltaAggregate.Clone(),
 	}}
 }
 
@@ -617,6 +637,24 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	}
 	var verificationSessionID tss.SessionID
 	copy(verificationSessionID[:], bytes.Repeat([]byte{0x31}, len(verificationSessionID)))
+	sigmaOpeningRecord := minimalPresignSigmaOpeningRecord(tb, RPoint)
+	response := sigmaOpeningRecord.Response
+	identificationTranscripts := []presignIdentificationTranscript{
+		{
+			Party: 1,
+			Contributions: []presignMTAContribution{{
+				Peer: 2, Inbound: response.Clone(), Outbound: response.Clone(),
+				InboundDelta: response.Clone(), OutboundDelta: response.Clone(),
+			}},
+		},
+		{
+			Party: 2,
+			Contributions: []presignMTAContribution{{
+				Peer: 1, Inbound: response.Clone(), Outbound: response.Clone(),
+				InboundDelta: response.Clone(), OutboundDelta: response.Clone(),
+			}},
+		},
+	}
 	return &Presign{state: &presignState{
 		Consumed:       NewAtomicBoolWire(false),
 		attempt:        newPresignAttemptBinding(false),
@@ -681,10 +719,68 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 				KPoint:            slices.Clone(R),
 			}},
 		},
-		KShare:         kShare,
-		ChiShare:       chiShare,
-		DeltaAggregate: delta,
+		IdentificationTranscripts: identificationTranscripts,
+		SigmaOpeningRecords:       []presignSigmaOpeningRecord{sigmaOpeningRecord},
+		KShare:                    kShare,
+		ChiShare:                  chiShare,
+		DeltaAggregate:            delta,
 	}}
+}
+
+type minimalResponseOpeningWire struct {
+	X     []byte `wire:"1,bytes,len=32"`
+	YSign []byte `wire:"2,bytes,len=1"`
+	Y     []byte `wire:"3,bytes,max_bytes=paillier_signed"`
+	Rho   []byte `wire:"4,bytes,max_bytes=paillier_signed"`
+	RhoY  []byte `wire:"5,bytes,max_bytes=paillier_signed"`
+}
+
+func (minimalResponseOpeningWire) WireType() string { return "mta.response-opening-private" }
+
+func (minimalResponseOpeningWire) WireVersion() uint16 { return 1 }
+
+// minimalPresignSigmaOpeningRecord returns structurally valid wire-only
+// material. It is not a cryptographically coherent protocol fixture.
+func minimalPresignSigmaOpeningRecord(tb testing.TB, point *secp.Point) presignSigmaOpeningRecord {
+	tb.Helper()
+	one := func() *big.Int { return big.NewInt(1) }
+	proof := zkpai.AffGProof{
+		A:              one(),
+		Bx:             secp.Clone(point),
+		By:             one(),
+		E:              one(),
+		S:              one(),
+		F:              one(),
+		T:              one(),
+		Y:              one(),
+		Z1:             one(),
+		Z2:             one(),
+		Z3:             one(),
+		Z4:             one(),
+		W:              one(),
+		WY:             one(),
+		TranscriptHash: bytes.Repeat([]byte{0x35}, sha256.Size),
+	}
+	opening, err := wire.Marshal(
+		minimalResponseOpeningWire{
+			X: bytes.Repeat([]byte{1}, secp.ScalarSize), YSign: []byte{0},
+			Y: []byte{1}, Rho: []byte{1}, RhoY: []byte{1},
+		},
+		wire.WithFieldLimitsForMarshal(wire.FieldLimits{
+			"paillier_signed": tss.DefaultMaxPaillierCiphertextBytes,
+		}),
+	)
+	if err != nil {
+		tb.Fatal("marshal minimal sigma opening: " + err.Error())
+	}
+	return presignSigmaOpeningRecord{
+		Peer: 2,
+		Response: mta.ResponseMessage{
+			Ciphertext: []byte{1},
+			Proof:      proof,
+		},
+		Opening: opening,
+	}
 }
 
 func testLimitsPtr() *Limits {

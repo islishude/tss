@@ -36,6 +36,15 @@ func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessa
 		return nil, err
 	}
 	defer secret.ClearBigInt(alpha)
+	// Paillier decryption returns the canonical residue in [0, N), while the
+	// CGGMP21 affine relation uses a signed plaintext in the centered interval.
+	// A negative x*k+y therefore decrypts as N-|x*k+y| and must be restored
+	// before reducing the initiator's additive share modulo the curve order.
+	halfN := new(big.Int).Rsh(new(big.Int).Set(skA.N), 1)
+	defer secret.ClearBigInt(halfN)
+	if alpha.Cmp(halfN) > 0 {
+		alpha.Sub(alpha, skA.N)
+	}
 	alpha.Mod(alpha, secp.Order())
 	return secret.NewScalar(alpha.FillBytes(make([]byte, secp.ScalarSize)), secp.ScalarSize)
 }

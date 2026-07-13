@@ -366,6 +366,7 @@ func (s *KeygenSession) abort() {
 		return
 	}
 	s.aborted = true
+	s.completed = false
 	s.state = keygenAborted
 	if s.local != nil {
 		s.local.Destroy()

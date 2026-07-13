@@ -103,6 +103,12 @@ func TestFast_PresignCodecReceivesCompleteLimits(t *testing.T) {
 	presign.state.Signers = tss.NewPartySet(1)
 	presign.state.VerifyShares = presign.state.VerifyShares[:1]
 	presign.state.Verification.Entries = presign.state.Verification.Entries[:1]
+	destroyMTAContributions(presign.state.IdentificationTranscripts[0].Contributions)
+	presign.state.IdentificationTranscripts[1].destroy()
+	presign.state.IdentificationTranscripts = presign.state.IdentificationTranscripts[:1]
+	presign.state.IdentificationTranscripts[0].Contributions = nil
+	destroyPresignSigmaOpeningRecords(presign.state.SigmaOpeningRecords)
+	presign.state.SigmaOpeningRecords = nil
 
 	raw, err := presign.marshalWireMessageWithLimits(testLimits())
 	if err != nil {

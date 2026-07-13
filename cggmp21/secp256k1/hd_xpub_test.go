@@ -124,6 +124,24 @@ func TestExtendedPublicKeyRejectsInvalidInputs(t *testing.T) {
 			wantErr: tss.ErrInvalidExtendedPublicKey,
 		},
 		{
+			name: "master with parent fingerprint",
+			run: func() error {
+				bad := *known
+				bad.ParentFingerprint[0] = 1
+				return bad.Validate()
+			},
+			wantErr: tss.ErrInvalidExtendedPublicKey,
+		},
+		{
+			name: "master with child number",
+			run: func() error {
+				bad := *known
+				bad.ChildNumber = 1
+				return bad.Validate()
+			},
+			wantErr: tss.ErrInvalidExtendedPublicKey,
+		},
+		{
 			name: "hardened derive",
 			run: func() error {
 				_, _, err := known.Derive([]uint32{tss.HardenedKeyStart})

@@ -370,6 +370,13 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 			return fmt.Errorf("invalid group commitment %d: %w", i, err)
 		}
 	}
+	groupPublicKey, err := secp.PointBytes(k.state.GroupCommitments[0])
+	if err != nil {
+		return fmt.Errorf("invalid group commitment 0: %w", err)
+	}
+	if !bytes.Equal(groupPublicKey, k.state.PublicKey) {
+		return errors.New("group commitment constant does not match public key")
+	}
 	if k.state.PaillierPrivateKey == nil {
 		return errors.New("missing paillier private key")
 	}
@@ -409,6 +416,17 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		if _, err := secp.PointFromBytes(data.VerificationShare); err != nil {
 			return fmt.Errorf("invalid verification share for %d: %w", id, err)
 		}
+		expectedVerificationShare, err := secp.EvalCommitmentPoints(k.state.GroupCommitments, id)
+		if err != nil {
+			return fmt.Errorf("evaluate verification share for party %d: %w", id, err)
+		}
+		expectedVerificationBytes, err := secp.PointBytes(expectedVerificationShare)
+		if err != nil {
+			return fmt.Errorf("encode verification share for party %d: %w", id, err)
+		}
+		if !bytes.Equal(expectedVerificationBytes, data.VerificationShare) {
+			return fmt.Errorf("verification share for party %d does not match group commitments", id)
+		}
 		if data.PaillierPublicKey == nil || data.PaillierProof == nil {
 			return fmt.Errorf("incomplete paillier public key for party %d", id)
 		}
@@ -427,7 +445,6 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 			return fmt.Errorf("invalid paillier proof for party %d: %w", id, err)
 		}
 		var proofDomain []byte
-		var err error
 		if id == k.state.Party {
 			proofDomain, err = keySharePaillierProofDomain(k, limits)
 		} else {
@@ -573,6 +590,18 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 	} else {
 		if err := verifyKeygenConfirmationSetBinding(k, confirmations); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
+		}
+		reveals := make(map[tss.PartyID][]byte, len(confirmations))
+		for _, confirmation := range confirmations {
+			reveals[confirmation.Sender] = confirmation.ChainCode
+		}
+		aggregate, err := bip32util.AggregateChainCode(k.state.Parties, reveals)
+		if err != nil {
+			return fmt.Errorf("invalid keygen confirmations: aggregate chain code: %w", err)
+		}
+		defer clear(aggregate)
+		if !bytes.Equal(aggregate, k.state.ChainCode) {
+			return errors.New("invalid keygen confirmations: aggregate chain code mismatch")
 		}
 	}
 	return nil

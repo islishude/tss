@@ -377,19 +377,19 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	if env.PayloadType == payloadReshareReceiverMaterial || env.PayloadType == payloadReshareFactorProof || env.PayloadType == payloadKeygenConfirmation {
 		allowedParties = s.newParties
 	}
-	if err := s.validateInbound(in, allowedParties); err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
+	if s.completed || s.aborted {
+		if err := s.validateInbound(in, allowedParties); err != nil {
+			if errors.Is(err, tss.ErrDuplicateMessage) {
+				return nil, tss.ErrDuplicateMessage
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	if s.completed {
-		if (!s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial) || env.PayloadType == payloadKeygenConfirmation {
-			return nil, nil
+		if s.completed {
+			if (!s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial) || env.PayloadType == payloadKeygenConfirmation {
+				return nil, nil
+			}
+			return nil, completedSessionError(env.Round, env.From)
 		}
-		return nil, completedSessionError(env.Round, env.From)
-	}
-	if s.aborted {
 		return nil, abortedSessionError(env.Round, env.From)
 	}
 	defer func() {
@@ -398,7 +398,84 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 			s.abort()
 		}
 	}()
+	if err := tss.ValidateInboundWithoutReplay(s.guard, in, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, allowedParties, s.selfID); err != nil {
+		return nil, err
+	}
+	if env.PayloadType == payloadReshareShare && env.Round == reshareShareRound {
+		dd := s.dealerData[env.From]
+		if dd != nil && dd.commitments == nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare share arrived before dealer commitments"))
+		}
+	}
+	if s.hasAcceptedInbound(env) {
+		if err := s.validateInbound(in, allowedParties); err != nil {
+			if errors.Is(err, tss.ErrDuplicateMessage) {
+				return nil, tss.ErrDuplicateMessage
+			}
+			return nil, err
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("reshare message slot is already accepted"))
+	}
+	staged := s.cloneForInboundTransition()
+	liveConfigLog := staged.cfg.Log
+	liveLog := staged.log
+	stagedLog := new(stagedLifecycleLogger)
+	staged.cfg.Log = stagedLog
+	staged.log = stagedLog
+	defer stagedLog.discard()
+	stagedOwned := true
+	defer func() {
+		if stagedOwned {
+			staged.abort()
+		}
+	}()
+	out, err = staged.applyValidatedInbound(env)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateInbound(in, allowedParties); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
+		return nil, err
+	}
+	staged.cfg.Log = liveConfigLog
+	staged.log = liveLog
+	s.commitInboundTransition(staged)
+	stagedOwned = false
+	stagedLog.flush(s.log)
+	return out, nil
+}
 
+func (s *ReshareSession) hasAcceptedInbound(env tss.Envelope) bool {
+	if s == nil {
+		return false
+	}
+	switch env.PayloadType {
+	case payloadReshareDealerCommitments:
+		dd := s.dealerData[env.From]
+		return dd != nil && dd.commitments != nil
+	case payloadReshareShare:
+		dd := s.dealerData[env.From]
+		return dd != nil && dd.share != nil
+	case payloadReshareReceiverMaterial:
+		npd := s.newPartyData[env.From]
+		return npd != nil && npd.paillierPub.PublicKey != nil
+	case payloadReshareFactorProof:
+		npd := s.newPartyData[env.From]
+		return npd != nil && npd.factorProof != nil
+	case payloadKeygenConfirmation:
+		npd := s.newPartyData[env.From]
+		return npd != nil && npd.confirmation != nil
+	default:
+		return false
+	}
+}
+
+// applyValidatedInbound performs protocol verification, transition staging,
+// and outbound construction on an independently owned session copy. The live
+// handler commits replay and swaps this state only after this method succeeds.
+func (s *ReshareSession) applyValidatedInbound(env tss.Envelope) (out []tss.Envelope, err error) {
 	if env.PayloadType == payloadKeygenConfirmation {
 		return s.handleReshareConfirmation(env)
 	}
@@ -571,6 +648,15 @@ func validateOldKeyMatchesResharePlan(oldKey *KeyShare, plan *ResharePlan) error
 	if !bytes.Equal(oldKey.state.ChainCode, plan.state.ChainCode) {
 		return errors.New("old key chain code does not match reshare plan")
 	}
+	if oldKey.state.PaillierProofSessionID != plan.state.OldPaillierProofSessionID {
+		return errors.New("old key lifecycle session does not match reshare plan")
+	}
+	if !bytes.Equal(oldKey.state.KeygenTranscriptHash, plan.state.OldKeygenTranscriptHash) {
+		return errors.New("old key transcript does not match reshare plan")
+	}
+	if !bytes.Equal(oldKey.state.PlanHash, plan.state.OldPlanHash) {
+		return errors.New("old key lifecycle plan does not match reshare plan")
+	}
 	if !sameParties(oldKey.state.Parties, plan.state.OldParties) {
 		return errors.New("old key party set does not match reshare plan")
 	}
@@ -595,18 +681,21 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 		return nil
 	}
 	out := &ResharePlan{state: &resharePlanState{
-		SessionID:           in.state.SessionID,
-		CurveID:             in.state.CurveID,
-		OldGroupPublicKey:   bytes.Clone(in.state.OldGroupPublicKey),
-		OldGroupCommitments: tss.CloneByteSlices(in.state.OldGroupCommitments),
-		OldParties:          in.state.OldParties.Clone(),
-		OldThreshold:        in.state.OldThreshold,
-		DealerParties:       in.state.DealerParties.Clone(),
-		NewParties:          in.state.NewParties.Clone(),
-		NewThreshold:        in.state.NewThreshold,
-		ChainCode:           bytes.Clone(in.state.ChainCode),
-		PaillierBits:        in.state.PaillierBits,
-		SecurityParams:      in.state.SecurityParams,
+		SessionID:                 in.state.SessionID,
+		OldPaillierProofSessionID: in.state.OldPaillierProofSessionID,
+		OldKeygenTranscriptHash:   bytes.Clone(in.state.OldKeygenTranscriptHash),
+		OldPlanHash:               bytes.Clone(in.state.OldPlanHash),
+		CurveID:                   in.state.CurveID,
+		OldGroupPublicKey:         bytes.Clone(in.state.OldGroupPublicKey),
+		OldGroupCommitments:       tss.CloneByteSlices(in.state.OldGroupCommitments),
+		OldParties:                in.state.OldParties.Clone(),
+		OldThreshold:              in.state.OldThreshold,
+		DealerParties:             in.state.DealerParties.Clone(),
+		NewParties:                in.state.NewParties.Clone(),
+		NewThreshold:              in.state.NewThreshold,
+		ChainCode:                 bytes.Clone(in.state.ChainCode),
+		PaillierBits:              in.state.PaillierBits,
+		SecurityParams:            in.state.SecurityParams,
 	}, limits: in.limits}
 	out.state.OldVerificationShares = make(map[tss.PartyID][]byte, len(in.state.OldVerificationShares))
 	for id, share := range in.state.OldVerificationShares {

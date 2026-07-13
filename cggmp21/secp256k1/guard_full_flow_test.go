@@ -306,8 +306,11 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 		t.Fatal("produced ECDSA signature failed verification")
 	}
 	for _, id := range signers {
-		if len(signSessions[id].presign.state.sigmaOpenings) != 0 || len(signSessions[id].presign.state.SigmaOpeningRecords) != 0 {
-			t.Fatalf("party %d retained sigma identification witnesses after successful signing", id)
+		if len(signSessions[id].sigmaOpenings) != 0 {
+			t.Fatalf("party %d retained attempt-owned sigma identification witnesses after successful signing", id)
+		}
+		if len(signSessions[id].presign.state.SigmaOpeningRecords) != len(signers)-1 {
+			t.Fatalf("party %d mutated caller-owned presign witness records", id)
 		}
 	}
 

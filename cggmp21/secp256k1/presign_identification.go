@@ -400,30 +400,54 @@ func (s *PresignSession) verifyPresignIdentificationPayload(from tss.PartyID, pa
 	return nil
 }
 
-func (s *PresignSession) startPresignIdentification(cause error) ([]tss.Envelope, error) {
+type preparedPresignIdentification struct {
+	alert     []byte
+	payload   presignIdentificationPayload
+	envelope  tss.Envelope
+	committed bool
+}
+
+func (p *preparedPresignIdentification) destroy() {
+	if p == nil || p.committed {
+		return
+	}
+	clear(p.alert)
+	p.payload.destroy()
+	clearEnvelope(&p.envelope)
+}
+
+func (s *PresignSession) preparePresignIdentification(cause error) (*preparedPresignIdentification, bool, error) {
 	if s.identifying {
-		return nil, nil
+		return nil, false, nil
 	}
 	alert := s.presignIdentificationAlert()
 	payload, err := s.buildLocalPresignIdentificationPayload(alert)
 	if err != nil {
-		return nil, fmt.Errorf("prepare presign identification after %w: %w", cause, err)
+		return nil, false, fmt.Errorf("prepare presign identification after %w: %w", cause, err)
 	}
 	encoded, err := payload.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		payload.destroy()
-		return nil, err
+		return nil, false, err
 	}
 	env, err := newEnvelope(s.config, presignIdentificationRound, s.key.state.Party, tss.BroadcastPartyId, payloadPresignIdentification, encoded)
 	clear(encoded)
 	if err != nil {
 		payload.destroy()
-		return nil, err
+		return nil, false, err
+	}
+	return &preparedPresignIdentification{alert: alert, payload: payload, envelope: env}, true, nil
+}
+
+func (s *PresignSession) commitPresignIdentification(p *preparedPresignIdentification) sessionEffects {
+	if p == nil {
+		return sessionEffects{}
 	}
 	s.identifying = true
-	s.identificationAlert = bytes.Clone(alert)
-	s.identificationPayloads = map[tss.PartyID]presignIdentificationPayload{s.key.state.Party: payload}
-	return []tss.Envelope{env}, nil
+	s.identificationAlert = bytes.Clone(p.alert)
+	s.identificationPayloads = map[tss.PartyID]presignIdentificationPayload{s.key.state.Party: p.payload}
+	p.committed = true
+	return sessionEffects{envelopes: []tss.Envelope{p.envelope}}
 }
 
 type acceptPresignIdentificationTx struct {

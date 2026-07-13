@@ -165,6 +165,60 @@ func TestThresholdECDSAReshareRejectsShareBeforeCommitments(t *testing.T) {
 	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err == nil {
 		t.Fatal("accepted reshare share before dealer commitments")
 	}
+	if session1.dealerData[2].share != nil {
+		t.Fatal("early reshare share mutated dealer state")
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(commitment)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err != nil {
+		t.Fatalf("reshare share retry after commitments: %v", err)
+	}
+}
+
+func TestThresholdECDSAReshareOutboundFailureLeavesStateAndReplayUncommitted(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 2)
+	parties := tss.NewPartySet(1, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey: shares[1], SessionID: sessionID, DealerParties: parties,
+		NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1, _, err := startCGGMP21ReshareOverlap(shares[1], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session1.Destroy()
+	session2, out2, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session2.Destroy()
+
+	originalSigner := session1.cfg.EnvelopeSigner
+	session1.cfg.EnvelopeSigner = failingPresignEnvelopeSigner{}
+	if out, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil || len(out) != 0 {
+		t.Fatalf("reshare outbound construction failure = out:%d err:%v", len(out), err)
+	}
+	peer := session1.newPartyData[2]
+	if peer.paillierPub.PublicKey != nil || session1.dealerSent || session1.factorProofsSent {
+		t.Fatal("reshare outbound construction failure mutated accepted state")
+	}
+
+	session1.cfg.EnvelopeSigner = originalSigner
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+		t.Fatalf("retry after reshare outbound construction failure: %v", err)
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); !errors.Is(err, tss.ErrDuplicateMessage) {
+		t.Fatalf("accepted reshare duplicate = %v, want ErrDuplicateMessage", err)
+	}
 }
 
 func TestThresholdECDSAReshareFactorProofMayPrecedeReceiverBroadcast(t *testing.T) {
@@ -385,7 +439,7 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 		t.Fatal("test did not skip any receiver confirmations")
 	}
 	for _, id := range dealers {
-		if sessions[id].completed {
+		if sessions[id].Completed() {
 			t.Fatalf("old-only dealer %d completed before receiver confirmations", id)
 		}
 	}
@@ -395,8 +449,11 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 		}
 	}
 	for _, id := range dealers {
-		if !sessions[id].completed {
+		if !sessions[id].Completed() {
 			t.Fatalf("old-only dealer %d did not complete after receiver confirmations", id)
+		}
+		if share, ok := sessions[id].KeyShare(); ok || share != nil {
+			t.Fatalf("old-only dealer %d produced a replacement key share", id)
 		}
 	}
 }

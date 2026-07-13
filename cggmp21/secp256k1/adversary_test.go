@@ -429,7 +429,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeCompleted))
 	})
 
-	t.Run("malformed presign reject is non-mutating and equivocation is terminal", func(t *testing.T) {
+	t.Run("malformed presign reject is retryable and accepted equivocation is terminal", func(t *testing.T) {
 		h := newHarness(t, 2, 3)
 		sessionID, err := tss.NewSessionID(nil)
 		if err != nil {
@@ -457,7 +457,13 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, tss.NewPartySet(1, 2), nil))
 		assertCGGMPSnapshotUnchanged(t, before, after)
 
-		_, err = s1.Handle(testutil.DeliverEnvelope(out2[0]))
+		if _, err = s1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+			t.Fatalf("valid presign message was not retryable after malformed reject: %v", err)
+		}
+		if _, err = s1.Handle(testutil.DeliverEnvelope(out2[0])); !errors.Is(err, tss.ErrDuplicateMessage) {
+			t.Fatalf("accepted exact duplicate = %v, want ErrDuplicateMessage", err)
+		}
+		_, err = s1.Handle(testutil.DeliverEnvelope(bad))
 		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeVerification))
 		_, err = s1.Handle(testutil.DeliverEnvelope(out2[0]))
 		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeAborted))

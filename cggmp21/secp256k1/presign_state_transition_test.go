@@ -2,12 +2,19 @@ package secp256k1
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
+
+type failingPresignEnvelopeSigner struct{}
+
+func (failingPresignEnvelopeSigner) SignEnvelopeDigest([32]byte) ([]byte, error) {
+	return nil, errors.New("injected presign envelope signing failure")
+}
 
 func TestCGGMP21PresignRound1PlanHashRejectDoesNotMutate(t *testing.T) {
 	s1, _, s2, out2 := cggmpTwoPartyPresignSessions(t)
@@ -360,6 +367,359 @@ func TestCGGMP21PresignReadinessDerivesFromPartyState(t *testing.T) {
 	}
 }
 
+func TestCGGMP21PresignEarlyRoundReadinessIsTypedAndDoesNotMutate(t *testing.T) {
+	s1, out1, s2, out2 := cggmpTwoPartyPresignSessions(t)
+	defer s1.Destroy()
+	defer s2.Destroy()
+
+	var round2From2 tss.Envelope
+	for _, env := range out1 {
+		if env.To != tss.BroadcastPartyId && env.To != s2.key.state.Party {
+			continue
+		}
+		out, err := s2.Handle(testutil.DeliverEnvelope(env))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, candidate := range out {
+			if candidate.PayloadType == payloadPresignRound2 && candidate.To == s1.key.state.Party {
+				round2From2 = candidate
+			}
+		}
+	}
+	if round2From2.PayloadType == "" {
+		t.Fatal("missing party 2 round2 output")
+	}
+
+	before := snapshotCGGMPPresignSession(s1)
+	err := s1.validatePresignInboundReadiness(round2From2)
+	after := snapshotCGGMPPresignSession(s1)
+	var protocolErr *tss.ProtocolError
+	var earlyErr *presignEarlyMessageError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeRound || !errors.As(err, &earlyErr) {
+		t.Fatalf("early round2 error = %v", err)
+	}
+	assertCGGMPSnapshotUnchanged(t, before, after)
+
+	for _, env := range out2 {
+		if env.To != tss.BroadcastPartyId && env.To != s1.key.state.Party {
+			continue
+		}
+		if _, err := s1.Handle(testutil.DeliverEnvelope(env)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	peerState, ok := s1.partyState(2)
+	if !ok || peerState.round2.outboundEnvelope.PayloadType != payloadPresignRound2 {
+		t.Fatal("missing party 1 round2 output")
+	}
+	round2From1 := peerState.round2.outboundEnvelope.Clone()
+	round3From2, err := s2.Handle(testutil.DeliverEnvelope(round2From1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	round3 := mustPresignEnvelope(t, round3From2, payloadPresignRound3, tss.BroadcastPartyId)
+
+	before = snapshotCGGMPPresignSession(s1)
+	err = s1.validatePresignInboundReadiness(round3)
+	after = snapshotCGGMPPresignSession(s1)
+	protocolErr = nil
+	earlyErr = nil
+	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeRound || !errors.As(err, &earlyErr) {
+		t.Fatalf("early round3 error = %v", err)
+	}
+	assertCGGMPSnapshotUnchanged(t, before, after)
+}
+
+func TestCGGMP21PresignTransitionPreparationFailureDoesNotAcceptInbound(t *testing.T) {
+	t.Run("round1_to_round2", func(t *testing.T) {
+		s1, _, s2, out2 := cggmpTwoPartyPresignSessions(t)
+		defer s1.Destroy()
+		defer s2.Destroy()
+		proofEnv := mustPresignEnvelope(t, out2, payloadPresignRound1Proof, s1.key.state.Party)
+		proofTx, err := s1.buildAcceptPresignRound1ProofTx(proofEnv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := proofTx.apply(s1); err != nil {
+			t.Fatal(err)
+		}
+		proofTx.markCommitted()
+		s1.config.EnvelopeSigner = failingPresignEnvelopeSigner{}
+
+		before := snapshotCGGMPPresignSession(s1)
+		tx, err := s1.buildAcceptPresignRound1PayloadTx(out2[0])
+		after := snapshotCGGMPPresignSession(s1)
+		if tx != nil {
+			tx.cleanupOnReject()
+		}
+		if err == nil {
+			t.Fatal("expected injected round2 envelope construction failure")
+		}
+		assertCGGMPSnapshotUnchanged(t, before, after)
+	})
+
+	t.Run("round2_to_round3", func(t *testing.T) {
+		s1, out1, s2, out2 := cggmpTwoPartyPresignSessions(t)
+		defer s1.Destroy()
+		defer s2.Destroy()
+		installPresignRound1Peer(t, s1, out2)
+		installPresignRound1Peer(t, s2, out1)
+		prepared1, ok, err := s1.preparePresignRound2Outputs()
+		if err != nil || !ok {
+			t.Fatalf("prepare party 1 round2: ok=%v err=%v", ok, err)
+		}
+		s1.commitPresignRound2Outputs(prepared1)
+		prepared2, ok, err := s2.preparePresignRound2Outputs()
+		if err != nil || !ok {
+			t.Fatalf("prepare party 2 round2: ok=%v err=%v", ok, err)
+		}
+		effects2 := s2.commitPresignRound2Outputs(prepared2)
+		round2 := mustPresignEnvelope(t, effects2.envelopes, payloadPresignRound2, s1.key.state.Party)
+		s1.config.EnvelopeSigner = failingPresignEnvelopeSigner{}
+
+		before := snapshotCGGMPPresignSession(s1)
+		tx, err := s1.buildAcceptPresignRound2Tx(round2)
+		after := snapshotCGGMPPresignSession(s1)
+		if tx != nil {
+			tx.cleanupOnReject()
+		}
+		if err == nil {
+			t.Fatal("expected injected round3 envelope construction failure")
+		}
+		assertCGGMPSnapshotUnchanged(t, before, after)
+	})
+
+	t.Run("round3_to_identification", func(t *testing.T) {
+		s1, s2, _, round3From2 := presignSessionsWithRound3Outputs(t)
+		defer s1.Destroy()
+		defer s2.Destroy()
+		originalChi := s1.presign.state.ChiShare
+		originalScalar, err := secpScalarFromSecret(originalChi)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replacementScalar := secp.ScalarAdd(originalScalar, secp.ScalarOne())
+		if replacementScalar.IsZero() {
+			replacementScalar = secp.ScalarOne()
+		}
+		replacement, err := secpSecretScalarFromScalar(replacementScalar)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1.presign.state.ChiShare = replacement
+		defer func() {
+			s1.presign.state.ChiShare = originalChi
+			replacement.Destroy()
+		}()
+		s1.config.EnvelopeSigner = failingPresignEnvelopeSigner{}
+
+		before := snapshotCGGMPPresignSession(s1)
+		tx, err := s1.buildAcceptPresignRound3Tx(round3From2)
+		after := snapshotCGGMPPresignSession(s1)
+		if tx != nil {
+			tx.cleanupOnReject()
+		}
+		if err == nil {
+			t.Fatal("expected injected identification envelope construction failure")
+		}
+		if s1.identifying || len(s1.identificationAlert) != 0 || len(s1.identificationPayloads) != 0 {
+			t.Fatal("failed identification preparation mutated session state")
+		}
+		assertCGGMPSnapshotUnchanged(t, before, after)
+	})
+}
+
+func TestCGGMP21PresignEarlyEnvelopeCanBeRetriedAfterPrerequisites(t *testing.T) {
+	t.Run("round2_before_round1", func(t *testing.T) {
+		s1, out1, s2, out2 := cggmpTwoPartyPresignSessions(t)
+		defer s1.Destroy()
+		defer s2.Destroy()
+		var round2From2 tss.Envelope
+		for _, env := range out1 {
+			if env.To != tss.BroadcastPartyId && env.To != s2.key.state.Party {
+				continue
+			}
+			out, err := s2.Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range out {
+				if candidate.PayloadType == payloadPresignRound2 && candidate.To == s1.key.state.Party {
+					round2From2 = candidate
+				}
+			}
+		}
+		if round2From2.PayloadType == "" {
+			t.Fatal("missing party 2 round2 output")
+		}
+
+		before := snapshotCGGMPPresignSession(s1)
+		out, err := s1.Handle(testutil.DeliverEnvelope(round2From2))
+		after := snapshotCGGMPPresignSession(s1)
+		var protocolErr *tss.ProtocolError
+		var earlyErr *presignEarlyMessageError
+		if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeRound || protocolErr.Blame != nil ||
+			!errors.As(err, &earlyErr) || len(out) != 0 || s1.aborted {
+			t.Fatalf("early round2 = out:%d err:%v aborted:%v", len(out), err, s1.aborted)
+		}
+		assertCGGMPSnapshotUnchanged(t, before, after)
+
+		for _, env := range out2 {
+			if env.To != tss.BroadcastPartyId && env.To != s1.key.state.Party {
+				continue
+			}
+			if _, err := s1.Handle(testutil.DeliverEnvelope(env)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, err = s1.Handle(testutil.DeliverEnvelope(round2From2))
+		if err != nil || len(out) == 0 || s1.aborted {
+			t.Fatalf("round2 retry = out:%d err:%v aborted:%v", len(out), err, s1.aborted)
+		}
+		state, ok := s1.partyState(round2From2.From)
+		if !ok || !state.round2.havePayload || state.mta.alphaDelta == nil || state.mta.alphaSigma == nil {
+			t.Fatal("round2 retry did not commit verified MtA state")
+		}
+	})
+
+	t.Run("round3_before_all_round2", func(t *testing.T) {
+		s1, out1, s2, out2 := cggmpTwoPartyPresignSessions(t)
+		defer s1.Destroy()
+		defer s2.Destroy()
+		var round2From1, round2From2 tss.Envelope
+		for _, env := range out2 {
+			if env.To != tss.BroadcastPartyId && env.To != s1.key.state.Party {
+				continue
+			}
+			out, err := s1.Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range out {
+				if candidate.PayloadType == payloadPresignRound2 && candidate.To == s2.key.state.Party {
+					round2From1 = candidate
+				}
+			}
+		}
+		for _, env := range out1 {
+			if env.To != tss.BroadcastPartyId && env.To != s2.key.state.Party {
+				continue
+			}
+			out, err := s2.Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range out {
+				if candidate.PayloadType == payloadPresignRound2 && candidate.To == s1.key.state.Party {
+					round2From2 = candidate
+				}
+			}
+		}
+		if round2From1.PayloadType == "" || round2From2.PayloadType == "" {
+			t.Fatal("missing round2 output")
+		}
+		round3Out, err := s2.Handle(testutil.DeliverEnvelope(round2From1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		round3From2 := mustPresignEnvelope(t, round3Out, payloadPresignRound3, tss.BroadcastPartyId)
+
+		before := snapshotCGGMPPresignSession(s1)
+		out, err := s1.Handle(testutil.DeliverEnvelope(round3From2))
+		after := snapshotCGGMPPresignSession(s1)
+		var protocolErr *tss.ProtocolError
+		var earlyErr *presignEarlyMessageError
+		if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeRound || protocolErr.Blame != nil ||
+			!errors.As(err, &earlyErr) || len(out) != 0 || s1.aborted {
+			t.Fatalf("early round3 = out:%d err:%v aborted:%v", len(out), err, s1.aborted)
+		}
+		assertCGGMPSnapshotUnchanged(t, before, after)
+
+		if _, err := s1.Handle(testutil.DeliverEnvelope(round2From2)); err != nil {
+			t.Fatal(err)
+		}
+		out, err = s1.Handle(testutil.DeliverEnvelope(round3From2))
+		if err != nil || len(out) != 0 || !s1.completed || s1.aborted {
+			t.Fatalf("round3 retry = out:%d err:%v completed:%v aborted:%v", len(out), err, s1.completed, s1.aborted)
+		}
+	})
+}
+
+func TestCGGMP21PresignOutputFailureLeavesEnvelopeRetryable(t *testing.T) {
+	t.Run("round1_to_round2", func(t *testing.T) {
+		s1, _, s2, out2 := cggmpTwoPartyPresignSessions(t)
+		defer s1.Destroy()
+		defer s2.Destroy()
+		proof := mustPresignEnvelope(t, out2, payloadPresignRound1Proof, s1.key.state.Party)
+		if _, err := s1.Handle(testutil.DeliverEnvelope(proof)); err != nil {
+			t.Fatal(err)
+		}
+		originalSigner := s1.config.EnvelopeSigner
+		s1.config.EnvelopeSigner = failingPresignEnvelopeSigner{}
+		before := snapshotCGGMPPresignSession(s1)
+		out, err := s1.Handle(testutil.DeliverEnvelope(out2[0]))
+		after := snapshotCGGMPPresignSession(s1)
+		if err == nil || len(out) != 0 || s1.aborted {
+			t.Fatalf("injected round2 failure = out:%d err:%v aborted:%v", len(out), err, s1.aborted)
+		}
+		assertCGGMPSnapshotUnchanged(t, before, after)
+
+		s1.config.EnvelopeSigner = originalSigner
+		out, err = s1.Handle(testutil.DeliverEnvelope(out2[0]))
+		if err != nil || len(out) == 0 || s1.aborted {
+			t.Fatalf("round1 retry = out:%d err:%v aborted:%v", len(out), err, s1.aborted)
+		}
+	})
+
+	t.Run("round2_to_round3", func(t *testing.T) {
+		s1, out1, s2, out2 := cggmpTwoPartyPresignSessions(t)
+		defer s1.Destroy()
+		defer s2.Destroy()
+		var round2From2 tss.Envelope
+		for _, env := range out2 {
+			if env.To != tss.BroadcastPartyId && env.To != s1.key.state.Party {
+				continue
+			}
+			if _, err := s1.Handle(testutil.DeliverEnvelope(env)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, env := range out1 {
+			if env.To != tss.BroadcastPartyId && env.To != s2.key.state.Party {
+				continue
+			}
+			out, err := s2.Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, candidate := range out {
+				if candidate.PayloadType == payloadPresignRound2 && candidate.To == s1.key.state.Party {
+					round2From2 = candidate
+				}
+			}
+		}
+		if round2From2.PayloadType == "" {
+			t.Fatal("missing party 2 round2 output")
+		}
+		originalSigner := s1.config.EnvelopeSigner
+		s1.config.EnvelopeSigner = failingPresignEnvelopeSigner{}
+		before := snapshotCGGMPPresignSession(s1)
+		out, err := s1.Handle(testutil.DeliverEnvelope(round2From2))
+		after := snapshotCGGMPPresignSession(s1)
+		if err == nil || len(out) != 0 || s1.aborted {
+			t.Fatalf("injected round3 failure = out:%d err:%v aborted:%v", len(out), err, s1.aborted)
+		}
+		assertCGGMPSnapshotUnchanged(t, before, after)
+
+		s1.config.EnvelopeSigner = originalSigner
+		out, err = s1.Handle(testutil.DeliverEnvelope(round2From2))
+		if err != nil || len(out) == 0 || s1.aborted {
+			t.Fatalf("round2 retry = out:%d err:%v aborted:%v", len(out), err, s1.aborted)
+		}
+	})
+}
+
 func cggmpTwoPartyPresignSessions(t *testing.T) (*PresignSession, []tss.Envelope, *PresignSession, []tss.Envelope) {
 	t.Helper()
 	h := newHarness(t, 2, 3)
@@ -412,6 +772,8 @@ func installPresignRound1Peer(t *testing.T, session *PresignSession, remoteOut [
 
 func installPresignRound2Tx(t *testing.T, session *PresignSession, tx *acceptPresignRound2Tx) {
 	t.Helper()
+	tx.prepared.destroy()
+	tx.prepared = preparedPresignTransitionEffects{}
 	st, ok := session.partyState(tx.from)
 	if !ok {
 		t.Fatal("missing round2 peer state")
@@ -425,6 +787,8 @@ func installPresignRound2Tx(t *testing.T, session *PresignSession, tx *acceptPre
 
 func installPresignRound3Tx(t *testing.T, session *PresignSession, tx *acceptPresignRound3Tx) {
 	t.Helper()
+	tx.prepared.destroy()
+	tx.prepared = preparedPresignTransitionEffects{}
 	st, ok := session.partyState(tx.from)
 	if !ok {
 		t.Fatal("missing round3 peer state")

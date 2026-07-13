@@ -300,9 +300,9 @@ func (s *SignSession) buildLocalSignIdentificationPayload(alert []byte) (signIde
 	for _, contribution := range transcriptValue.Contributions {
 		peer := contribution.Peer
 		var opening *presignSigmaOpening
-		for i := range s.presign.state.sigmaOpenings {
-			if s.presign.state.sigmaOpenings[i].Peer == peer {
-				opening = &s.presign.state.sigmaOpenings[i]
+		for i := range s.sigmaOpenings {
+			if s.sigmaOpenings[i].Peer == peer {
+				opening = &s.sigmaOpenings[i]
 				break
 			}
 		}

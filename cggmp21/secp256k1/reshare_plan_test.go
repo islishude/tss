@@ -83,6 +83,26 @@ func TestResharePlanDigestBindsPublicInputs(t *testing.T) {
 	if bytes.Equal(digest1, digest3) {
 		t.Fatal("reshare plan digest did not change after chain-code mutation")
 	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*resharePlanState)
+	}{
+		{name: "old Paillier proof session", mutate: func(state *resharePlanState) { state.OldPaillierProofSessionID[0] ^= 1 }},
+		{name: "old transcript", mutate: func(state *resharePlanState) { state.OldKeygenTranscriptHash[0] ^= 1 }},
+		{name: "old plan", mutate: func(state *resharePlanState) { state.OldPlanHash[0] ^= 1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := cloneResharePlan(plan)
+			tc.mutate(changed.state)
+			digest, err := changed.Digest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Equal(digest1, digest) {
+				t.Fatalf("reshare plan digest did not bind %s", tc.name)
+			}
+		})
+	}
 }
 
 func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
@@ -105,6 +125,11 @@ func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
 	snapshot.DealerParties[0] = 99
 	snapshot.NewParties[0] = 99
 	snapshot.ChainCode[0] = 99
+	snapshot.OldKeygenTranscriptHash[0] = 99
+	snapshot.OldPlanHash[0] = 99
+	clonedSnapshot := snapshot.Clone()
+	clonedSnapshot.OldKeygenTranscriptHash[1] = 98
+	clonedSnapshot.OldPlanHash[1] = 98
 
 	if bytes.Equal(snapshot.OldGroupPublicKey, plan.state.OldGroupPublicKey) ||
 		bytes.Equal(snapshot.OldGroupCommitments[0], plan.state.OldGroupCommitments[0]) ||
@@ -113,7 +138,11 @@ func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
 		plan.state.OldParties[0] != 1 ||
 		plan.state.DealerParties[0] != 1 ||
 		plan.state.NewParties[0] != 2 ||
-		plan.state.ChainCode[0] != 1 {
+		plan.state.ChainCode[0] != 1 ||
+		plan.state.OldKeygenTranscriptHash[0] == 99 ||
+		plan.state.OldPlanHash[0] == 99 ||
+		snapshot.OldKeygenTranscriptHash[1] == 98 ||
+		snapshot.OldPlanHash[1] == 98 {
 		t.Fatal("ResharePlan snapshot aliases internal state")
 	}
 }
@@ -147,6 +176,12 @@ func TestResharePlanCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(wantDigest, gotDigest) {
 		t.Fatal("reshare plan digest changed after round trip")
 	}
+	decodedSnapshot, ok := decoded.Snapshot()
+	if !ok || decodedSnapshot.OldPaillierProofSessionID != plan.state.OldPaillierProofSessionID ||
+		!bytes.Equal(decodedSnapshot.OldKeygenTranscriptHash, plan.state.OldKeygenTranscriptHash) ||
+		!bytes.Equal(decodedSnapshot.OldPlanHash, plan.state.OldPlanHash) {
+		t.Fatal("reshare plan round trip lost source generation binding")
+	}
 	raw3, err := decoded.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +191,37 @@ func TestResharePlanCanonicalEncoding(t *testing.T) {
 	}
 	if _, err := tss.DecodeBinary[ResharePlan](append(raw1, 0)); err == nil {
 		t.Fatal("reshare plan accepted trailing data")
+	}
+}
+
+func TestResharePlanRejectsDifferentSourceGeneration(t *testing.T) {
+	t.Parallel()
+	oldKey := CachedKeygenShares(t, 2, 3)[1]
+	var sessionID tss.SessionID
+	sessionID[0] = 0x91
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey: oldKey, SessionID: sessionID,
+		DealerParties: oldKey.state.Parties, NewParties: oldKey.state.Parties,
+		NewThreshold: oldKey.state.Threshold, Limits: testLimitsPtr(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*resharePlanState)
+	}{
+		{name: "Paillier proof session", mutate: func(state *resharePlanState) { state.OldPaillierProofSessionID[0] ^= 1 }},
+		{name: "keygen transcript", mutate: func(state *resharePlanState) { state.OldKeygenTranscriptHash[0] ^= 1 }},
+		{name: "lifecycle plan", mutate: func(state *resharePlanState) { state.OldPlanHash[0] ^= 1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mixed := cloneResharePlan(plan)
+			tc.mutate(mixed.state)
+			if err := validateOldKeyMatchesResharePlan(oldKey, mixed); err == nil {
+				t.Fatalf("accepted old key from a different %s generation", tc.name)
+			}
+		})
 	}
 }
 
@@ -303,13 +369,18 @@ func minimalValidResharePlan(t *testing.T) *ResharePlan {
 	t.Helper()
 	var sessionID tss.SessionID
 	sessionID[0] = 1
+	var oldPaillierProofSession tss.SessionID
+	oldPaillierProofSession[0] = 2
 	publicKey := mustResharePlanPoint(t, 1)
 	linearCommitment := mustResharePlanPoint(t, 1)
 	return &ResharePlan{state: &resharePlanState{
-		SessionID:           sessionID,
-		CurveID:             reshareCurveID,
-		OldGroupPublicKey:   publicKey,
-		OldGroupCommitments: [][]byte{publicKey, linearCommitment},
+		SessionID:                 sessionID,
+		OldPaillierProofSessionID: oldPaillierProofSession,
+		OldKeygenTranscriptHash:   bytes.Repeat([]byte{0x22}, 32),
+		OldPlanHash:               bytes.Repeat([]byte{0x33}, 32),
+		CurveID:                   reshareCurveID,
+		OldGroupPublicKey:         publicKey,
+		OldGroupCommitments:       [][]byte{publicKey, linearCommitment},
 		OldVerificationShares: map[tss.PartyID][]byte{
 			1: mustResharePlanPoint(t, 2),
 			2: mustResharePlanPoint(t, 3),

@@ -144,6 +144,129 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
+func TestThresholdECDSARefreshEarlyShareRejectsWithoutReplayAndRetries(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1, out1, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session1.Destroy()
+	session2, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session2.Destroy()
+	sharesFrom2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := mustCGGMPEnvelope(t, sharesFrom2, payloadRefreshShare, 1)
+	out, err := session1.Handle(testutil.DeliverEnvelope(share))
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeRound {
+		t.Fatalf("early refresh share error = %v, want round error", err)
+	}
+	if len(out) != 0 || session1.partyData[2].share != nil || session1.completed {
+		t.Fatal("early refresh share mutated session state or emitted output")
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err != nil {
+		t.Fatalf("refresh share retry after commitments: %v", err)
+	}
+}
+
+func TestThresholdECDSARefreshOutboundFailureLeavesStateAndReplayUncommitted(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1, _, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session1.Destroy()
+	session2, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session2.Destroy()
+
+	originalSigner := session1.cfg.EnvelopeSigner
+	session1.cfg.EnvelopeSigner = failingPresignEnvelopeSigner{}
+	if out, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil || len(out) != 0 {
+		t.Fatalf("refresh outbound construction failure = out:%d err:%v", len(out), err)
+	}
+	if session1.partyData[2].commitments != nil || session1.sharesSent || session1.newShare != nil {
+		t.Fatal("refresh outbound construction failure mutated accepted state")
+	}
+
+	session1.cfg.EnvelopeSigner = originalSigner
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+		t.Fatalf("retry after refresh outbound construction failure: %v", err)
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); !errors.Is(err, tss.ErrDuplicateMessage) {
+		t.Fatalf("accepted refresh duplicate = %v, want ErrDuplicateMessage", err)
+	}
+}
+
+func TestThresholdECDSARefreshReplayCommitFailureDoesNotLogStagedSuccess(t *testing.T) {
+	shares := CachedKeygenShares(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1, out1, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session1.Destroy()
+	session2, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session2.Destroy()
+
+	sharesFrom2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+		t.Fatal(err)
+	}
+	share := mustCGGMPEnvelope(t, sharesFrom2, payloadRefreshShare, session1.cfg.Self)
+	logger := new(captureLifecycleLogger)
+	session1.cfg.Log = logger
+	session1.log = logger
+	cache := tss.NewBoundedReplayCache(1)
+	if err := cache.CheckAndStore(tss.MessageSlotKey{
+		Protocol: "full-cache", SessionID: sessionID, Round: 1,
+		From: 99, To: 100, PayloadType: "full-cache",
+	}, [32]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	session1.guard.ReplayCache = cache
+
+	out, err := session1.Handle(testutil.DeliverEnvelope(share))
+	if !errors.Is(err, tss.ErrReplayCacheFull) {
+		t.Fatalf("refresh replay commit failure = %v, want ErrReplayCacheFull", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("refresh replay commit failure emitted %d envelopes", len(out))
+	}
+	if len(logger.entries) != 0 {
+		t.Fatalf("refresh replay commit failure emitted %d staged success logs", len(logger.entries))
+	}
+}
+
 func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
 	t.Parallel()
 

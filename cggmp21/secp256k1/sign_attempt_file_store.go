@@ -25,6 +25,9 @@ const (
 	signAttemptBurnMagic          = "cggmp21-sign-attempt-burn-v1\n"
 	signAttemptStoreSaltFile      = ".store-key-salt"
 	signAttemptStoreSaltSize      = 32
+	signAttemptStoreMaxKDFTime    = 4
+	signAttemptStoreMaxKDFMemory  = 128 * 1024
+	signAttemptStoreMaxKDFThreads = 8
 )
 
 // FileSignAttemptStore is an encrypted append-only reference implementation of
@@ -47,7 +50,9 @@ type FileSignAttemptStore struct {
 // directories must reside on one filesystem because atomic hard links establish
 // presign claims and durable delivery/completion objects. Paths use an
 // HMAC-derived opaque store key rather than the secret-tainted presign content
-// ID. A nil params value selects [tss.DefaultPassphraseParams].
+// ID. The root is canonicalized, an explicit root or non-system ancestor
+// symlink is rejected, and every owned directory is restricted to mode 0700.
+// A nil params value selects [tss.DefaultPassphraseParams].
 func NewFileSignAttemptStore(directory string, passphrase []byte, params *tss.PassphraseParams) (*FileSignAttemptStore, error) {
 	if directory == "" {
 		return nil, errors.New("empty sign attempt store directory")
@@ -55,6 +60,11 @@ func NewFileSignAttemptStore(directory string, passphrase []byte, params *tss.Pa
 	if len(passphrase) == 0 {
 		return nil, errors.New("empty sign attempt store passphrase")
 	}
+	secureRoot, err := secureSignAttemptStoreRoot(directory)
+	if err != nil {
+		return nil, err
+	}
+	directory = secureRoot
 	store := &FileSignAttemptStore{
 		root:                 directory,
 		objects:              filepath.Join(directory, "objects"),
@@ -69,6 +79,10 @@ func NewFileSignAttemptStore(directory string, passphrase []byte, params *tss.Pa
 		params = tss.DefaultPassphraseParams()
 	}
 	copied := *params
+	if err := validateSignAttemptStoreKDFParams(&copied); err != nil {
+		store.Destroy()
+		return nil, err
+	}
 	store.params = &copied
 	for _, path := range []string{
 		store.root,
@@ -82,6 +96,10 @@ func NewFileSignAttemptStore(directory string, passphrase []byte, params *tss.Pa
 		if err := os.MkdirAll(path, 0o700); err != nil {
 			store.Destroy()
 			return nil, fmt.Errorf("create sign attempt store directory: %w", err)
+		}
+		if err := validateSecureSignAttemptStoreDirectory(path); err != nil {
+			store.Destroy()
+			return nil, err
 		}
 	}
 	salt, err := loadOrCreateSignAttemptStoreSalt(store.root)
@@ -730,14 +748,173 @@ func deriveSignAttemptStoreSecret(passphrase, salt []byte, params *tss.Passphras
 	if len(passphrase) == 0 || len(salt) != signAttemptStoreSaltSize {
 		return nil, errors.New("invalid sign attempt store key material")
 	}
-	if params == nil || params.Time == 0 || params.Memory == 0 || params.Threads == 0 {
-		return nil, errors.New("invalid sign attempt store KDF parameters")
+	if err := validateSignAttemptStoreKDFParams(params); err != nil {
+		return nil, err
 	}
 	return argon2.IDKey(passphrase, salt, params.Time, params.Memory, params.Threads, sha256.Size), nil
 }
 
+func validateSignAttemptStoreKDFParams(params *tss.PassphraseParams) error {
+	if params == nil || params.Time == 0 || params.Memory == 0 || params.Threads == 0 {
+		return errors.New("invalid sign attempt store KDF parameters")
+	}
+	if params.Time > signAttemptStoreMaxKDFTime || params.Memory > signAttemptStoreMaxKDFMemory || params.Threads > signAttemptStoreMaxKDFThreads {
+		return fmt.Errorf("sign attempt store KDF parameters exceed limits: time=%d memory=%d threads=%d", params.Time, params.Memory, params.Threads)
+	}
+	return nil
+}
+
+func secureSignAttemptStoreRoot(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve sign attempt store root: %w", err)
+	}
+	if info, statErr := os.Lstat(abs); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("sign attempt store root is a symlink %q", abs)
+	} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+		return "", fmt.Errorf("inspect sign attempt store root %q: %w", abs, statErr)
+	}
+	if err := rejectSignAttemptStoreSymlinkAncestors(abs); err != nil {
+		return "", err
+	}
+
+	// Resolve the existing trusted path once and retain only the canonical target
+	// path. Volume-root aliases such as macOS /var are administrator-controlled;
+	// all lower symlink ancestors were rejected above.
+	current := abs
+	var suffix []string
+	for {
+		_, statErr := os.Lstat(current)
+		if statErr == nil {
+			break
+		}
+		if !errors.Is(statErr, fs.ErrNotExist) {
+			return "", fmt.Errorf("inspect sign attempt store path %q: %w", current, statErr)
+		}
+		suffix = append(suffix, filepath.Base(current))
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("no existing ancestor for sign attempt store root %q", abs)
+		}
+		current = parent
+	}
+	if err := validateSignAttemptStoreTrustedAncestorChain(current); err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(current)
+	if err != nil {
+		return "", fmt.Errorf("resolve sign attempt store ancestor %q: %w", current, err)
+	}
+	// A trusted volume-root alias is only an indirection mechanism; its target
+	// chain must independently satisfy the same ownership and replacement
+	// rules before any missing suffix is appended.
+	if err := validateSignAttemptStoreTrustedAncestorChain(resolved); err != nil {
+		return "", fmt.Errorf("validate canonical sign attempt store ancestor: %w", err)
+	}
+	for i := len(suffix) - 1; i >= 0; i-- {
+		resolved = filepath.Join(resolved, suffix[i])
+	}
+	return filepath.Clean(resolved), nil
+}
+
+// validateSignAttemptStoreTrustedAncestorChain ensures that no untrusted local
+// principal can replace an existing path component or insert the missing
+// suffix between inspection and creation. A writable sticky directory is safe
+// only for an already-existing child whose ownership was independently
+// accepted; the nearest existing ancestor itself must never be writable by
+// group or other because the store creates entries inside it.
+func validateSignAttemptStoreTrustedAncestorChain(path string) error {
+	volumeRoot := filepath.Clean(filepath.VolumeName(path) + string(os.PathSeparator))
+	first := true
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil {
+			return fmt.Errorf("inspect sign attempt store trusted ancestor %q: %w", current, err)
+		}
+		isVolumeAlias := info.Mode()&os.ModeSymlink != 0 && filepath.Clean(filepath.Dir(current)) == volumeRoot
+		if !isVolumeAlias && !info.IsDir() {
+			return fmt.Errorf("sign attempt store trusted ancestor %q is not a directory", current)
+		}
+		if !signAttemptStoreTrustedOwner(info) {
+			return fmt.Errorf("sign attempt store ancestor %q is not owned by the current user or administrator", current)
+		}
+		if !isVolumeAlias && info.Mode().Perm()&0o022 != 0 {
+			if first || info.Mode()&os.ModeSticky == 0 {
+				return fmt.Errorf("sign attempt store ancestor %q permits untrusted path replacement", current)
+			}
+		}
+		if current == volumeRoot {
+			return nil
+		}
+		first = false
+		parent := filepath.Dir(current)
+		if parent == current {
+			return fmt.Errorf("sign attempt store path %q has no filesystem volume root", path)
+		}
+	}
+}
+
+// rejectSignAttemptStoreSymlinkAncestors rejects caller-controlled indirection
+// while permitting conventional aliases directly below a filesystem volume
+// root, such as macOS /var -> /private/var.
+func rejectSignAttemptStoreSymlinkAncestors(path string) error {
+	volumeRoot := filepath.Clean(filepath.VolumeName(path) + string(os.PathSeparator))
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		switch {
+		case err == nil:
+			if info.Mode()&os.ModeSymlink != 0 && filepath.Clean(filepath.Dir(current)) != volumeRoot {
+				return fmt.Errorf("sign attempt store ancestor is a symlink %q", current)
+			}
+		case errors.Is(err, fs.ErrNotExist):
+			// A missing suffix is created only after every existing ancestor is
+			// inspected and the trusted prefix is canonicalized.
+		default:
+			return fmt.Errorf("inspect sign attempt store ancestor %q: %w", current, err)
+		}
+		if current == volumeRoot {
+			return nil
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return fmt.Errorf("sign attempt store path %q has no filesystem volume root", path)
+		}
+	}
+}
+
+func validateSecureSignAttemptStoreDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect sign attempt store directory %q: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("sign attempt store path %q is not a real directory", path)
+	}
+	if err := os.Chmod(path, 0o700); err != nil { //nolint:gosec // directories intentionally require owner traversal
+		return fmt.Errorf("secure sign attempt store directory %q: %w", path, err)
+	}
+	info, err = os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("reinspect sign attempt store directory %q after chmod: %w", path, err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		return fmt.Errorf("unsafe sign attempt store directory permissions on %q: %04o, want 0700", path, info.Mode().Perm())
+	}
+	return nil
+}
+
 func loadOrCreateSignAttemptStoreSalt(root string) ([]byte, error) {
 	path := filepath.Join(root, signAttemptStoreSaltFile)
+	if info, statErr := os.Lstat(path); statErr == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return nil, errors.New("sign attempt store salt is not a regular file")
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			return nil, fmt.Errorf("unsafe sign attempt store salt permissions: %04o", info.Mode().Perm())
+		}
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return nil, fmt.Errorf("inspect sign attempt store salt: %w", statErr)
+	}
 	salt, err := os.ReadFile(path) //nolint:gosec // fixed store-local salt path under caller-selected root
 	if err == nil {
 		if len(salt) != signAttemptStoreSaltSize {

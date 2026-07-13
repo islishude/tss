@@ -363,7 +363,7 @@ func VerifyIdentificationFailure(evidence tss.BlameEvidence, record tss.Identifi
 		if err := certificate.UnmarshalBinary(record.BroadcastCertificate); err != nil {
 			return err
 		}
-		if err := certificate.VerifyFull(first, ctx.Parties, ctx.BroadcastACKVerifier); err != nil {
+		if err := certificate.VerifyFull(first, evidenceCertificateRecipients(evidence.Kind, ctx), ctx.BroadcastACKVerifier); err != nil {
 			return err
 		}
 	}

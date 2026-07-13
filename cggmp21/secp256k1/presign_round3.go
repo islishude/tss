@@ -109,12 +109,17 @@ func (s *PresignSession) buildAcceptPresignRound3Tx(env tss.Envelope) (*acceptPr
 	if _, ok := s.partyState(env.From); !ok {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errPresignSignerMissing)
 	}
-	owned = false
-	return &acceptPresignRound3Tx{
+	tx := &acceptPresignRound3Tx{
 		from:        env.From,
 		delta:       p.Delta,
 		verifyShare: material,
-	}, nil
+	}
+	owned = false
+	if err := tx.prepare(s); err != nil {
+		tx.cleanupOnReject()
+		return nil, err
+	}
+	return tx, nil
 }
 
 func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRound3Payload) (signVerifyShare, error) {
@@ -241,9 +246,20 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		return nil, nil
 	}
 	defer prepared.destroy()
+	terminal, terminalReady, err := s.preparePresignCompletionWithStagedLocalRound3(prepared)
+	if err != nil {
+		return nil, err
+	}
+	if terminalReady {
+		defer terminal.destroy()
+	}
 	effects, err := s.commitPresignRound3Output(prepared)
 	if err != nil {
 		return nil, err
+	}
+	if terminalReady {
+		terminalEffects := s.commitPresignCompletionEffects(terminal)
+		effects.envelopes = append(effects.envelopes, terminalEffects.envelopes...)
 	}
 	return effects.envelopes, nil
 }
@@ -1097,28 +1113,89 @@ func (s *PresignSession) commitPresignRound3Output(p *preparedPresignRound3Outpu
 	s.round3Sent = true
 	s.presign = p.presign
 	p.committed = true
-	identificationOut, err := s.tryComplete()
-	if err != nil {
-		return sessionEffects{}, err
-	}
-	return sessionEffects{envelopes: append([]tss.Envelope{p.env}, identificationOut...)}, nil
+	return sessionEffects{envelopes: []tss.Envelope{p.env}}, nil
 }
 
-func (s *PresignSession) tryComplete() ([]tss.Envelope, error) {
-	prepared, ok, err := s.maybePreparePresignCompletion()
-	if err != nil {
-		var alert *presignAggregateAlertError
-		if errors.As(err, &alert) {
-			return s.startPresignIdentification(alert.err)
+type preparedPresignCompletionEffects struct {
+	completion     *preparedPresignCompletion
+	identification *preparedPresignIdentification
+}
+
+func (p *preparedPresignCompletionEffects) destroy() {
+	if p == nil {
+		return
+	}
+	if p.completion != nil {
+		p.completion.destroy()
+	}
+	if p.identification != nil {
+		p.identification.destroy()
+	}
+}
+
+func (s *PresignSession) preparePresignCompletionEffects() (*preparedPresignCompletionEffects, bool, error) {
+	completion, ok, err := s.maybePreparePresignCompletion()
+	if err == nil {
+		if !ok {
+			return nil, false, nil
 		}
-		return nil, err
+		return &preparedPresignCompletionEffects{completion: completion}, true, nil
+	}
+	var alert *presignAggregateAlertError
+	if !errors.As(err, &alert) {
+		return nil, false, err
+	}
+	identification, ready, prepareErr := s.preparePresignIdentification(alert.err)
+	if prepareErr != nil {
+		return nil, false, prepareErr
+	}
+	if !ready {
+		return nil, false, nil
+	}
+	return &preparedPresignCompletionEffects{identification: identification}, true, nil
+}
+
+func (s *PresignSession) commitPresignCompletionEffects(p *preparedPresignCompletionEffects) sessionEffects {
+	if p == nil {
+		return sessionEffects{}
+	}
+	if p.completion != nil {
+		s.commitPresignCompletion(p.completion)
+		return sessionEffects{}
+	}
+	return s.commitPresignIdentification(p.identification)
+}
+
+func (s *PresignSession) preparePresignCompletionWithStagedLocalRound3(p *preparedPresignRound3Output) (*preparedPresignCompletionEffects, bool, error) {
+	if p == nil {
+		return nil, false, errors.New("nil prepared local presign round3 output")
+	}
+	selfState, ok := s.partyState(s.key.state.Party)
+	if !ok {
+		return nil, false, errors.New("missing local presign party state")
+	}
+	previousRound3 := selfState.round3
+	previousSent := s.round3Sent
+	previousPresign := s.presign
+	selfState.round3 = presignRound3State{
+		delta:           p.delta,
+		verifyShare:     p.verifyShare,
+		haveDelta:       true,
+		haveVerifyShare: true,
+	}
+	s.round3Sent = true
+	s.presign = p.presign
+	prepared, ok, err := s.preparePresignCompletionEffects()
+	selfState.round3 = previousRound3
+	s.round3Sent = previousSent
+	s.presign = previousPresign
+	if err != nil {
+		return nil, false, err
 	}
 	if !ok {
-		return nil, nil
+		return nil, false, nil
 	}
-	defer prepared.destroy()
-	s.commitPresignCompletion(prepared)
-	return nil, nil
+	return prepared, true, nil
 }
 
 type preparedPresignCompletion struct {

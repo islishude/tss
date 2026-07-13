@@ -213,7 +213,7 @@ func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx
 		if err := certificate.UnmarshalBinary(record.BroadcastCertificate); err != nil {
 			return err
 		}
-		if err := certificate.VerifyFull(first, ctx.Parties, ctx.BroadcastACKVerifier); err != nil {
+		if err := certificate.VerifyFull(first, evidenceCertificateRecipients(evidence.Kind, ctx), ctx.BroadcastACKVerifier); err != nil {
 			return err
 		}
 	}
@@ -230,6 +230,16 @@ func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx
 		return err
 	}
 	return nil
+}
+
+// evidenceCertificateRecipients keeps the full key committee in the public
+// evidence context while validating signer-scoped broadcasts against the exact
+// signer set that was authorized to receive them.
+func evidenceCertificateRecipients(kind tss.EvidenceKind, ctx EvidenceContext) tss.PartySet {
+	if isSignerScopedEvidence(kind) {
+		return ctx.Signers
+	}
+	return ctx.Parties
 }
 
 func identificationProofEvidenceField(env tss.Envelope, failureClass string, statement, protocolAlert, keygenTranscript, presignTranscript []byte) (tss.EvidenceField, error) {

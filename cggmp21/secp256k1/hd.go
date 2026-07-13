@@ -57,6 +57,9 @@ func (x ExtendedPublicKey) Validate() error {
 	if len(x.ChainCode) != bip32util.ChainCodeSize {
 		return fmt.Errorf("%w: chain code must be %d bytes", tss.ErrInvalidExtendedPublicKey, bip32util.ChainCodeSize)
 	}
+	if x.Depth == 0 && (x.ParentFingerprint != [4]byte{} || x.ChildNumber != 0) {
+		return fmt.Errorf("%w: master key must have zero parent fingerprint and child number", tss.ErrInvalidExtendedPublicKey)
+	}
 	return nil
 }
 

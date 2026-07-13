@@ -174,6 +174,38 @@ func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
 	}
 }
 
+func TestCGGMP21KeyShareValidationBindsPublicPolynomial(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
+
+	t.Run("public key equals constant commitment", func(t *testing.T) {
+		mutated := cloneKeyShareValue(shares[1])
+		mutated.state.PublicKey = bytes.Clone(mutated.state.PartyData[2].VerificationShare)
+		if err := mutated.validateWithoutConfirmations(testLimits()); err == nil {
+			t.Fatal("key share accepted a public key different from commitment zero")
+		}
+	})
+
+	t.Run("verification shares equal commitment evaluations", func(t *testing.T) {
+		mutated := cloneKeyShareValue(shares[1])
+		data := mutated.state.PartyData[2]
+		data.VerificationShare = bytes.Clone(mutated.state.PartyData[1].VerificationShare)
+		mutated.state.PartyData[2] = data
+		if err := mutated.validateWithoutConfirmations(testLimits()); err == nil {
+			t.Fatal("key share accepted a verification share unrelated to the commitments")
+		}
+	})
+}
+
+func TestCGGMP21KeyShareValidationBindsAggregateChainCode(t *testing.T) {
+	t.Parallel()
+	share := cloneKeyShareValue(CachedKeygenShares(t, 2, 3)[1])
+	share.state.ChainCode[0] ^= 1
+	if err := share.ValidateWithLimits(testLimits()); err == nil {
+		t.Fatal("key share accepted a chain code different from the confirmation XOR")
+	}
+}
+
 func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)

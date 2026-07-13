@@ -20,6 +20,10 @@ implementation.
   when protocol material currently generates them together.
 - Integer responses use canonical signed-magnitude encoding; verifier range
   checks precede all algebraic equation checks.
+- MtA decryption decodes the Paillier plaintext with the centered representative
+  (`m` for `m <= N/2`, otherwise `m-N`) before reduction modulo the secp256k1
+  order. This preserves negative affine masks proved by Πaff-g; unsigned
+  reduction modulo `N` is not equivalent.
 - All proofs use Ring-Pedersen commitments to hide integer witnesses.
   Commitment nonces are sampled from the configured <code>SecurityParams</code> ranges.
 - Witness scalars and Paillier randomness use fixed-width `secret.Scalar`;

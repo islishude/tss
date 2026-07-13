@@ -204,9 +204,6 @@ func destroyPresignSigmaOpeningRecords(records []presignSigmaOpeningRecord) {
 }
 
 func validatePresignSigmaOpeningRecords(records []presignSigmaOpeningRecord, signers tss.PartySet) error {
-	if len(records) == 0 {
-		return nil
-	}
 	if len(records) != len(signers)-1 {
 		return errors.New("presign sigma opening record count mismatch")
 	}
@@ -229,9 +226,123 @@ func validatePresignSigmaOpeningRecords(records []presignSigmaOpeningRecord, sig
 	return nil
 }
 
+// activatePresignSigmaOpeningRecords creates short-lived or attempt-owned
+// witness handles after the persisted public/private bindings have been
+// validated. Each resumed session owns an independent copy so destroying one
+// idempotent session cannot invalidate another session for the same exact
+// attempt.
+func activatePresignSigmaOpeningRecords(presign *Presign) ([]presignSigmaOpening, error) {
+	if presign == nil || presign.state == nil {
+		return nil, errors.New("nil presign")
+	}
+	records := presign.state.SigmaOpeningRecords
+	if err := validatePresignSigmaOpeningRecords(records, presign.state.Signers); err != nil {
+		return nil, err
+	}
+	transcriptValue, ok := presignIdentificationTranscriptFor(presign, presign.state.Party)
+	if !ok {
+		return nil, errors.New("missing local sigma identification transcript")
+	}
+	localEntry, ok := presignVerificationEntryFor(presign, presign.state.Party)
+	if !ok {
+		return nil, errors.New("missing local sigma verification entry")
+	}
+	localXBar, err := secp.PointBytes(localEntry.XBarPoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid local sigma XBar commitment: %w", err)
+	}
+	openings := make([]presignSigmaOpening, 0, len(records))
+	for i := range records {
+		contribution, ok := mtaContributionFor(transcriptValue.Contributions, records[i].Peer)
+		if !ok || !sameSigmaResponse(records[i].Response, contribution.Outbound) {
+			destroyPresignSigmaOpenings(openings)
+			return nil, fmt.Errorf("presign sigma opening response mismatch for peer %d", records[i].Peer)
+		}
+		opening := new(mta.ResponseOpening)
+		if err := opening.UnmarshalPrivateBinary(records[i].Opening); err != nil {
+			destroyPresignSigmaOpenings(openings)
+			return nil, fmt.Errorf("activate private presign sigma opening: %w", err)
+		}
+		peerEntry, ok := presignVerificationEntryFor(presign, records[i].Peer)
+		if !ok {
+			opening.Destroy()
+			destroyPresignSigmaOpenings(openings)
+			return nil, fmt.Errorf("missing sigma verification entry for peer %d", records[i].Peer)
+		}
+		if err := opening.Verify(
+			presign.state.SecurityParams,
+			mta.StartMessage{Ciphertext: peerEntry.EncK},
+			records[i].Response,
+			peerEntry.KPoint,
+			localXBar,
+			peerEntry.PaillierPublicKey,
+			localEntry.PaillierPublicKey,
+		); err != nil {
+			opening.Destroy()
+			destroyPresignSigmaOpenings(openings)
+			return nil, fmt.Errorf("invalid presign sigma opening for peer %d: %w", records[i].Peer, err)
+		}
+		openings = append(openings, presignSigmaOpening{
+			Peer: records[i].Peer, Response: records[i].Response.Clone(), Opening: opening,
+		})
+	}
+	return openings, nil
+}
+
+// verifyPresignSigmaOpeningRecords validates the exact local witness set and
+// its public response bindings without retaining reusable opening handles.
+func verifyPresignSigmaOpeningRecords(presign *Presign) error {
+	openings, err := activatePresignSigmaOpeningRecords(presign)
+	if err != nil {
+		return err
+	}
+	destroyPresignSigmaOpenings(openings)
+	return nil
+}
+
 type presignIdentificationTranscript struct {
 	Party         tss.PartyID              `wire:"1,u32"`
 	Contributions []presignMTAContribution `wire:"2,recordlist,max_items=signers"`
+}
+
+func validatePresignIdentificationTranscripts(transcripts []presignIdentificationTranscript, signers tss.PartySet) error {
+	if len(transcripts) != len(signers) {
+		return fmt.Errorf("presign identification transcript count %d != signers %d", len(transcripts), len(signers))
+	}
+	for i := range transcripts {
+		value := &transcripts[i]
+		if value.Party != signers[i] {
+			return fmt.Errorf("presign identification party %d out of canonical signer order at index %d", value.Party, i)
+		}
+		if len(value.Contributions) != len(signers)-1 {
+			return fmt.Errorf("presign identification contribution count for party %d is %d, want %d", value.Party, len(value.Contributions), len(signers)-1)
+		}
+		index := 0
+		for _, peer := range signers {
+			if peer == value.Party {
+				continue
+			}
+			contribution := &value.Contributions[index]
+			index++
+			if contribution.Peer != peer {
+				return fmt.Errorf("presign identification peer %d for party %d is out of canonical signer order", contribution.Peer, value.Party)
+			}
+			for _, response := range []struct {
+				name  string
+				value mta.ResponseMessage
+			}{
+				{name: "inbound sigma", value: contribution.Inbound},
+				{name: "outbound sigma", value: contribution.Outbound},
+				{name: "inbound delta", value: contribution.InboundDelta},
+				{name: "outbound delta", value: contribution.OutboundDelta},
+			} {
+				if err := response.value.Validate(); err != nil {
+					return fmt.Errorf("invalid %s identification response for party %d and peer %d: %w", response.name, value.Party, peer, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (t *presignIdentificationTranscript) destroy() {
@@ -457,6 +568,9 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	}
 	if err := validatePresignVerificationContext(p.state.Signers, p.state.Verification, limits); err != nil {
 		return fmt.Errorf("invalid presign verification context: %w", err)
+	}
+	if err := validatePresignIdentificationTranscripts(p.state.IdentificationTranscripts, p.state.Signers); err != nil {
+		return err
 	}
 	if err := validatePresignSigmaOpeningRecords(p.state.SigmaOpeningRecords, p.state.Signers); err != nil {
 		return err
@@ -782,6 +896,7 @@ type SignSession struct {
 	identifying            bool // Conditional signing identification round is active.
 	identificationAlert    []byte
 	identificationPayloads map[tss.PartyID]signIdentificationPayload
+	sigmaOpenings          []presignSigmaOpening   // Attempt-owned online identification witnesses.
 	aborted                bool                    // Terminal failure/destruction flag.
 	signature              *Signature              // Final aggregated signature, cleared by Destroy.
 	attempt                SignAttemptRecord       // Durable one-use attempt/outbox record.
@@ -812,15 +927,13 @@ func (s *SignSession) abort() {
 }
 
 func (s *SignSession) destroyOnlineIdentificationOpenings() {
-	if s == nil || s.presign == nil || s.presign.state == nil {
+	if s == nil {
 		return
 	}
-	for i := range s.presign.state.sigmaOpenings {
-		s.presign.state.sigmaOpenings[i].destroy()
+	for i := range s.sigmaOpenings {
+		s.sigmaOpenings[i].destroy()
 	}
-	s.presign.state.sigmaOpenings = nil
-	destroyPresignSigmaOpeningRecords(s.presign.state.SigmaOpeningRecords)
-	s.presign.state.SigmaOpeningRecords = nil
+	s.sigmaOpenings = nil
 }
 
 type presignRound1Payload struct {
@@ -958,10 +1071,12 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("presign identification is not active"))
 	}
-	if err := s.validateInbound(env); err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
-		}
+	// Authenticate the envelope and enforce its delivery policy before decoding
+	// or inspecting protocol readiness, but do not reserve the replay slot yet.
+	// Each transition builder stages every fallible next-round effect first; the
+	// exact replay slot is committed only immediately before the infallible state
+	// commit below.
+	if err := tss.ValidateInboundWithoutReplay(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.signers, s.key.state.Party); err != nil {
 		return nil, err
 	}
 	if !tss.ContainsParty(s.signers, base.From) {
@@ -978,13 +1093,13 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 payload in wrong round"))
 		}
 		if st.round1.havePayload {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1"))
+			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round1"))
 		}
 		tx, err := s.buildAcceptPresignRound1PayloadTx(base)
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, tx)
+		return applyPresignTransition(s, env, tx)
 
 	case payloadPresignRound1Proof:
 		if base.Round != presignStartRound {
@@ -994,57 +1109,83 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("self presign round1 proof is not expected"))
 		}
 		if st.round1.haveProof {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1 proof"))
+			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round1 proof"))
 		}
 		tx, err := s.buildAcceptPresignRound1ProofTx(base)
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, tx)
+		return applyPresignTransition(s, env, tx)
 
 	case payloadPresignRound2:
 		if base.Round != presignRound2 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round2 payload in wrong round"))
 		}
 		if st.round2.havePayload {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round2"))
+			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round2"))
+		}
+		if err := s.validatePresignInboundReadiness(base); err != nil {
+			return nil, err
 		}
 		tx, err := s.buildAcceptPresignRound2Tx(base)
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, tx)
+		return applyPresignTransition(s, env, tx)
 
 	case payloadPresignRound3:
 		if base.Round != presignRound3 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round3 payload in wrong round"))
 		}
 		if st.round3.haveDelta {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate delta share"))
+			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate delta share"))
+		}
+		if err := s.validatePresignInboundReadiness(base); err != nil {
+			return nil, err
 		}
 		tx, err := s.buildAcceptPresignRound3Tx(base)
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, tx)
+		return applyPresignTransition(s, env, tx)
 
 	case payloadPresignIdentification:
 		if base.Round != presignIdentificationRound {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("presign identification payload in wrong round"))
 		}
+		if _, exists := s.identificationPayloads[base.From]; exists {
+			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign identification payload"))
+		}
 		tx, err := s.buildAcceptPresignIdentificationTx(base)
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, tx)
+		return applyPresignTransition(s, env, tx)
 
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
 }
 
-func applyPresignTransition(s *PresignSession, tx sessionTransition[PresignSession]) ([]tss.Envelope, error) {
+func (s *PresignSession) rejectAcceptedPresignDuplicate(env tss.InboundEnvelope, cause error) ([]tss.Envelope, error) {
+	base := env.Envelope()
+	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
+		return nil, err
+	}
+	return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, cause)
+}
+
+func applyPresignTransition(s *PresignSession, env tss.InboundEnvelope, tx sessionTransition[PresignSession]) ([]tss.Envelope, error) {
 	defer tx.cleanupOnReject()
+	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
+		return nil, err
+	}
 	effects, err := tx.apply(s)
 	if err != nil {
 		return nil, err

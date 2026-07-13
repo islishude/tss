@@ -14,6 +14,8 @@ func (s *KeygenSession) Destroy() {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.abort()
 	if s.keyShare != nil {
 		s.keyShare.Destroy()

@@ -229,6 +229,189 @@ func (o *ResponseOpening) Destroy() {
 	*o = ResponseOpening{}
 }
 
+// Verify checks that the private opening is an in-range AffG witness for the
+// exact public MtA response and curve commitments. It reveals no witness
+// material and uses the constant-time Paillier path for the secret multiplier
+// x.
+func (o *ResponseOpening) Verify(params zkpai.SecurityParams, start StartMessage, response ResponseMessage, aCommitment, bCommitment []byte, pkA, pkB *pai.PublicKey) error {
+	if o == nil || o.x == nil || o.y == nil || o.rho == nil || o.rhoY == nil ||
+		o.x.FixedLen() == 0 || o.y.FixedLen() == 0 || o.rho.FixedLen() == 0 || o.rhoY.FixedLen() == 0 {
+		return errors.New("destroyed MtA response opening")
+	}
+	if err := params.Validate(); err != nil {
+		return fmt.Errorf("invalid MtA response opening security parameters: %w", err)
+	}
+	if pkA == nil || pkB == nil {
+		return errors.New("nil Paillier public key")
+	}
+	if err := pkA.Validate(); err != nil {
+		return fmt.Errorf("invalid initiator Paillier public key: %w", err)
+	}
+	if err := pkB.Validate(); err != nil {
+		return fmt.Errorf("invalid responder Paillier public key: %w", err)
+	}
+	if err := params.CheckPaillierModulus(pkA); err != nil {
+		return fmt.Errorf("invalid initiator Paillier modulus: %w", err)
+	}
+	if err := params.CheckPaillierModulus(pkB); err != nil {
+		return fmt.Errorf("invalid responder Paillier modulus: %w", err)
+	}
+	if o.x.FixedLen() != secp.ScalarSize || o.y.FixedLen() != int((params.EllPrime+8)/8) {
+		return errors.New("MtA response opening witness has invalid width")
+	}
+	xEncoded := o.x.FixedBytes()
+	xValue := new(big.Int).SetBytes(xEncoded)
+	clear(xEncoded)
+	defer secret.ClearBigInt(xValue)
+	if !zkpai.InUnsignedPowerOfTwo(xValue, params.Ell) {
+		return errors.New("MtA response opening x is out of range")
+	}
+	yValue, err := responseOpeningSignedValue(o.y)
+	if err != nil {
+		return errors.New("invalid MtA response opening y")
+	}
+	defer secret.ClearBigInt(yValue)
+	if !zkpai.InSignedPowerOfTwo(yValue, params.EllPrime) {
+		return errors.New("MtA response opening y is out of range")
+	}
+	if err := start.Validate(); err != nil {
+		return err
+	}
+	if err := response.Validate(); err != nil {
+		return err
+	}
+
+	startCiphertext := new(big.Int).SetBytes(start.Ciphertext)
+	responseCiphertext := new(big.Int).SetBytes(response.Ciphertext)
+	if err := pkA.ValidateCiphertext(startCiphertext); err != nil {
+		return fmt.Errorf("invalid MtA start ciphertext: %w", err)
+	}
+	if err := pkA.ValidateCiphertext(responseCiphertext); err != nil {
+		return fmt.Errorf("invalid MtA response ciphertext: %w", err)
+	}
+	if err := pkB.ValidateCiphertext(response.Proof.Y); err != nil {
+		return fmt.Errorf("invalid MtA response Y ciphertext: %w", err)
+	}
+	if err := validateResponseOpeningRandomness(o.rho, pkA, "rho"); err != nil {
+		return err
+	}
+	if err := validateResponseOpeningRandomness(o.rhoY, pkB, "rhoY"); err != nil {
+		return err
+	}
+
+	aPoint, err := secp.PointFromBytes(aCommitment)
+	if err != nil {
+		return fmt.Errorf("invalid a commitment: %w", err)
+	}
+	bPoint, err := secp.PointFromBytes(bCommitment)
+	if err != nil {
+		return fmt.Errorf("invalid b commitment: %w", err)
+	}
+	xScalar, err := secpScalarFromSecret(o.x)
+	if err != nil {
+		return errors.New("invalid MtA response opening x")
+	}
+	if !secp.Equal(secp.ScalarBaseMult(xScalar), bPoint) {
+		return errors.New("MtA response opening x does not open b commitment")
+	}
+	yScalar, err := signedSecretScalarModOrder(o.y)
+	if err != nil {
+		return errors.New("invalid MtA response opening y")
+	}
+	expectedYPoint := secp.ScalarBaseMult(yScalar)
+	proofYPoint, err := responseOpeningProofPoint(response.Proof.YPoint)
+	if err != nil {
+		return fmt.Errorf("invalid MtA response proof YPoint: %w", err)
+	}
+	if !secp.Equal(expectedYPoint, proofYPoint) {
+		return errors.New("MtA response opening y does not open proof YPoint")
+	}
+	proofAlphaPoint, err := responseOpeningProofPoint(response.Proof.AlphaPoint)
+	if err != nil {
+		return fmt.Errorf("invalid MtA response proof AlphaPoint: %w", err)
+	}
+	expectedAlphaPoint := secp.Add(secp.ScalarMult(aPoint, xScalar), expectedYPoint)
+	if !secp.Equal(expectedAlphaPoint, proofAlphaPoint) {
+		return errors.New("MtA response opening does not open proof AlphaPoint")
+	}
+
+	xBytes := o.x.FixedBytes()
+	xSigned, err := secret.NewSignedInt(false, xBytes, len(xBytes))
+	clear(xBytes)
+	if err != nil {
+		return errors.New("invalid MtA response opening x")
+	}
+	defer xSigned.Destroy()
+	xMulStart, err := zkpai.OMulCT(pkA, xSigned, startCiphertext, xSigned.FixedLen())
+	if err != nil {
+		return fmt.Errorf("verify MtA response ciphertext multiplier: %w", err)
+	}
+	defer secret.ClearBigInt(xMulStart)
+	encY, err := pkA.EncryptSignedWithSecretRandomness(o.y, o.rho)
+	if err != nil {
+		return fmt.Errorf("verify MtA response ciphertext mask: %w", err)
+	}
+	defer secret.ClearBigInt(encY)
+	expectedResponse, err := pkA.AddCiphertexts(xMulStart, encY)
+	if err != nil {
+		return fmt.Errorf("verify MtA response ciphertext: %w", err)
+	}
+	defer secret.ClearBigInt(expectedResponse)
+	if expectedResponse.Cmp(responseCiphertext) != 0 {
+		return errors.New("MtA response opening does not reproduce response ciphertext")
+	}
+	expectedProofY, err := pkB.EncryptSignedWithSecretRandomness(o.y, o.rhoY)
+	if err != nil {
+		return fmt.Errorf("verify MtA response Y ciphertext: %w", err)
+	}
+	defer secret.ClearBigInt(expectedProofY)
+	if expectedProofY.Cmp(response.Proof.Y) != 0 {
+		return errors.New("MtA response opening does not reproduce proof Y ciphertext")
+	}
+	return nil
+}
+
+func responseOpeningSignedValue(value *secret.SignedInt) (*big.Int, error) {
+	if value == nil || value.FixedLen() == 0 {
+		return nil, errors.New("destroyed signed opening value")
+	}
+	magnitude := value.FixedMagnitude()
+	defer clear(magnitude)
+	out := new(big.Int).SetBytes(magnitude)
+	negative, err := value.SelectBySign([]byte{0}, []byte{1})
+	if err != nil {
+		secret.ClearBigInt(out)
+		return nil, err
+	}
+	defer clear(negative)
+	if negative[0] == 1 {
+		out.Neg(out)
+	}
+	return out, nil
+}
+
+func validateResponseOpeningRandomness(randomness *secret.Scalar, pk *pai.PublicKey, name string) error {
+	nLen := (pk.N.BitLen() + 7) / 8
+	if randomness == nil || randomness.FixedLen() != nLen {
+		return fmt.Errorf("MtA response opening %s has invalid width", name)
+	}
+	encoded := randomness.FixedBytes()
+	defer clear(encoded)
+	value := new(big.Int).SetBytes(encoded)
+	defer secret.ClearBigInt(value)
+	if !zkpai.IsZNStar(value, pk.N) {
+		return fmt.Errorf("MtA response opening %s is not canonical Paillier randomness", name)
+	}
+	return nil
+}
+
+func responseOpeningProofPoint(encoded []byte) (*secp.Point, error) {
+	if len(encoded) == 0 {
+		return secp.NewInfinity(), nil
+	}
+	return secp.PointFromBytes(encoded)
+}
+
 // Reprove creates a fresh verifier-specific Πaff-g proof for the exact public
 // response bound to this opening.
 func (o *ResponseOpening) Reprove(params zkpai.SecurityParams, reader io.Reader, domain []byte, start StartMessage, response ResponseMessage, aCommitment, bCommitment []byte, pkA, pkB *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*zkpai.AffGProof, error) {

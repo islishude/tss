@@ -103,11 +103,23 @@ func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err
 			s.abort()
 		}
 	}()
-	if err := s.validateInbound(env); err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
-		}
+	if err := tss.ValidateInboundWithoutReplay(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self); err != nil {
 		return nil, err
+	}
+	if base.PayloadType == payloadKeygenShare && base.Round == keygenShareRound {
+		slot, slotErr := s.round1.slot(base.From)
+		if slotErr == nil && slot.commitments == nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("encrypted keygen share arrived before dealer commitments"))
+		}
+	}
+	if s.hasAcceptedInbound(base) {
+		if err := s.validateInbound(env); err != nil {
+			if errors.Is(err, tss.ErrDuplicateMessage) {
+				return nil, tss.ErrDuplicateMessage
+			}
+			return nil, err
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("keygen message slot is already accepted"))
 	}
 
 	var tx sessionTransition[KeygenSession]
@@ -136,10 +148,53 @@ func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err
 		return nil, err
 	}
 	defer tx.cleanupOnReject()
-	effects, err := tx.apply(s)
+	staged := s.cloneForInboundTransition()
+	liveLog := staged.cfg.Log
+	stagedLog := new(stagedLifecycleLogger)
+	staged.cfg.Log = stagedLog
+	defer stagedLog.discard()
+	stagedOwned := true
+	defer func() {
+		if stagedOwned {
+			staged.abort()
+		}
+	}()
+	effects, err := tx.apply(staged)
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
+		return nil, err
+	}
+	staged.cfg.Log = liveLog
+	s.commitInboundTransition(staged)
+	stagedOwned = false
 	tx.markCommitted()
+	stagedLog.flush(s.cfg.Logger())
 	return effects.envelopes, nil
+}
+
+func (s *KeygenSession) hasAcceptedInbound(env tss.Envelope) bool {
+	if s == nil {
+		return false
+	}
+	switch env.PayloadType {
+	case payloadKeygenCommitments:
+		slot, err := s.round1.slot(env.From)
+		return err == nil && slot.commitments != nil
+	case payloadKeygenShare:
+		slot, err := s.round1.slot(env.From)
+		return err == nil && slot.share != nil
+	case payloadKeygenConfirmation:
+		if s.pendingConfirmations[env.From] != nil {
+			return true
+		}
+		_, ok, err := s.confirmations.confirmation(env.From)
+		return err == nil && ok
+	default:
+		return false
+	}
 }

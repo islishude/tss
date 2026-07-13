@@ -275,12 +275,79 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 			s.abort()
 		}
 	}()
+	if err := tss.ValidateInboundWithoutReplay(s.guard, in, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self); err != nil {
+		return nil, err
+	}
+	if env.PayloadType == payloadRefreshShare && env.Round == refreshShareRound {
+		pd, pdErr := s.partyEntry(env.From)
+		if pdErr == nil && pd.commitments == nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh share arrived before commitments"))
+		}
+	}
+	if s.hasAcceptedInbound(env) {
+		if err := s.validateInbound(in); err != nil {
+			if errors.Is(err, tss.ErrDuplicateMessage) {
+				return nil, tss.ErrDuplicateMessage
+			}
+			return nil, err
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("refresh message slot is already accepted"))
+	}
+	staged := s.cloneForInboundTransition()
+	liveConfigLog := staged.cfg.Log
+	liveLog := staged.log
+	stagedLog := new(stagedLifecycleLogger)
+	staged.cfg.Log = stagedLog
+	staged.log = stagedLog
+	defer stagedLog.discard()
+	stagedOwned := true
+	defer func() {
+		if stagedOwned {
+			staged.abort()
+		}
+	}()
+	out, err = staged.applyValidatedInbound(env)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.validateInbound(in); err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}
 		return nil, err
 	}
+	staged.cfg.Log = liveConfigLog
+	staged.log = liveLog
+	s.commitInboundTransition(staged)
+	stagedOwned = false
+	stagedLog.flush(s.log)
+	return out, nil
+}
+
+func (s *RefreshSession) hasAcceptedInbound(env tss.Envelope) bool {
+	if s == nil {
+		return false
+	}
+	pd, err := s.partyEntry(env.From)
+	if err != nil || pd == nil {
+		return false
+	}
+	switch env.PayloadType {
+	case payloadRefreshCommitments:
+		return pd.commitments != nil
+	case payloadRefreshShare:
+		return pd.share != nil
+	case payloadKeygenConfirmation:
+		return pd.confirmation != nil
+	default:
+		return false
+	}
+}
+
+// applyValidatedInbound performs protocol verification, transition staging,
+// and outbound construction on an independently owned session copy. The live
+// handler commits replay and swaps this state only after this method succeeds.
+func (s *RefreshSession) applyValidatedInbound(env tss.Envelope) ([]tss.Envelope, error) {
 	if env.PayloadType == payloadKeygenConfirmation {
 		return s.handleRefreshConfirmation(env)
 	}

@@ -4,8 +4,10 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"testing"
 
@@ -41,11 +43,11 @@ func TestThresholdECDSAOnlineIdentificationInvariantFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, session := range []*SignSession{s1, s2} {
-		got := len(session.presign.state.sigmaOpenings)
+		got := len(session.sigmaOpenings)
 		if got != len(signers)-1 {
 			t.Fatalf("sign session %d retained %d sigma openings, want %d", session.key.state.Party, got, len(signers)-1)
 		}
-		if session.presign.state.sigmaOpenings[0].Opening == nil {
+		if session.sigmaOpenings[0].Opening == nil {
 			t.Fatalf("sign session %d retained destroyed sigma opening", session.key.state.Party)
 		}
 	}
@@ -132,8 +134,11 @@ func TestThresholdECDSAOnlineIdentificationInvariantFallback(t *testing.T) {
 	if s1.Identifying() || !s1.aborted {
 		t.Fatal("all-valid sign identification fallback did not enter terminal state")
 	}
-	if len(presigns[1].state.sigmaOpenings) != 0 || len(presigns[1].state.SigmaOpeningRecords) != 0 {
-		t.Fatal("all-valid sign identification fallback retained sigma openings")
+	if len(s1.sigmaOpenings) != 0 {
+		t.Fatal("all-valid sign identification fallback retained attempt-owned sigma openings")
+	}
+	if len(presigns[1].state.SigmaOpeningRecords) != 1 {
+		t.Fatal("sign session mutated caller-owned presign witness records")
 	}
 }
 
@@ -166,6 +171,94 @@ func TestThresholdECDSAPresignPersistsSigmaOpeningsWithoutRestoringReuse(t *test
 	}
 	if !IsPresignConsumed(&restored) {
 		t.Fatal("restored presign was reusable")
+	}
+	corrupted, err := tss.DecodeBinary[Presign](raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer corrupted.Destroy()
+	response := &corrupted.state.SigmaOpeningRecords[0].Response
+	response.Ciphertext[len(response.Ciphertext)-1] ^= 1
+	if openings, err := activatePresignSigmaOpeningRecords(corrupted); err == nil {
+		destroyPresignSigmaOpenings(openings)
+		t.Fatal("activated a sigma witness whose response did not match the public transcript")
+	}
+}
+
+func TestThresholdECDSAExactAttemptSessionsOwnIdentificationWitnesses(t *testing.T) {
+	t.Parallel()
+	shares := identificationKeyShares(t)
+	signers := tss.NewPartySet(1, 2)
+	presigns := identificationPresigns(t, shares, signers)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("exact attempt witness ownership"))
+	store := newTestSignAttemptStore()
+	first, _, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := presigns[1].MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Presign
+	if err := restored.UnmarshalBinaryWithLimits(raw, testLimits()); err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Destroy()
+	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
+	resumed, _, err := ResumeSignWithLimits(context.Background(), shares[1], &restored, store, guard, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []*SignSession{first, second, resumed} {
+		if len(session.sigmaOpenings) != len(signers)-1 || session.sigmaOpenings[0].Opening == nil {
+			t.Fatal("exact-attempt session omitted its owned sigma identification witness")
+		}
+	}
+
+	first.Destroy()
+	if len(first.sigmaOpenings) != 0 {
+		t.Fatal("destroyed session retained its owned sigma witness")
+	}
+	if len(second.sigmaOpenings) != 1 || second.sigmaOpenings[0].Opening == nil ||
+		len(resumed.sigmaOpenings) != 1 || resumed.sigmaOpenings[0].Opening == nil {
+		t.Fatal("destroying one exact-attempt session invalidated another session")
+	}
+	if len(presigns[1].state.SigmaOpeningRecords) != 1 {
+		t.Fatal("destroying a session mutated the caller-owned presign")
+	}
+
+	_, peerOut, err := StartSignDigestWithStore(shares[2], presigns[2], sessionID, digest[:], newTestSignAttemptStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPublic, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarOne()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(wrongPublic, second.publicKey) {
+		wrongPublic, err = secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(2)))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, session := range []*SignSession{second, resumed} {
+		session.publicKey = bytes.Clone(wrongPublic)
+		out, err := session.Handle(testutil.DeliverEnvelope(peerOut[0]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != 1 || out[0].PayloadType != payloadSignIdentification || !session.Identifying() {
+			t.Fatal("exact-attempt session could not use its owned witness for identification")
+		}
 	}
 }
 

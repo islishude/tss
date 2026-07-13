@@ -3,10 +3,13 @@
 package mta
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // Tier 1: Finish error paths (needs crypto keygen).
@@ -135,5 +138,110 @@ func TestFinishMultipleValues(t *testing.T) {
 		if got.Cmp(want) != 0 {
 			t.Fatalf("a=%d b=%d: alpha+beta = %s mod q, want %s", p.a, p.b, got, want)
 		}
+	}
+}
+
+func TestFinishCenteredSignedPlaintextPreservesDeltaAndSigmaRelations(t *testing.T) {
+	t.Parallel()
+	skA, skB, rpA, _ := setupTestEnv(t)
+	params := testSecurityParams()
+
+	tests := []struct {
+		name   string
+		domain []byte
+		a      int64
+		b      int64
+		mask   int64
+	}{
+		{name: "delta", domain: []byte("negative-delta-response"), a: 3, b: 5, mask: 19},
+		{name: "sigma", domain: []byte("negative-sigma-response"), a: 7, b: 11, mask: 83},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			a := big.NewInt(tc.a)
+			b := big.NewInt(tc.b)
+			aSecret := testSecretScalar(t, a)
+			bSecret := testSecretScalar(t, b)
+			start, err := Start(nil, aSecret, skA.PublicKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			aCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(a)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			bPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(b))
+			bCommitment, err := secp.PointBytes(bPoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			maskBytes := big.NewInt(tc.mask).FillBytes(make([]byte, int((params.EllPrime+8)/8)))
+			mask, err := secret.NewSignedInt(true, maskBytes, len(maskBytes))
+			clear(maskBytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer mask.Destroy()
+			encMaskA, rho, err := skA.EncryptSignedSecret(nil, mask)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rho.Destroy()
+			product, err := skA.MulPlaintext(new(big.Int).SetBytes(start.Message.Ciphertext), b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			responseCiphertext, err := skA.AddCiphertexts(product, encMaskA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encMaskB, rhoY, err := skB.EncryptSignedSecret(nil, mask)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rhoY.Destroy()
+			aPoint, err := secp.PointFromBytes(aCommitment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			statement := zkpai.AffGStatement{
+				ReceiverPaillierN: skA.PublicKey,
+				ProverPaillierN:   skB.PublicKey,
+				C:                 new(big.Int).SetBytes(start.Message.Ciphertext),
+				D:                 responseCiphertext,
+				Y:                 encMaskB,
+				X:                 bPoint,
+				K:                 aPoint,
+				VerifierAux:       rpA,
+			}
+			proof, err := zkpai.ProveAffG(params, tc.domain, statement, zkpai.AffGWitness{
+				X: bSecret, Y: mask, Rho: rho, RhoY: rhoY,
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := ResponseMessage{Ciphertext: responseCiphertext.Bytes(), Proof: *proof}
+			alphaShare, err := Finish(params, tc.domain, start.Message, response, aCommitment, bCommitment, skA, skB.PublicKey, rpA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer alphaShare.Destroy()
+			maskScalar, err := signedSecretScalarModOrder(mask)
+			if err != nil {
+				t.Fatal(err)
+			}
+			betaShare := secp.ScalarNeg(maskScalar)
+			alphaScalar, err := secpScalarFromSecret(alphaShare)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := secp.ScalarAdd(alphaScalar, betaShare)
+			want := secp.ScalarMul(secp.ScalarFromBigInt(a), secp.ScalarFromBigInt(b))
+			if !bytes.Equal(got.Bytes(), want.Bytes()) {
+				t.Fatal("centered signed MtA shares did not preserve the product relation")
+			}
+		})
 	}
 }

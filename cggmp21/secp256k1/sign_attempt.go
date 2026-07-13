@@ -628,6 +628,33 @@ func validateSignAttemptDeliveryState(r SignAttemptRecord, env tss.Envelope) err
 	return nil
 }
 
+// validateSignAttemptDeliveryAuthentication replays ACK authentication at the
+// recovery boundary. Structural validation alone is insufficient for records
+// returned by caller-supplied durable stores.
+func validateSignAttemptDeliveryAuthentication(r SignAttemptRecord, verifier tss.BroadcastAckVerifier) error {
+	if len(r.DeliveryState.Acks) == 0 && r.DeliveryState.Certificate == nil {
+		return nil
+	}
+	if verifier == nil {
+		return fmt.Errorf("%w: delivery authentication: %w", ErrSignAttemptCorrupt, tss.ErrMissingAckVerifier)
+	}
+	env, _, err := decodeSignAttemptEnvelope(r.CanonicalBaseEnvelopeBytes)
+	if err != nil {
+		return fmt.Errorf("%w: delivery authentication envelope: %w", ErrSignAttemptCorrupt, err)
+	}
+	for _, ack := range r.DeliveryState.Acks {
+		if err := tss.VerifyBroadcastAck(env, ack, verifier); err != nil {
+			return fmt.Errorf("%w: delivery ack authentication: %w: %w", ErrSignAttemptCorrupt, tss.ErrInvalidBroadcastCertificate, err)
+		}
+	}
+	if r.DeliveryState.Certificate != nil {
+		if err := r.DeliveryState.Certificate.VerifyFull(env, r.DeliveryPolicy.Recipients, verifier); err != nil {
+			return fmt.Errorf("%w: delivery certificate authentication: %w", ErrSignAttemptCorrupt, err)
+		}
+	}
+	return nil
+}
+
 func validateSignAttemptDeliveryAck(ack tss.BroadcastAck, env tss.Envelope, recipients tss.PartySet) error {
 	if !recipients.Contains(ack.Party) {
 		return fmt.Errorf("%w: delivery ack from non-recipient", ErrSignAttemptCorrupt)
