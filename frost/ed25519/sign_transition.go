@@ -107,7 +107,14 @@ func (s *SignSession) buildAcceptNonceCommitmentTx(base tss.Envelope) (*acceptNo
 	}
 	commitment, err := tss.DecodeBinaryValueWithLimits[nonceCommitment](base.Payload, s.limits)
 	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
+		verifyKey := s.derivation.VerificationKeyBytes()
+		return nil, &tss.ProtocolError{
+			Code:  tss.ErrCodeVerification,
+			Round: base.Round,
+			Party: base.From,
+			Blame: frostNonceCommitmentBlame(base, s.signers, verifyKey),
+			Err:   fmt.Errorf("invalid FROST nonce commitment: %w", err),
+		}
 	}
 	if err := requirePlanHash("sign", commitment.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)

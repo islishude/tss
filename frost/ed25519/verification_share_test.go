@@ -66,6 +66,38 @@ func TestVerificationShareRejectsMalformedAndOversizedFields(t *testing.T) {
 	}
 }
 
+func TestVerificationShareRejectsNonCanonicalIdentityEncoding(t *testing.T) {
+	t.Parallel()
+	identity := make([]byte, 32)
+	identity[0] = 1
+	publicKey, err := newVerificationSharePointFromBytes(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := VerificationShare{Party: 1, PublicKey: publicKey}
+	raw, err := share.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nonCanonical := append([]byte(nil), identity...)
+	nonCanonical[len(nonCanonical)-1] |= 0x80
+	mutated, err := testutil.RewriteWireFieldByName(
+		raw,
+		verificationShareWireType,
+		VerificationShare{},
+		"PublicKey",
+		nonCanonical,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded VerificationShare
+	if err := decoded.UnmarshalBinary(mutated); err == nil {
+		t.Fatal("verification-share wire accepted a non-canonical identity encoding")
+	}
+}
+
 func testFROSTVerificationShare(t testing.TB) VerificationShare {
 	t.Helper()
 	point, err := edcurve.ScalarBaseMultBig(big.NewInt(1))

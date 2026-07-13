@@ -2,8 +2,10 @@ package bip32util
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -283,6 +285,89 @@ func TestDeriveEd25519KhovratovichLawMultiStepConsistency(t *testing.T) {
 	}
 	if !bytes.Equal(direct.ChildChainCode, chained.ChildChainCode) {
 		t.Fatal("multi-step vs chained chain code mismatch")
+	}
+}
+
+func TestDeriveEd25519KhovratovichLawZeroTweakKeepsParentKey(t *testing.T) {
+	t.Parallel()
+	parentPub := testutil.MustDecodeHex(t, ed25519HDVectorParentPubHex)
+	chainCode := testutil.MustDecodeHex(t, ed25519HDVectorChainCodeHex)
+	wantChain := bytes.Repeat([]byte{0x5a}, ChainCodeSize)
+	result, err := DeriveEd25519KhovratovichLaw(
+		parentPub,
+		chainCode,
+		[]uint32{7},
+		tss.WithHMACFunc(func(_, data []byte) []byte {
+			out := make([]byte, 64)
+			if data[0] == 0x03 {
+				copy(out[32:], wantChain)
+			}
+			return out
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(result.ChildPublicKey, parentPub) {
+		t.Fatal("zero Ed25519 tweak changed the parent public key")
+	}
+	if !bytes.Equal(result.ChildChainCode, wantChain) {
+		t.Fatal("zero Ed25519 tweak did not install the derived chain code")
+	}
+	if !testutil.IsZeroBytes(result.AdditiveShift) {
+		t.Fatal("zero Ed25519 tweak produced a non-zero additive shift")
+	}
+}
+
+func TestDeriveEd25519KhovratovichLawIdentityChildHandling(t *testing.T) {
+	t.Parallel()
+	parentPoint, err := edcurve.ScalarBaseMultBig(big.NewInt(-8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentPub := parentPoint.Bytes()
+	chainCode := bytes.Repeat([]byte{0x42}, ChainCodeSize)
+	wantChain := bytes.Repeat([]byte{0x08}, ChainCodeSize)
+	hmac := func(_, data []byte) []byte {
+		out := make([]byte, 64)
+		idx := binary.LittleEndian.Uint32(data[len(data)-4:])
+		if data[0] == 0x02 && idx == 7 {
+			// zL=1 produces tweak 8, so parent=-8*B yields the identity.
+			out[0] = 1
+		}
+		if data[0] == 0x03 {
+			copy(out[32:], bytes.Repeat([]byte{byte(idx)}, ChainCodeSize))
+		}
+		return out
+	}
+
+	if _, err := DeriveEd25519KhovratovichLaw(
+		parentPub,
+		chainCode,
+		[]uint32{7},
+		tss.WithHMACFunc(hmac),
+	); !errors.Is(err, tss.ErrInvalidChild) {
+		t.Fatalf("identity child error = %v, want ErrInvalidChild", err)
+	}
+
+	result, err := DeriveEd25519KhovratovichLaw(
+		parentPub,
+		chainCode,
+		[]uint32{7},
+		tss.WithHMACFunc(hmac),
+		tss.WithInvalidChildMode(tss.SkipInvalidChild),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ResolvedPath) != 1 || result.ResolvedPath[0] != 8 {
+		t.Fatalf("resolved path = %v, want [8]", result.ResolvedPath)
+	}
+	if !bytes.Equal(result.ChildPublicKey, parentPub) {
+		t.Fatal("skip mode did not derive the valid zero-tweak child at the next index")
+	}
+	if !bytes.Equal(result.ChildChainCode, wantChain) {
+		t.Fatal("skip mode returned the wrong child chain code")
 	}
 }
 

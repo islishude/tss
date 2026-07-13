@@ -78,6 +78,21 @@ func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitmen
 	}
 }
 
+// frostNonceCommitmentBlame builds blame evidence for an invalid FROST nonce commitment.
+func frostNonceCommitmentBlame(env tss.Envelope, signers tss.PartySet, publicKey []byte) *tss.Blame {
+	return &tss.Blame{
+		Reason:  "invalid FROST nonce commitment",
+		Parties: tss.NewPartySet(env.From),
+		Evidence: frostMarshalEvidence(
+			env,
+			tss.EvidenceKindFrostNonceCommitment,
+			"invalid FROST nonce commitment",
+			tss.EvidenceField{Key: frostEvidenceFieldSignerSetHash, Value: tss.PartySetHash(signers, frostPartySetHashLabel)},
+			frostHashField(frostEvidenceFieldPublicKeyHash, publicKey),
+		),
+	}
+}
+
 // frostSignBlame builds Blame evidence for an invalid FROST partial signature.
 func frostSignBlame(env tss.Envelope, signers tss.PartySet, publicKey []byte) *tss.Blame {
 	return &tss.Blame{
@@ -89,30 +104,6 @@ func frostSignBlame(env tss.Envelope, signers tss.PartySet, publicKey []byte) *t
 			"invalid FROST partial signature",
 			tss.EvidenceField{Key: frostEvidenceFieldSignerSetHash, Value: tss.PartySetHash(signers, frostPartySetHashLabel)},
 			frostHashField(frostEvidenceFieldPublicKeyHash, publicKey),
-		),
-	}
-}
-
-// frostAggregateBlame builds Blame evidence for a failed aggregate Ed25519 signature.
-func frostAggregateBlame(sessionID tss.SessionID, self tss.PartyID, signers tss.PartySet, publicKey, message, sig []byte) *tss.Blame {
-	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    tss.ProtocolFROSTEd25519,
-		SessionID:   sessionID,
-		Round:       signRound2,
-		From:        self,
-		PayloadType: payloadSignPartial,
-	})
-	return &tss.Blame{
-		Reason:  "aggregated Ed25519 signature failed verification",
-		Parties: signers.Clone(),
-		Evidence: frostMarshalEvidence(
-			env,
-			tss.EvidenceKindFrostAggregateSignature,
-			"aggregated Ed25519 signature failed verification",
-			tss.EvidenceField{Key: frostEvidenceFieldSignerSetHash, Value: tss.PartySetHash(signers, frostPartySetHashLabel)},
-			frostHashField(frostEvidenceFieldPublicKeyHash, publicKey),
-			frostHashField("message_hash", message),
-			frostHashField("signature_hash", sig),
 		),
 	}
 }

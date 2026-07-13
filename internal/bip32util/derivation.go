@@ -221,6 +221,10 @@ func deriveSecp256k1Child(parentPub, parentChain []byte, idx uint32, cfg tss.Der
 }
 
 func deriveEd25519Child(parentPub, parentChain []byte, idx uint32, cfg tss.DeriveConfig) (tweak *fed.Scalar, childChain []byte, usedIdx uint32, err error) {
+	parentPoint, err := edcurve.PointFromBytes(parentPub)
+	if err != nil {
+		return nil, nil, idx, fmt.Errorf("%w: invalid parent public key: %w", tss.ErrInvalidPublicKey, err)
+	}
 	for {
 		if idx >= tss.HardenedKeyStart {
 			return nil, nil, idx, fmt.Errorf(
@@ -237,17 +241,19 @@ func deriveEd25519Child(parentPub, parentChain []byte, idx uint32, cfg tss.Deriv
 			return nil, nil, idx, fmt.Errorf("HMACFunc: got %d bytes, want 64", len(z))
 		}
 
-		candidate, zero, err := ed25519TweakScalarFromZLeft(z[:28])
+		candidate, err := ed25519TweakScalarFromZLeft(z[:28])
 		if err != nil {
 			return nil, nil, idx, err
 		}
-		if zero {
+		childPoint := edcurve.AddPoints(parentPoint, fed.NewIdentityPoint().ScalarBaseMult(candidate))
+		if edcurve.IsIdentity(childPoint) {
+			candidate.Set(fed.NewScalar())
 			if cfg.InvalidChildMode == tss.SkipInvalidChild {
 				idx++
 				continue
 			}
 			return nil, nil, idx, fmt.Errorf(
-				"%w: zero scalar at index %d", tss.ErrInvalidChild, idx,
+				"%w: child public key is identity at index %d", tss.ErrInvalidChild, idx,
 			)
 		}
 
@@ -267,21 +273,15 @@ func deriveEd25519PublicKey(base *fed.Point, additiveShift *fed.Scalar) ([]byte,
 	return shifted.Bytes(), nil
 }
 
-func ed25519TweakScalarFromZLeft(zLeft []byte) (*fed.Scalar, bool, error) {
+func ed25519TweakScalarFromZLeft(zLeft []byte) (*fed.Scalar, error) {
 	var raw [edcurve.ScalarSize]byte
-	var nonZero byte
 	var carry byte
 	for i, b := range zLeft {
 		raw[i] = (b << 3) | carry
 		carry = b >> 5
-		nonZero |= b
 	}
 	if len(zLeft) < len(raw) {
 		raw[len(zLeft)] = carry
 	}
-	if nonZero == 0 {
-		return edcurve.ScalarZero(), true, nil
-	}
-	tweak, err := edcurve.ScalarFromCanonical(raw[:])
-	return tweak, false, err
+	return edcurve.ScalarFromCanonical(raw[:])
 }

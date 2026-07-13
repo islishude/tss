@@ -69,12 +69,15 @@ func (s *SignSession) prepareAggregate() (*preparedAggregateSignature, bool, err
 	zBytes := z.Bytes()
 	sig := append(append([]byte(nil), RBytes...), zBytes...)
 	if !stded25519.Verify(stded25519.PublicKey(verifyKey), s.message, sig) {
-		return nil, false, &tss.ProtocolError{
-			Code:  tss.ErrCodeVerification,
-			Round: signRound2,
-			Blame: frostAggregateBlame(s.sessionID, s.key.state.Party, s.signers, verifyKey, s.message, sig),
-			Err:   errors.New("aggregated Ed25519 signature failed verification"),
-		}
+		// Every partial has already passed its per-signer verification equation.
+		// A final verification failure therefore indicates a local invariant or
+		// dependency failure and cannot be attributed to any signer.
+		return nil, false, tss.NewProtocolError(
+			tss.ErrCodeInvariant,
+			signRound2,
+			tss.BroadcastPartyId,
+			errors.New("aggregated Ed25519 signature failed verification after all partials verified"),
+		)
 	}
 	return &preparedAggregateSignature{signature: sig}, true, nil
 }

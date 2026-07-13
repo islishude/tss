@@ -1,6 +1,7 @@
 package edwards25519
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha512"
 	"encoding/binary"
@@ -151,7 +152,7 @@ func ScalarBaseMultBig(x *big.Int) (*fed.Point, error) {
 	return fed.NewIdentityPoint().ScalarBaseMult(s), nil
 }
 
-// PointFromBytes parses a native compressed 32-byte point and rejects the
+// PointFromBytes parses a canonical native compressed 32-byte point and rejects the
 // identity as well as points that are not in the prime-order subgroup.
 // Non-prime-order points (including the eight small-order points) are rejected.
 func PointFromBytes(in []byte) (*fed.Point, error) {
@@ -166,7 +167,7 @@ func PointFromBytes(in []byte) (*fed.Point, error) {
 	return p, nil
 }
 
-// PointFromBytesAllowIdentity parses a native compressed 32-byte point and
+// PointFromBytesAllowIdentity parses a canonical native compressed 32-byte point and
 // rejects points that are not in the prime-order subgroup. The identity
 // point is allowed.
 func PointFromBytesAllowIdentity(in []byte) (*fed.Point, error) {
@@ -176,6 +177,9 @@ func PointFromBytesAllowIdentity(in []byte) (*fed.Point, error) {
 	p, err := fed.NewIdentityPoint().SetBytes(in)
 	if err != nil {
 		return nil, err
+	}
+	if !bytes.Equal(p.Bytes(), in) {
+		return nil, errors.New("non-canonical edwards25519 point encoding")
 	}
 	if !IsIdentity(p) && !isPrimeOrderPoint(p) {
 		return nil, errors.New("point is not in the prime-order subgroup")

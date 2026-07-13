@@ -50,7 +50,7 @@ func TestFROSTKeygenRejectNoMutationInvariant(t *testing.T) {
 	assertFROSTSnapshotUnchanged(t, before, after)
 }
 
-func TestFROSTSignRejectNoMutationInvariant(t *testing.T) {
+func TestFROSTSignMalformedCommitmentAbortsAndClearsSecrets(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 3)
@@ -71,17 +71,28 @@ func TestFROSTSignRejectNoMutationInvariant(t *testing.T) {
 	bad := out2[0]
 	bad.Payload = []byte("malformed nonce commitment")
 
-	before := snapshotFROSTSignSession(sign1)
+	dNonce := sign1.dNonce
+	eNonce := sign1.eNonce
 	out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
-	after := snapshotFROSTSignSession(sign1)
-
 	if err == nil {
 		t.Fatal("expected malformed sign commitment to be rejected")
+	}
+	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+	if protocolErr.Blame == nil || len(protocolErr.Blame.Parties) != 1 || protocolErr.Blame.Parties[0] != 2 {
+		t.Fatalf("malformed nonce commitment blame = %#v, want party 2", protocolErr.Blame)
 	}
 	if len(out) != 0 {
 		t.Fatalf("rejected sign message produced %d outbound envelopes", len(out))
 	}
-	assertFROSTSnapshotUnchanged(t, before, after)
+	if !sign1.aborted || sign1.completed {
+		t.Fatal("malformed nonce commitment did not leave signing terminally aborted")
+	}
+	if sign1.dNonce != nil || sign1.eNonce != nil || dNonce.FixedLen() != 0 || eNonce.FixedLen() != 0 {
+		t.Fatal("malformed nonce commitment retained local signing nonces")
+	}
+	if sign1.derivation != nil || sign1.message != nil {
+		t.Fatal("malformed nonce commitment retained signing intent state")
+	}
 }
 
 func TestFROSTReshareRejectNoMutationInvariant(t *testing.T) {

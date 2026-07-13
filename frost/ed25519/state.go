@@ -33,5 +33,7 @@ func shouldAbortSession(err error) bool {
 	if protocolErr.Code == tss.ErrCodeVerification && errors.Is(protocolErr.Err, errPlanHashMismatch) {
 		return false
 	}
-	return protocolErr.Code == tss.ErrCodeVerification || protocolErr.Blame != nil
+	return protocolErr.Code == tss.ErrCodeVerification ||
+		protocolErr.Code == tss.ErrCodeInvariant ||
+		protocolErr.Blame != nil
 }

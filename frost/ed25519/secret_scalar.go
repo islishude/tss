@@ -27,14 +27,18 @@ func newEdSecretScalarFromFed(s *fed.Scalar) (*secret.Scalar, error) {
 	if s == nil {
 		return nil, errors.New("nil secret scalar")
 	}
-	return newEdSecretScalar(s.Bytes())
+	encoded := s.Bytes()
+	defer clear(encoded)
+	return newEdSecretScalar(encoded)
 }
 
 func edScalarFromSecret(s *secret.Scalar) (*fed.Scalar, error) {
 	if s == nil {
 		return nil, errors.New("nil secret scalar")
 	}
-	return edcurve.ScalarFromCanonical(s.FixedBytes())
+	encoded := s.FixedBytes()
+	defer clear(encoded)
+	return edcurve.ScalarFromCanonical(encoded)
 }
 
 func validateEdSecretScalar(s *secret.Scalar) error {

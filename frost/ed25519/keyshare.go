@@ -52,10 +52,14 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 	}, true
 }
 
-// Derive resolves a non-hardened Ed25519-BIP32 derivation path from this key share.
+// Derive validates the key share and resolves a non-hardened Ed25519-BIP32
+// derivation path. Destroyed or inconsistent shares are rejected.
 func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	if k == nil || k.state == nil {
 		return nil, errors.New("nil key share")
+	}
+	if err := k.ValidateConsistency(); err != nil {
+		return nil, fmt.Errorf("cannot derive from invalid key share: %w", err)
 	}
 	return DeriveNonHardenedBIP32(k.state.PublicKey.Bytes(), k.state.ChainCode, path.Clone(), opts...)
 }
@@ -170,18 +174,10 @@ func (k *KeyShare) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	if len(in) > limits.State.MaxSerializedKeyShareBytes {
 		return fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
 	}
-	var decoded KeyShare
-	if err := decoded.UnmarshalWireMessage(in,
+	return k.UnmarshalWireMessage(in,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
 		wire.WithFieldLimits(limits.fieldLimits()),
-	); err != nil {
-		return err
-	}
-	if err := decoded.ValidateWithLimits(limits); err != nil {
-		return err
-	}
-	k.state = decoded.state
-	return nil
+	)
 }
 
 func (k *KeyShare) validateWithoutConfirmations() error {
@@ -221,7 +217,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if !k.state.ConfirmationMode.valid() {
 		return errors.New("key share has invalid completion confirmation mode")
 	}
-	if _, err := edScalarFromSecret(k.state.Secret); err != nil {
+	if err := validateEdSecretScalar(k.state.Secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	if k.state.GroupCommitments.Len() != k.state.Threshold {
@@ -296,6 +292,7 @@ func (k *KeyShare) validateConsistencyWithoutConfirmations() error {
 	if err != nil {
 		return fmt.Errorf("cannot decode secret share: %w", err)
 	}
+	defer secretScalar.Set(fed.NewScalar())
 	wantPub, ok := k.verificationSharePoint(k.state.Party)
 	if !ok {
 		return errors.New("missing verification share for local party")

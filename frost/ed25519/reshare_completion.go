@@ -162,23 +162,8 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		return prepared, true, nil
 	}
 
-	// Verify each dealer's share against their commitments at the local party's ID.
-	for dealer, share := range s.shares {
-		edShare, err := edScalarFromSecret(share)
-		if err != nil {
-			return nil, false, err
-		}
-		verifyErr := s.commits[dealer].VerifyShare(s.selfID, edShare)
-		edShare.Set(fed.NewScalar())
-		if verifyErr != nil {
-			return nil, false, &tss.ProtocolError{
-				Code:  tss.ErrCodeVerification,
-				Round: reshareStartRound,
-				Party: dealer,
-				Blame: frostReshareBlame(s.cfg, dealer, s.commits[dealer].BytesList()),
-				Err:   verifyErr,
-			}
-		}
+	if err := s.verifyReshareDealerShares(); err != nil {
+		return nil, false, err
 	}
 
 	newSecret := fed.NewScalar()
@@ -213,7 +198,7 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 			share.Set(fed.NewScalar())
 		}
 	}
-	newSecretScalar, err := newEdSecretScalar(newSecret.Bytes())
+	newSecretScalar, err := newEdSecretScalarFromFed(newSecret)
 	newSecret.Set(fed.NewScalar())
 	if err != nil {
 		return nil, false, err
@@ -270,6 +255,37 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 	}
 	releasePrepared = false
 	return prepared, true, nil
+}
+
+// verifyReshareDealerShares follows the canonical old-party order so every
+// receiver attributes the same first invalid share when several dealers fail.
+func (s *ReshareSession) verifyReshareDealerShares() error {
+	for _, dealer := range s.oldParties {
+		share, ok := s.shares[dealer]
+		if !ok || share == nil {
+			return fmt.Errorf("missing reshare share from dealer %d", dealer)
+		}
+		commitments, ok := s.commits[dealer]
+		if !ok {
+			return fmt.Errorf("missing reshare commitments from dealer %d", dealer)
+		}
+		edShare, err := edScalarFromSecret(share)
+		if err != nil {
+			return err
+		}
+		verifyErr := commitments.VerifyShare(s.selfID, edShare)
+		edShare.Set(fed.NewScalar())
+		if verifyErr != nil {
+			return &tss.ProtocolError{
+				Code:  tss.ErrCodeVerification,
+				Round: reshareStartRound,
+				Party: dealer,
+				Blame: frostReshareBlame(s.cfg, dealer, commitments.BytesList()),
+				Err:   verifyErr,
+			}
+		}
+	}
+	return nil
 }
 
 func (s *ReshareSession) prepareResharePublicBinding() (groupCommitments, *reshareConfirmationBinding, map[tss.PartyID]keySharePartyData, error) {

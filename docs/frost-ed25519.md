@@ -141,6 +141,13 @@ The local share is stored as `internal/secret.Scalar` fixed-length bytes.
 `String()`, `GoString()`, and `Format()` redact it, while `MarshalJSON()` rejects
 the record. `Destroy()` zeroes the package-owned secret and chain code in place.
 A shallow Go copy is only another handle to that same lifecycle state.
+`KeyShare.Derive` revalidates the complete share and its secret/public
+consistency before using public derivation metadata, so a destroyed or
+inconsistent share fails closed. Public-only derivation from an independently
+validated metadata snapshot remains available through `DeriveNonHardenedBIP32`.
+Successful `UnmarshalBinary` and `UnmarshalWireMessage` calls destroy any
+superseded receiver secret and chain code only after the replacement has fully
+decoded and validated; failed decoding leaves the receiver unchanged.
 `KeygenSession.KeyShare()` and reshare completion accessors return independently
 owned shares that must each be destroyed separately.
 
@@ -256,6 +263,11 @@ E_i = e_i · B
 ```
 
 These are sent as a `nonceCommitment` payload in a round-1 broadcast envelope.
+Each point must have one canonical, non-identity prime-order encoding. An
+authenticated signer that sends an invalid commitment is blamed from the public
+envelope evidence (`EvidenceKindFrostNonceCommitment`), and the recipient aborts
+the signing session and clears its local nonces as required by RFC 9591 Section
+5.2.
 
 ### Binding Factor
 
@@ -337,7 +349,10 @@ The final signature is the standard 64-byte Ed25519 value:
 sig = R || z
 ```
 
-This is verified with `crypto/ed25519.Verify(PK, message, sig)`. A failed final verification returns `ProtocolError` with `EvidenceKindFrostAggregateSignature` blame.
+This is verified with `crypto/ed25519.Verify(PK, message, sig)`. Because every
+partial has already passed its per-signer equation, a failed final verification
+is treated as a local invariant or dependency failure: the session aborts with
+no signer blame.
 
 ### Signing Entry Point
 
@@ -380,6 +395,10 @@ For true resharing, each party `i` from the original participant set:
 
 Each receiver `j` verifies each share against its dealer's commitments, then computes:
 
+Receivers verify dealer shares in canonical old-party order. If more than one
+dealer share is invalid, every receiver attributes the first invalid dealer in
+that order so the protocol error and blame evidence remain deterministic.
+
 ```
 x'_j = Σ_i g_i(j)   mod q
 ```
@@ -410,7 +429,8 @@ always remains unavailable.
 
 ## BIP32 HD Derivation
 
-The package implements non-hardened BIP32-Ed25519 derivation following the [Khovratovich-Law / Cardano scheme](https://eprint.iacr.org/2018/483).
+The package implements non-hardened BIP32-Ed25519 derivation following the
+[Khovratovich-Law paper](https://doi.org/10.1109/EuroSPW.2017.47).
 
 ### Derivation
 
@@ -425,6 +445,12 @@ For each path index `i`:
 3. `cumulativeShift += zL mod q`
 4. `childPub = A_par + cumShift · B`
 5. `childChain = HMAC-SHA512(c_par, 0x03 || A_par || ser_32(i))[32:64]`
+
+For public derivation, a zero `zL` is valid: the public point stays unchanged
+while the child chain code advances. The invalid-child condition is instead
+`childPub == identity`, matching the paper. `ErrorOnInvalidChild` returns
+`ErrInvalidChild`; `SkipInvalidChild` increments the index and recomputes both
+the tweak and chain code until it reaches a valid non-hardened child.
 
 Only non-hardened indices (`i < 2^31`) are supported since hardened derivation requires the full private key, which no single party holds.
 
