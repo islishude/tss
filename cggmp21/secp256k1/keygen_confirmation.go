@@ -20,9 +20,9 @@ const keygenConfirmationWireType = "cggmp21.secp256k1.keygen-confirmation"
 
 // KeygenConfirmation is a post-keygen consistency artifact. Each party produces
 // one after keygen completes and exchanges it with all other parties. If any
-// party's confirmation disagrees on the global transcript (public key, party set,
-// transcript hash, or commitments hash), the transport may have equivocated and
-// the resulting key shares must not be used.
+// party's confirmation disagrees on the global transcript (public key, party
+// set, transcript hash, commitments hash, plan, or epoch), the transport may
+// have equivocated and the resulting key shares must not be used.
 type KeygenConfirmation struct {
 	SessionID       tss.SessionID `wire:"1,bytes,len=32"`
 	Sender          tss.PartyID   `wire:"2,u32"`
@@ -33,6 +33,7 @@ type KeygenConfirmation struct {
 	CommitmentsHash []byte        `wire:"7,bytes,len=32"`
 	ChainCode       []byte        `wire:"8,bytes,len=32"`
 	PlanHash        []byte        `wire:"9,bytes,len=32"`
+	EpochID         []byte        `wire:"10,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for KeygenConfirmation.
@@ -56,6 +57,7 @@ func (c *KeygenConfirmation) Clone() *KeygenConfirmation {
 		CommitmentsHash: slices.Clone(c.CommitmentsHash),
 		ChainCode:       slices.Clone(c.ChainCode),
 		PlanHash:        slices.Clone(c.PlanHash),
+		EpochID:         slices.Clone(c.EpochID),
 	}
 }
 
@@ -91,6 +93,7 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 		CommitmentsHash: commitmentsHash,
 		ChainCode:       slices.Clone(k.state.ChainCode),
 		PlanHash:        slices.Clone(k.state.PlanHash),
+		EpochID:         slices.Clone(k.state.Epoch.EpochID),
 	}, nil
 }
 
@@ -169,6 +172,9 @@ func (c KeygenConfirmation) Validate() error {
 	}
 	if len(c.PlanHash) != sha256.Size {
 		return errors.New("keygen confirmation: invalid plan hash length")
+	}
+	if err := validateRequiredPlanID("keygen confirmation epoch id", c.EpochID); err != nil {
+		return err
 	}
 	if err := wire.ValidateStrictSortedIDs(c.Parties); err != nil {
 		return fmt.Errorf("keygen confirmation: %w", err)

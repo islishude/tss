@@ -28,9 +28,6 @@ const (
 	evidenceFieldSHash                       = "s_hash"
 	evidenceFieldDeltaResponseHash           = "delta_response_hash"
 	evidenceFieldSigmaResponseHash           = "sigma_response_hash"
-	evidenceFieldSignVerifyKPointHash        = "sign_verify_k_point_hash"
-	evidenceFieldSignVerifyChiPointHash      = "sign_verify_chi_point_hash"
-	evidenceFieldSignPrepProofHash           = "signprep_proof_hash"
 	evidenceFieldPartialEquationHash         = "partial_equation_hash"
 	evidenceFieldObservedPartialEquationHash = "observed_partial_equation_hash"
 )
@@ -62,9 +59,9 @@ type EvidenceContext struct {
 	// in an IdentificationRecord.
 	BroadcastACKVerifier tss.BroadcastAckVerifier
 	// IdentificationVerifier replays a proof-backed accusation against trusted,
-	// public protocol transcript material for unknown extension failure types.
-	// Built-in sign/presign identification always uses the library verifier and
-	// cannot be overridden through this hook.
+	// public protocol transcript material after the library authenticates the
+	// portable envelope and optional broadcast certificate. Figure 9 callers use
+	// this hook to supply the retained public round transcript.
 	IdentificationVerifier IdentificationFailureVerifier
 }
 
@@ -78,7 +75,16 @@ type IdentificationFailureVerifier interface {
 // session context the caller already trusts. It does not authenticate transport
 // delivery; callers still need authenticated envelopes.
 func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
-	evidence, err := tss.DecodeBinary[tss.BlameEvidence](encoded)
+	var evidence *tss.BlameEvidence
+	var err error
+	if len(encoded) > tss.DefaultMaxBlameEvidenceBytes {
+		evidence, err = tss.UnmarshalBlameEvidenceWithLimits(encoded, figure9EvidenceLimits())
+		if err == nil && evidence.Kind != tss.EvidenceKindPresignRedAlert {
+			return errors.New("oversized non-Figure 9 blame evidence")
+		}
+	} else {
+		evidence, err = tss.DecodeBinary[tss.BlameEvidence](encoded)
+	}
 	if err != nil {
 		return err
 	}
@@ -128,7 +134,7 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 		if err := verifyIdentificationRecord(evidence, encodedRecord, ctx); err != nil {
 			return err
 		}
-	} else if evidence.Kind == tss.EvidenceKindPresignIdentification || evidence.Kind == tss.EvidenceKindSignIdentification {
+	} else if evidence.Kind == tss.EvidenceKindPresignRedAlert {
 		return errors.New("identification evidence is missing its public record")
 	}
 	return nil
@@ -136,7 +142,7 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 
 func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx EvidenceContext) error {
 	var record tss.IdentificationRecord
-	if err := record.UnmarshalBinary(encoded); err != nil {
+	if err := record.UnmarshalBinaryWithLimits(encoded, identificationLimitsForKind(evidence.Kind)); err != nil {
 		return fmt.Errorf("invalid identification record: %w", err)
 	}
 	if record.Accused != evidence.From {
@@ -168,7 +174,9 @@ func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx
 	if len(record.SignedEnvelopeA) == 0 {
 		return errors.New("portable identification evidence lacks an authenticated envelope")
 	}
-	first, err := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeA, defaultEnvelopeLimitsForEvidence())
+	first, err := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeA, envelopeLimitsForEvidence(tss.Envelope{
+		Protocol: evidence.Protocol, Round: evidence.Round, PayloadType: evidence.PayloadType,
+	}))
 	if err != nil {
 		return fmt.Errorf("decode first signed identification envelope: %w", err)
 	}
@@ -191,7 +199,7 @@ func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx
 		return errors.New("evidence does not bind the first signed identification envelope")
 	}
 	if len(record.SignedEnvelopeB) > 0 {
-		second, err := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeB, defaultEnvelopeLimitsForEvidence())
+		second, err := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeB, envelopeLimitsForEvidence(first))
 		if err != nil {
 			return fmt.Errorf("decode second signed identification envelope: %w", err)
 		}
@@ -220,9 +228,6 @@ func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx
 	if len(record.SignedEnvelopeB) > 0 {
 		return nil
 	}
-	if evidence.Kind == tss.EvidenceKindPresignIdentification || evidence.Kind == tss.EvidenceKindSignIdentification {
-		return VerifyIdentificationFailure(*evidence, record, ctx)
-	}
 	if ctx.IdentificationVerifier == nil {
 		return fmt.Errorf("identification verifier required for signed failure class %q", record.FailureClass)
 	}
@@ -240,38 +245,6 @@ func evidenceCertificateRecipients(kind tss.EvidenceKind, ctx EvidenceContext) t
 		return ctx.Signers
 	}
 	return ctx.Parties
-}
-
-func identificationProofEvidenceField(env tss.Envelope, failureClass string, statement, protocolAlert, keygenTranscript, presignTranscript []byte) (tss.EvidenceField, error) {
-	record := &tss.IdentificationRecord{
-		FailureClass: failureClass,
-		Accused:      env.From,
-		Statement:    bytes.Clone(statement),
-		Proof:        bytes.Clone(env.Payload),
-	}
-	for _, item := range []struct {
-		key   string
-		value []byte
-	}{
-		{key: "protocol_alert_digest", value: protocolAlert},
-		{key: evidenceFieldKeygenTranscriptHash, value: keygenTranscript},
-		{key: evidenceFieldPresignTranscriptHash, value: presignTranscript},
-	} {
-		if len(item.value) == sha256.Size {
-			record.TranscriptHashes = append(record.TranscriptHashes, tss.EvidenceField{Key: item.key, Value: bytes.Clone(item.value)})
-		}
-	}
-	alert := record.ComputeAlertDigest()
-	record.AlertDigest = alert[:]
-	return tss.IdentificationEvidenceField(record)
-}
-
-func validateIdentificationPayloadSize(env tss.Envelope) error {
-	if len(env.Payload) <= maxIdentificationPayloadBytes {
-		return nil
-	}
-	return tss.NewProtocolError(tss.ErrCodePayloadTooLarge, env.Round, env.From,
-		fmt.Errorf("identification payload too large: %d > %d", len(env.Payload), maxIdentificationPayloadBytes))
 }
 
 func verificationErrorWithEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, blamed tss.PartySet, err error, fields ...tss.EvidenceField) *tss.ProtocolError {
@@ -318,7 +291,7 @@ func hasEvidenceField(fields []tss.EvidenceField, key string) bool {
 }
 
 func signedFailureEvidenceField(env tss.Envelope, kind tss.EvidenceKind, fields []tss.EvidenceField) (tss.EvidenceField, error) {
-	envelopeBytes, err := env.MarshalBinaryWithLimits(defaultEnvelopeLimitsForEvidence())
+	envelopeBytes, err := env.MarshalBinaryWithLimits(envelopeLimitsForEvidence(env))
 	if err != nil {
 		return tss.EvidenceField{}, err
 	}
@@ -334,7 +307,7 @@ func signedFailureEvidenceField(env tss.Envelope, kind tss.EvidenceKind, fields 
 	}
 	alert := record.ComputeAlertDigest()
 	record.AlertDigest = alert[:]
-	return tss.IdentificationEvidenceField(record)
+	return tss.IdentificationEvidenceFieldWithLimits(record, identificationLimitsForKind(kind))
 }
 
 // bindInboundAuthenticationEvidence upgrades attributable broadcast failures
@@ -358,11 +331,15 @@ func bindInboundAuthenticationEvidence(err error, in tss.InboundEnvelope) error 
 		return err
 	}
 
-	evidence, decodeErr := tss.DecodeBinary[tss.BlameEvidence](protocolErr.Blame.Evidence)
+	evidenceLimits := evidenceLimitsForKind(tss.EvidenceKindPresignRedAlert)
+	if !isFigure9Envelope(env) {
+		evidenceLimits = tss.DefaultEvidenceLimits()
+	}
+	evidence, decodeErr := tss.UnmarshalBlameEvidenceWithLimits(protocolErr.Blame.Evidence, evidenceLimits)
 	if decodeErr != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, fmt.Errorf("decode authenticated broadcast evidence: %w", decodeErr))
 	}
-	envelopeBytes, marshalErr := env.MarshalBinaryWithLimits(defaultEnvelopeLimitsForEvidence())
+	envelopeBytes, marshalErr := env.MarshalBinaryWithLimits(envelopeLimitsForEvidence(env))
 	if marshalErr != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, fmt.Errorf("marshal authenticated broadcast envelope: %w", marshalErr))
 	}
@@ -382,7 +359,7 @@ func bindInboundAuthenticationEvidence(err error, in tss.InboundEnvelope) error 
 		if evidence.PublicInputs[i].Key != tss.IdentificationRecordEvidenceKey {
 			continue
 		}
-		if unmarshalErr := record.UnmarshalBinary(evidence.PublicInputs[i].Value); unmarshalErr != nil {
+		if unmarshalErr := record.UnmarshalBinaryWithLimits(evidence.PublicInputs[i].Value, identificationLimitsForKind(evidence.Kind)); unmarshalErr != nil {
 			return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, fmt.Errorf("decode identification record before certificate binding: %w", unmarshalErr))
 		}
 		hadRecord = true
@@ -403,14 +380,14 @@ func bindInboundAuthenticationEvidence(err error, in tss.InboundEnvelope) error 
 		if len(record.SignedEnvelopeA) == 0 {
 			record.SignedEnvelopeA = bytes.Clone(envelopeBytes)
 		} else {
-			bound, decodeErr := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeA, defaultEnvelopeLimitsForEvidence())
+			bound, decodeErr := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeA, envelopeLimitsForEvidence(env))
 			if decodeErr != nil || bound.Digest() != currentDigest {
 				return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, errors.New("identification record envelope does not match authenticated broadcast"))
 			}
 		}
 		record.BroadcastCertificate = bytes.Clone(certificateBytes)
 	}
-	if (evidence.Kind == tss.EvidenceKindPresignIdentification || evidence.Kind == tss.EvidenceKindSignIdentification) && bytes.Equal(record.Proof, env.Payload) {
+	if evidence.Kind == tss.EvidenceKindPresignRedAlert && bytes.Equal(record.Proof, env.Payload) {
 		// The authenticated envelope is the canonical proof carrier. Keeping a
 		// second copy can make otherwise valid portable evidence exceed its 1 MiB
 		// hard cap at the maximum supported signer count.
@@ -430,12 +407,12 @@ func bindInboundAuthenticationEvidence(err error, in tss.InboundEnvelope) error 
 	}
 	alert := record.ComputeAlertDigest()
 	record.AlertDigest = alert[:]
-	recordField, marshalErr := tss.IdentificationEvidenceField(&record)
+	recordField, marshalErr := tss.IdentificationEvidenceFieldWithLimits(&record, identificationLimitsForKind(evidence.Kind))
 	if marshalErr != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, fmt.Errorf("marshal certified broadcast identification record: %w", marshalErr))
 	}
 	evidence.PublicInputs = append(inputs, recordField)
-	evidenceBytes, marshalErr := evidence.MarshalBinary()
+	evidenceBytes, marshalErr := evidence.MarshalBinaryWithLimits(evidenceLimitsForKind(evidence.Kind))
 	if marshalErr != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, fmt.Errorf("marshal certified broadcast blame evidence: %w", marshalErr))
 	}
@@ -448,11 +425,12 @@ func bindInboundAuthenticationEvidence(err error, in tss.InboundEnvelope) error 
 }
 
 func marshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, fields ...tss.EvidenceField) ([]byte, error) {
-	evidence, err := tss.NewBlameEvidence(env, kind, reason, fields)
+	limits := evidenceLimitsForKind(kind)
+	evidence, err := tss.NewBlameEvidenceWithLimits(env, kind, reason, fields, limits)
 	if err != nil {
 		return nil, err
 	}
-	encoded, err := evidence.MarshalBinary()
+	encoded, err := evidence.MarshalBinaryWithLimits(limits)
 	if err != nil {
 		return nil, err
 	}
@@ -550,17 +528,28 @@ func compareEvidenceField(evidence *tss.BlameEvidence, key string, expected []by
 func validateEvidenceShape(evidence *tss.BlameEvidence) error {
 	switch evidence.Kind {
 	case tss.EvidenceKindKeygenCommitment:
-		return expectEvidenceMessage(evidence, keygenStartRound, payloadKeygenCommitments)
+		switch evidence.PayloadType {
+		case payloadFigure6Commitment:
+			return expectEvidenceMessage(evidence, keygenFigure6CommitmentRound, payloadFigure6Commitment)
+		case payloadFigure6Reveal:
+			return expectEvidenceMessage(evidence, keygenFigure6RevealRound, payloadFigure6Reveal)
+		case payloadFigure6Proof:
+			return expectEvidenceMessage(evidence, keygenFigure6ProofRound, payloadFigure6Proof)
+		default:
+			return fmt.Errorf("evidence payload type %q is not Figure 6 material", evidence.PayloadType)
+		}
 	case tss.EvidenceKindPaillierAux:
 		switch evidence.PayloadType {
-		case payloadKeygenCommitments:
-			return expectEvidenceMessage(evidence, keygenStartRound, payloadKeygenCommitments)
-		case payloadKeygenShare:
-			return expectEvidenceMessage(evidence, keygenShareRound, payloadKeygenShare)
-		case payloadRefreshCommitments:
-			return expectEvidenceMessage(evidence, refreshStartRound, payloadRefreshCommitments)
-		case payloadRefreshShare:
-			return expectEvidenceMessage(evidence, refreshShareRound, payloadRefreshShare)
+		case payloadAuxInfoReveal:
+			if evidence.Round != keygenAuxInfoRevealRound && evidence.Round != refreshAuxInfoRevealRound {
+				return fmt.Errorf("auxinfo reveal evidence has invalid round %d", evidence.Round)
+			}
+			return nil
+		case payloadAuxInfoProofs, payloadAuxInfoDirect:
+			if evidence.Round != keygenAuxInfoProofRound && evidence.Round != refreshAuxInfoProofRound {
+				return fmt.Errorf("auxinfo proof evidence has invalid round %d", evidence.Round)
+			}
+			return nil
 		case payloadReshareReceiverMaterial:
 			return expectEvidenceMessage(evidence, reshareStartRound, payloadReshareReceiverMaterial)
 		case payloadReshareFactorProof:
@@ -568,12 +557,6 @@ func validateEvidenceShape(evidence *tss.BlameEvidence) error {
 		default:
 			return fmt.Errorf("evidence payload type %q is not Paillier auxiliary material", evidence.PayloadType)
 		}
-	case tss.EvidenceKindKeygenShare:
-		return expectEvidenceMessage(evidence, keygenShareRound, payloadKeygenShare)
-	case tss.EvidenceKindRefreshShare:
-		return expectEvidenceMessage(evidence, refreshShareRound, payloadRefreshShare)
-	case tss.EvidenceKindRefreshCommitment:
-		return expectEvidenceMessage(evidence, refreshStartRound, payloadRefreshCommitments)
 	case tss.EvidenceKindReshareShare:
 		return expectEvidenceMessage(evidence, reshareShareRound, payloadReshareShare)
 	case tss.EvidenceKindReshareCommitment:
@@ -590,12 +573,10 @@ func validateEvidenceShape(evidence *tss.BlameEvidence) error {
 		return expectEvidenceMessage(evidence, presignRound2, payloadPresignRound2)
 	case tss.EvidenceKindPresignRound3:
 		return expectEvidenceMessage(evidence, presignRound3, payloadPresignRound3)
-	case tss.EvidenceKindPresignIdentification:
-		return expectEvidenceMessage(evidence, presignIdentificationRound, payloadPresignIdentification)
+	case tss.EvidenceKindPresignRedAlert:
+		return expectEvidenceMessage(evidence, presignRedAlertRound, payloadPresignRedAlert)
 	case tss.EvidenceKindSignPartial, tss.EvidenceKindAggregateSign:
 		return expectEvidenceMessage(evidence, signStartRound, payloadSignPartial)
-	case tss.EvidenceKindSignIdentification:
-		return expectEvidenceMessage(evidence, signIdentificationRound, payloadSignIdentification)
 	default:
 		return fmt.Errorf("unknown evidence kind %q", evidence.Kind)
 	}
@@ -613,7 +594,7 @@ func expectEvidenceMessage(evidence *tss.BlameEvidence, round uint8, payloadType
 
 func isSignerScopedEvidence(kind tss.EvidenceKind) bool {
 	switch kind {
-	case tss.EvidenceKindPresignRound1, tss.EvidenceKindPresignRound2, tss.EvidenceKindPresignRound3, tss.EvidenceKindPresignIdentification, tss.EvidenceKindSignPartial, tss.EvidenceKindSignIdentification:
+	case tss.EvidenceKindPresignRound1, tss.EvidenceKindPresignRound2, tss.EvidenceKindPresignRound3, tss.EvidenceKindPresignRedAlert, tss.EvidenceKindSignPartial:
 		return true
 	default:
 		return false

@@ -24,12 +24,12 @@ go get github.com/islishude/tss
 
 ## Packages
 
-| Package                                      | Purpose                                                                                                                                                                                  |
-| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github.com/islishude/tss`                   | Shared party/session types, envelopes, authenticated inbound opening, guards, replay protection, broadcast certificates, blame evidence, HD signing context, and refresh scheduling.     |
-| `github.com/islishude/tss/tssrun`            | Transport- and database-neutral contracts for accepted run intent, durable lifecycle, session registration, dispatch, unknown-session policy, presign inventory, and generation cutover. |
-| `github.com/islishude/tss/frost/ed25519`     | FROST-style threshold Ed25519 with standard Ed25519 verification keys and signatures.                                                                                                    |
-| `github.com/islishude/tss/cggmp21/secp256k1` | CGGMP21-style threshold ECDSA with Paillier MtA and zero-knowledge proofs.                                                                                                               |
+| Package                                      | Purpose                                                                                                                                                                              |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `github.com/islishude/tss`                   | Shared party/session types, envelopes, authenticated inbound opening, guards, replay protection, broadcast certificates, blame evidence, HD signing context, and refresh scheduling. |
+| `github.com/islishude/tss/tssrun`            | Transport- and database-neutral contracts for accepted run intent, unified generation/presign/sign lifecycle, session registration, dispatch, unknown-session policy, and cutover.   |
+| `github.com/islishude/tss/frost/ed25519`     | FROST-style threshold Ed25519 with standard Ed25519 verification keys and signatures.                                                                                                |
+| `github.com/islishude/tss/cggmp21/secp256k1` | CGGMP21-style threshold ECDSA with Paillier MtA and zero-knowledge proofs.                                                                                                           |
 
 The library does not provide a production network, peer authentication, KMS/HSM,
 database, distributed scheduler, or deployment control plane. `tssrun` memory
@@ -38,16 +38,16 @@ not production durability or key management.
 
 ## Implemented Protocol Surface
 
-| Capability                     | `frost/ed25519`                                                          | `cggmp21/secp256k1`                                               |
-| ------------------------------ | ------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Dealerless key generation      | 2 rounds; confirmation is round 2                                        | 3 rounds; confirmation is round 3                                 |
-| Trusted-dealer import          | Interactive contribution flow and centralized provisioning helper        | Interactive contribution flow and centralized provisioning helper |
-| Explicit secret reconstruction | Threshold interpolation of the canonical Ed25519 group scalar            | Threshold interpolation of the secp256k1 private scalar           |
-| Signing                        | 2 online rounds; partial verification and Ed25519-compatible aggregation | 3-round offline presign plus 1-round online sign                  |
-| Proactive refresh              | Same party set and threshold                                             | Same party set and threshold, with Paillier key rotation          |
-| Resharing                      | Party-set and threshold change with target-holder confirmation           | Old-dealer/new-receiver party-set and threshold change            |
-| HD derivation                  | Non-hardened BIP32-style public derivation                               | Non-hardened BIP32 public derivation and extended public keys     |
-| Failure evidence               | Public blame evidence for attributable protocol failures                 | Signed equivocation and conditional identifiable-abort evidence   |
+| Capability                     | `frost/ed25519`                                                          | `cggmp21/secp256k1`                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Dealerless key generation      | 2 rounds; confirmation is round 2                                        | 3 rounds; confirmation is round 3                                                                  |
+| Trusted-dealer import          | Interactive contribution flow and centralized provisioning helper        | Interactive contribution flow and centralized provisioning helper                                  |
+| Explicit secret reconstruction | Threshold interpolation of the canonical Ed25519 group scalar            | Threshold interpolation of the secp256k1 private scalar                                            |
+| Signing                        | 2 online rounds; partial verification and Ed25519-compatible aggregation | 3-round offline presign plus 1-round online sign                                                   |
+| Proactive refresh              | Same party set and threshold                                             | Same party set and threshold, with Paillier key rotation                                           |
+| Resharing                      | Party-set and threshold change with target-holder confirmation           | Old-dealer/new-receiver party-set and threshold change                                             |
+| HD derivation                  | Non-hardened BIP32-style public derivation                               | Explicit non-hardened child generation with a fresh auxiliary epoch                                |
+| Failure evidence               | Public blame evidence for attributable protocol failures                 | Signed equivocation, Figure 7 accusations, Figure 9 proofs, and direct invalid-partial attribution |
 
 FROST signatures are standard 64-byte Ed25519 signatures accepted by
 `crypto/ed25519.Verify`. The implementation follows RFC 9591 signing equations
@@ -55,9 +55,11 @@ and domain separation but adds dealerless DKG, lifecycle binding, refresh,
 resharing, and BIP32-style derivation; it should be described as FROST-style, not
 as a wire-compatible implementation of every RFC ciphersuite.
 
-CGGMP21 signing never reconstructs the private key or nonce shares. Its Paillier
-proof layer uses CGGMP-compatible Πenc, Πaff-g, and Πlog\* statements, with CGGMP24
-Πmod and Ring-Pedersen Πprm semantics. See the
+CGGMP21 signing never reconstructs the private key or nonce shares. The current
+path implements paper Figures 6-10: Figure 7/F.1 creates each auxiliary epoch,
+Figure 8 uses Πenc-elg, Πelog, and Πaff-g, Figure 9 uses setup-less Πaff-g\* and
+Πdec, and Figure 10 verifies every normalized partial directly. It combines
+those relations with CGGMP24-style Πmod and Ring-Pedersen Πprm semantics. See the
 [proof inventory](docs/paillier-zk-proofs.md) and
 [audit guide](docs/audit-guide.md) for the current review surface.
 
@@ -111,9 +113,9 @@ Each participant runs one local protocol state machine. A real deployment must:
    call `tss.OpenEnvelope`, and route the resulting `InboundEnvelope` to the
    registered session. Secret-bearing direct payloads require confidential
    delivery; broadcast payloads require complete consistency certificates.
-5. Persist key shares, presigns, sign-attempt state, refresh/reshare cutovers, and
-   completion results at the documented durable boundary before making them
-   visible.
+5. Use one transactional `tssrun.LifecycleStore` boundary for exact key
+   generations, run leases, available presigns, online attempts,
+   refresh/reshare cutovers, explicit child generations, and completion results.
 
 `tssrun` makes run admission, session registry, unknown-session handling, and
 durable cutover interfaces explicit while leaving the transport and database to
@@ -123,11 +125,14 @@ the application. See [docs/tssrun.md](docs/tssrun.md) for its contracts and
 ### CGGMP21 Presign Safety
 
 CGGMP21 presigns are strictly one-use. `StartSign` requires an atomic durable
-`SignAttemptStore` that binds a presign to one immutable intent and exact outbound
-envelope before transmission. A timeout or I/O error during commit has unknown
-outcome: retry or call `ResumeSign` for the same attempt. Never release or reuse
-the presign. Custom stores should pass
-`secp256k1test.RunSignAttemptStoreSuite`.
+`LifecycleStore` transaction that validates the exact current generation,
+claims one available public `PresignID`, and persists one immutable intent and
+exact outbound envelope before transmission. Figure 8 completion stores the
+normalized secret tuple atomically and exposes only a public persisted
+descriptor. A timeout or I/O error during the online commit has unknown
+outcome: reconcile or call `ResumeSign` for the exact same attempt. Never
+release or reuse the presign. Custom stores should pass
+`tssrun/conformance.RunConformance` and backend-specific crash tests.
 
 ### Trusted Import and Secret Reconstruction
 

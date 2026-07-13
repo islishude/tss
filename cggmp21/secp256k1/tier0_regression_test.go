@@ -2,380 +2,187 @@ package secp256k1
 
 import (
 	"bytes"
-	"errors"
-	"math/big"
+	"crypto/sha256"
+	"io/fs"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/zk/signprep"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
-// TestFast_StaticNoSecretShareRegression scans sign.go for forbidden
-// regression markers that would indicate secret material leaking into
-// the public API surface. No cryptographic operations are performed.
-func TestFast_StaticNoSecretShareRegression(t *testing.T) {
-	t.Parallel()
-	body, err := os.ReadFile("sign.go")
+func TestFastStaticRetiredSigningPathsDoNotReturn(t *testing.T) {
+	sourceFS := os.DirFS(".")
+	entries, err := fs.ReadDir(sourceFS, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(body)
-	for _, forbidden := range []string{"SecretShare", "NonceShare", "InterpolateConstant"} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("sign.go still contains forbidden regression marker %q", forbidden)
-		}
+	forbidden := []string{
+		"LogCiphertext",
+		"LogProof",
+		"payloadPresignIdentification",
+		"presignIdentificationRound",
+		"payloadSignIdentification",
+		"signIdentificationRound",
+		"signprep",
+		"KPoint",
+		"ChiPoint",
+		"DeltaAggregate",
+		".BigInt()",
 	}
-}
-
-func TestFast_NoSecretScalarBigIntRegression(t *testing.T) {
-	t.Parallel()
-
-	sources := make(map[string][]byte, 3)
-	for name, read := range map[string]func() ([]byte, error){
-		"online_sign.go":    func() ([]byte, error) { return os.ReadFile("online_sign.go") },
-		"presign_round3.go": func() ([]byte, error) { return os.ReadFile("presign_round3.go") },
-		"sign.go":           func() ([]byte, error) { return os.ReadFile("sign.go") },
-	} {
-		body, err := read()
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		body, err := fs.ReadFile(sourceFS, name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		sources[name] = body
-	}
-	for name, body := range sources {
-		if strings.Contains(string(body), ".BigInt()") {
-			t.Fatalf("%s converts a scalar to *big.Int", name)
+		for _, marker := range forbidden {
+			if strings.Contains(string(body), marker) {
+				t.Fatalf("%s contains retired or unsafe marker %q", name, marker)
+			}
 		}
-	}
-
-	secretScalarType := reflect.TypeFor[*secret.Scalar]()
-	secpScalarType := reflect.TypeFor[secp.Scalar]()
-	for _, tc := range []struct {
-		name  string
-		owner reflect.Type
-		field string
-		want  reflect.Type
-	}{
-		{name: "sign partial wire scalar", owner: reflect.TypeFor[signPartialPayload](), field: "S", want: secretScalarType},
-		{name: "presign delta wire scalar", owner: reflect.TypeFor[presignRound3Payload](), field: "Delta", want: secretScalarType},
-	} {
-		field, ok := tc.owner.FieldByName(tc.field)
-		if !ok {
-			t.Fatalf("%s field missing", tc.name)
-		}
-		if field.Type != tc.want {
-			t.Fatalf("%s type = %v, want %v", tc.name, field.Type, tc.want)
-		}
-	}
-
-	partials, ok := reflect.TypeFor[SignSession]().FieldByName("partials")
-	if !ok {
-		t.Fatal("SignSession.partials field missing")
-	}
-	if partials.Type.Kind() != reflect.Map || partials.Type.Elem() != secpScalarType {
-		t.Fatalf("SignSession.partials type = %v, want map with secp.Scalar values", partials.Type)
 	}
 }
 
-func TestFast_RefreshCommitmentsRejectNonzeroConstant(t *testing.T) {
-	t.Parallel()
-	const threshold = 2
-	commitments := make([][]byte, threshold)
-	var err error
-	commitments[0], err = secp.PointBytes(secp.G)
+func TestFastKeyShareWireSchemaHasNoRetiredFigure9Fields(t *testing.T) {
+	want := []struct {
+		name string
+		tag  string
+	}{
+		{name: "Party", tag: "1"},
+		{name: "Threshold", tag: "2"},
+		{name: "Parties", tag: "3"},
+		{name: "PublicKey", tag: "4"},
+		{name: "ChainCode", tag: "5"},
+		{name: "Secret", tag: "6"},
+		{name: "GroupCommitments", tag: "7"},
+		{name: "PartyData", tag: "8"},
+		{name: "PaillierPrivateKey", tag: "9"},
+		{name: "ShareProof", tag: "10"},
+		{name: "KeygenTranscriptHash", tag: "11"},
+		{name: "PaillierProofSessionID", tag: "12"},
+		{name: "PaillierProofDomain", tag: "13"},
+		{name: "ResharePlanHash", tag: "14"},
+		{name: "PlanHash", tag: "15"},
+		{name: "SecurityParams", tag: "16"},
+		{name: "Epoch", tag: "17"},
+	}
+	typ := reflect.TypeFor[keyShareState]()
+	if typ.NumField() != len(want) {
+		t.Fatalf("key share wire state has %d fields, want exactly %d", typ.NumField(), len(want))
+	}
+	for i, expected := range want {
+		field := typ.Field(i)
+		tag, _, _ := strings.Cut(field.Tag.Get("wire"), ",")
+		if field.Name != expected.name || tag != expected.tag {
+			t.Fatalf("key share wire field %d = %s tag %q, want %s tag %q", i, field.Name, tag, expected.name, expected.tag)
+		}
+	}
+}
+
+func TestFastSecretScalarWireBoundaries(t *testing.T) {
+	secretScalarType := reflect.TypeFor[*secret.Scalar]()
+	for _, tc := range []struct {
+		owner reflect.Type
+		field string
+	}{
+		{owner: reflect.TypeFor[signPartialPayload](), field: "S"},
+		{owner: reflect.TypeFor[presignRound3Payload](), field: "Delta"},
+	} {
+		field, ok := tc.owner.FieldByName(tc.field)
+		if !ok || field.Type != secretScalarType {
+			t.Fatalf("%v.%s is %v, want *secret.Scalar", tc.owner, tc.field, field.Type)
+		}
+	}
+	partials, ok := reflect.TypeFor[SignSession]().FieldByName("partials")
+	if !ok || partials.Type.Kind() != reflect.Map || partials.Type.Elem() != reflect.TypeFor[secp.Scalar]() {
+		t.Fatalf("SignSession.partials has unsafe type %v", partials.Type)
+	}
+}
+
+func TestFastNormalizedPresignValidationMatrix(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Presign)
+	}{
+		{name: "missing presign id", mutate: func(p *Presign) { p.state.PresignID = nil }},
+		{name: "missing epoch id", mutate: func(p *Presign) { p.state.EpochID = nil }},
+		{name: "zero little r", mutate: func(p *Presign) { p.state.LittleR = secp.ScalarZero() }},
+		{name: "wrong commitment order", mutate: func(p *Presign) { p.state.Commitments[1].Party = 1 }},
+		{name: "aggregate delta mismatch", mutate: func(p *Presign) { p.state.Commitments[1].DeltaTilde = testCurvePointBytes(t, 1) }},
+		{name: "aggregate chi mismatch", mutate: func(p *Presign) { p.state.Commitments[1].STilde = testCurvePointBytes(t, 1) }},
+		{name: "request-time path", mutate: func(p *Presign) { p.state.Context.Derivation.Path = []uint32{1} }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := minimalCGGMP21Presign(t)
+			defer p.Destroy()
+			tc.mutate(p)
+			if err := p.ValidateWithLimits(testLimits()); err == nil {
+				t.Fatal("invalid normalized presign was accepted")
+			}
+		})
+	}
+}
+
+func TestFastSignPartialPayloadRequiresEpochAndPresignBindings(t *testing.T) {
+	zero, err := secpSecretScalarFromScalarAllowZero(secp.ScalarZero())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateRefreshCommitments(commitments, threshold); err == nil || !strings.Contains(err.Error(), "constant commitment") {
-		t.Fatalf("expected refresh constant commitment rejection, got %v", err)
+	base := signPartialPayload{
+		S:                   zero,
+		PresignID:           bytes.Repeat([]byte{1}, sha256.Size),
+		EpochID:             bytes.Repeat([]byte{2}, sha256.Size),
+		PresignTranscript:   bytes.Repeat([]byte{3}, sha256.Size),
+		PresignContext:      bytes.Repeat([]byte{4}, sha256.Size),
+		DigestHash:          bytes.Repeat([]byte{5}, sha256.Size),
+		PartialEquationHash: bytes.Repeat([]byte{6}, sha256.Size),
+		PlanHash:            bytes.Repeat([]byte{7}, sha256.Size),
 	}
-}
-
-// --- Presign VerifyShares validation regression tests ---
-
-func TestFast_PresignVerifySharesValidation(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		mutate  func(presign *Presign)
-		check   func(presign *Presign) error
-		wantMsg string
-	}{
-		{
-			name:    "nil VerifyShares",
-			mutate:  func(p *Presign) { p.state.VerifyShares = nil },
-			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
-			wantMsg: "nil VerifyShares",
-		},
-		{
-			name:    "empty VerifyShares",
-			mutate:  func(p *Presign) { p.state.VerifyShares = []signVerifyShare{} },
-			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
-			wantMsg: "empty VerifyShares",
-		},
-		{
-			name:    "mismatched signer count",
-			mutate:  func(p *Presign) { p.state.Signers = tss.NewPartySet(1, 2, 3) },
-			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
-			wantMsg: "mismatched signer/verify share count",
-		},
-		{
-			name: "duplicate VerifyShare",
-			mutate: func(p *Presign) {
-				vs := p.state.VerifyShares[0]
-				p.state.Signers = tss.PartySet{1, 1}
-				p.state.VerifyShares = []signVerifyShare{vs, vs}
-			},
-			check: func(p *Presign) error {
-				return validateSignVerifyShares(p.state.Signers, p.state.VerifyShares, testLimits())
-			},
-			wantMsg: "duplicate verify share",
-		},
-		{
-			name: "non-signer party",
-			mutate: func(p *Presign) {
-				vs := p.state.VerifyShares[0]
-				vs.Party = 999
-				p.state.VerifyShares[0] = vs
-			},
-			check: func(p *Presign) error {
-				return validateSignVerifyShares(p.state.Signers, p.state.VerifyShares, testLimits())
-			},
-			wantMsg: "non-signer party in verify share",
-		},
-		{
-			name:    "non-canonical KPoint",
-			mutate:  func(p *Presign) { p.state.VerifyShares[0].KPoint = nil },
-			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
-			wantMsg: "non-canonical KPoint",
-		},
-		{
-			name:    "non-canonical ChiPoint",
-			mutate:  func(p *Presign) { p.state.VerifyShares[0].ChiPoint = nil },
-			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
-			wantMsg: "non-canonical ChiPoint",
-		},
-		{
-			name:    "empty proof",
-			mutate:  func(p *Presign) { p.state.VerifyShares[0].Proof = new(signprep.Proof) },
-			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
-			wantMsg: "empty proof",
-		},
-		{
-			name: "oversize proof",
-			mutate: func(_ *Presign) {
-			},
-			check: func(p *Presign) error {
-				limits := testLimits()
-				limits.SignPrep.MaxProofBytes = 1
-				return p.ValidateWithLimits(limits)
-			},
-			wantMsg: "oversize proof",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			presign := minimalCGGMP21Presign(t)
-			tc.mutate(presign)
-			if err := tc.check(presign); err == nil {
-				t.Fatalf("expected rejection of %s", tc.wantMsg)
-			}
-		})
-	}
-}
-
-// --- Aggregate failure semantics ---
-
-func TestFast_AggregateFailureIsInvariantNotBlameAll(t *testing.T) {
-	t.Parallel()
-	if tss.ErrCodeInvariant != "invariant" {
-		t.Fatal("ErrCodeInvariant not defined")
-	}
-	if tss.ErrCodeInvariant == tss.ErrCodeAggregateSignInvalid {
-		t.Fatal("ErrCodeInvariant must differ from ErrCodeAggregateSignInvalid")
-	}
-	// Invariant error must not carry blame.
-	err := &tss.ProtocolError{Code: tss.ErrCodeInvariant, Round: 1, Err: errors.New("test")}
-	if err.Code != tss.ErrCodeInvariant || err.Round != 1 || err.Err == nil {
-		t.Fatal("invariant error fields not set correctly")
-	}
-	if err.Blame != nil {
-		t.Fatal("invariant error must not carry blame")
-	}
-}
-
-// --- SignPartialPayload encoding validation ---
-
-func TestFast_SignPartialPayloadEncodingRejectsMissingFields(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		payload signPartialPayload
-		wantMsg string
-	}{
-		{
-			name: "missing DigestHash",
-			payload: signPartialPayload{
-				S:                   testSecretScalar(t, 1),
-				PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
-				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
-				DigestHash:          nil,
-				PartialEquationHash: bytes.Repeat([]byte{0xdd}, 32),
-				PlanHash:            bytes.Repeat([]byte{0xee}, 32),
-			},
-			wantMsg: "missing DigestHash",
-		},
-		{
-			name: "missing PartialEquationHash",
-			payload: signPartialPayload{
-				S:                   testSecretScalar(t, 1),
-				PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
-				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
-				DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
-				PartialEquationHash: nil,
-				PlanHash:            bytes.Repeat([]byte{0xee}, 32),
-			},
-			wantMsg: "missing PartialEquationHash",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if _, err := marshalSignPartialPayload(tc.payload); err == nil {
-				t.Fatalf("expected rejection of %s", tc.wantMsg)
-			}
-		})
-	}
-}
-
-// --- Original defect regression (Section 14.3) shape tests ---
-
-// TestFast_OriginalDefectBlameShape verifies the error shape that the original
-// defect fix must produce: ErrCodeVerification, single-party blame, no
-// blame-all-signers, no ErrCodeAggregateSignInvalid for per-party failures.
-func TestFast_OriginalDefectBlameShape(t *testing.T) {
-	t.Parallel()
-	// Verify the error code hierarchy is correct.
-	if tss.ErrCodeVerification != "verification_failed" {
-		t.Fatal("ErrCodeVerification value mismatch")
-	}
-	if tss.ErrCodeInvariant != "invariant" {
-		t.Fatal("ErrCodeInvariant value mismatch")
-	}
-	if tss.ErrCodeAggregateSignInvalid != "aggregate_sign_invalid" {
-		t.Fatal("ErrCodeAggregateSignInvalid value mismatch")
-	}
-
-	// Per-party verification failures use ErrCodeVerification, not
-	// ErrCodeAggregateSignInvalid.
-	verificationErr := &tss.ProtocolError{
-		Code: tss.ErrCodeVerification,
-		Blame: &tss.Blame{
-			Reason:  "sign partial verification failed",
-			Parties: tss.NewPartySet(3),
-		},
-	}
-	if verificationErr.Code != tss.ErrCodeVerification {
-		t.Fatal("verification error code mismatch")
-	}
-	if len(verificationErr.Blame.Parties) != 1 {
-		t.Fatal("per-party blame must have exactly 1 party")
-	}
-	if verificationErr.Blame.Parties[0] != 3 {
-		t.Fatal("blame must point to the malicious sender")
-	}
-
-	// Invariant errors must not carry blame.
-	invariantErr := &tss.ProtocolError{
-		Code: tss.ErrCodeInvariant,
-		Err:  errors.New("test invariant"),
-	}
-	if invariantErr.Code != tss.ErrCodeInvariant || invariantErr.Err == nil {
-		t.Fatal("invariant error fields not set correctly")
-	}
-	if invariantErr.Blame != nil {
-		t.Fatal("invariant errors must not blame any party")
-	}
-}
-
-// TestFast_OriginalDefectCodeSeparation verifies that the original defect's
-// aggregate failure code is distinct from per-party verification codes.
-func TestFast_OriginalDefectCodeSeparation(t *testing.T) {
-	t.Parallel()
-	codes := []string{
-		tss.ErrCodeVerification,
-		tss.ErrCodeAggregateSignInvalid,
-		tss.ErrCodeInvariant,
-		tss.ErrCodeInvalidMessage,
-	}
-	for i := range codes {
-		for j := i + 1; j < len(codes); j++ {
-			if codes[i] == codes[j] {
-				t.Errorf("error codes must be distinct: %s == %s", codes[i], codes[j])
-			}
+	defer base.S.Destroy()
+	for _, mutate := range []func(*signPartialPayload){
+		func(p *signPartialPayload) { p.PresignID = nil },
+		func(p *signPartialPayload) { p.EpochID = nil },
+		func(p *signPartialPayload) { p.DigestHash = nil },
+		func(p *signPartialPayload) { p.PartialEquationHash = nil },
+	} {
+		p := base
+		mutate(&p)
+		if _, err := p.MarshalBinaryWithLimits(testLimits()); err == nil {
+			t.Fatal("sign partial missing a required binding was accepted")
 		}
 	}
 }
 
-// --- PresignRound3Payload validation ---
-
-func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		payload presignRound3Payload
-		wantMsg string
-	}{
-		{
-			name: "empty proof",
-			payload: func() presignRound3Payload {
-				one := big.NewInt(1)
-				kPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
-				return presignRound3Payload{
-					Delta:    testSecretScalar(t, 1),
-					KPoint:   kPoint,
-					ChiPoint: kPoint,
-					Proof:    &signprep.Proof{},
-					PlanHash: bytes.Repeat([]byte{0xef}, 32),
-				}
-			}(),
-			wantMsg: "empty proof in round3 payload",
-		},
-		{
-			name: "non-canonical KPoint",
-			payload: func() presignRound3Payload {
-				one := big.NewInt(1)
-				chiPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
-				proof := mustMinimalSignPrepProofForTest(t)
-				return presignRound3Payload{
-					Delta:    testSecretScalar(t, 1),
-					KPoint:   nil,
-					ChiPoint: chiPoint,
-					Proof:    proof,
-					PlanHash: bytes.Repeat([]byte{0xef}, 32),
-				}
-			}(),
-			wantMsg: "non-canonical KPoint in round3 payload",
-		},
+func TestFastPresignRound3PayloadRejectsMissingBindings(t *testing.T) {
+	g, err := secp.PointBytes(secp.G)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if _, err := marshalPresignRound3Payload(tc.payload); err == nil {
-				t.Fatalf("expected rejection of %s", tc.wantMsg)
-			}
-		})
+	zero := secp.ScalarZero().Bytes()
+	proof := zkpai.ElogProof{
+		A: bytes.Clone(g), N: bytes.Clone(g), B: bytes.Clone(g),
+		Z: bytes.Clone(zero), U: bytes.Clone(zero), TranscriptHash: bytes.Repeat([]byte{8}, sha256.Size),
+	}
+	delta, err := secpSecretScalarFromScalarAllowZero(secp.ScalarZero())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := presignRound3Payload{
+		Delta: delta, S: g, DeltaPoint: bytes.Clone(g), Proof: proof,
+		PlanHash: bytes.Repeat([]byte{1}, sha256.Size),
+		EpochID:  bytes.Repeat([]byte{2}, sha256.Size), PresignID: bytes.Repeat([]byte{3}, sha256.Size),
+	}
+	defer p.Delta.Destroy()
+	p.EpochID = nil
+	if _, err := p.MarshalBinaryWithLimits(testLimits()); err == nil {
+		t.Fatal("round3 payload without EpochID was accepted")
 	}
 }

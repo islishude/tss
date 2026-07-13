@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"bytes"
 	"reflect"
 	"strings"
 	"testing"
@@ -36,6 +35,8 @@ func TestFast_PublicGettersDoNotReturnMutableContainers(t *testing.T) {
 		for method := range typ.Methods() {
 			if method.Name == "Derive" ||
 				method.Name == "Digest" ||
+				method.Name == "LifecycleMetadata" ||
+				method.Name == "LifecycleMetadataWithLimits" ||
 				strings.HasPrefix(method.Name, "Marshal") ||
 				strings.HasPrefix(method.Name, "Unmarshal") {
 				continue
@@ -64,16 +65,16 @@ func TestFast_CryptographicStateUsesTypedMaterial(t *testing.T) {
 			},
 		},
 		{
-			typ:    reflect.TypeFor[keygenRound1Slot](),
-			fields: []string{"paillierPub", "ringPedersen"},
+			typ:    reflect.TypeFor[figure6LocalState](),
+			fields: []string{"contribution", "preparation"},
 		},
 		{
-			typ:    reflect.TypeFor[refreshPartyData](),
-			fields: []string{"paillierPub", "ringPedersen"},
+			typ:    reflect.TypeFor[auxInfoLocalState](),
+			fields: []string{"contribution", "paillier", "modulusPrep"},
 		},
 		{
-			typ:    reflect.TypeFor[reshareNewPartyData](),
-			fields: []string{"paillierPub", "ringPedersen"},
+			typ:    reflect.TypeFor[presignState](),
+			fields: []string{"KShare", "ChiShare", "Gamma", "PublicKey"},
 		},
 	} {
 		for _, name := range tc.fields {
@@ -96,7 +97,9 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
 	k.state.Parties = tss.NewPartySet(1)
+	k.state.Threshold = 1
 	k.state.GroupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
+	attachTestEpoch(t, k)
 	paillierMaterial, err := paillierPublicMaterialFromSnapshot(testPaillierPublicShare(t), testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -175,21 +178,17 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	p := minimalCGGMP21Presign(t)
-	p.state.Context.Derivation.Path = tss.DerivationPath([]uint32{1, 2}).Clone()
-	p.state.Derivation.RequestedPath = tss.DerivationPath{1, 2}
-	p.state.Derivation.ResolvedPath = tss.DerivationPath{1, 2}
-	p.state.Derivation.AdditiveShift = bytes.Repeat([]byte{9}, 32)
 
 	meta := mustPresignMetadata(t, p)
 	meta.Signers[0] = 99
-	meta.Context.Derivation.Path[0] = 99
 	meta.R[0] ^= 1
 	meta.LittleR[0] ^= 1
 	meta.PublicKey[0] ^= 1
 	meta.Derivation.AdditiveShift[0] = 99
 	meta.VerificationKey[0] ^= 1
+	meta.Epoch.Identifiers[0].Identifier[0] ^= 1
 
-	rBytes, err := secp.PointBytes(p.state.R)
+	rBytes, err := secp.PointBytes(p.state.Gamma)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,11 +197,11 @@ func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.state.Signers[0] != 1 ||
-		p.state.Context.Derivation.Path[0] != 1 ||
 		rBytes[0] == meta.R[0] ||
 		p.state.LittleR.Bytes()[0] == meta.LittleR[0] ||
 		publicKeyBytes[0] == meta.PublicKey[0] ||
-		p.state.Derivation.AdditiveShift[0] != 9 ||
+		p.state.Derivation.AdditiveShift[0] != 0 ||
+		p.state.Epoch.Identifiers[0].Identifier[0] == meta.Epoch.Identifiers[0].Identifier[0] ||
 		p.state.Derivation.ChildPublicKey[0] == meta.VerificationKey[0] {
 		t.Fatal("Presign getter snapshot aliases internal state")
 	}

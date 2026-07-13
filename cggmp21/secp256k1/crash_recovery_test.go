@@ -4,11 +4,13 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/tssrun"
 )
 
 // TestCGGMP21_KeyShare_PostCrashIntegrity verifies that a CGGMP21
@@ -76,8 +78,9 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 	}
 }
 
-// TestCGGMP21_Presign_PostCrashRecovery verifies that a serialized fresh
-// Presign is a consumed recovery-only snapshot and cannot start a new attempt.
+// TestCGGMP21_Presign_PostCrashRecovery verifies that persisting an available
+// Presign is side-effect free and that a first signing attempt can claim the
+// restored record after a process restart.
 func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	t.Parallel()
 
@@ -88,28 +91,44 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !IsPresignConsumed(presigns[1]) {
-		t.Fatal("MarshalBinary did not consume the local presign handle")
-	}
+	defer clear(raw)
 
 	restored, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if !IsPresignConsumed(restored) {
-		t.Fatal("restored serialized presign is reusable")
+	restoredRaw, err := restored.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(restoredRaw)
+	if !bytes.Equal(raw, restoredRaw) {
+		t.Fatal("available presign artifact changed across restart")
 	}
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
-	_, _, err = StartSignDigestWithStore(shares[1], restored, sid, digest[:], newTestSignAttemptStore())
-	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
+	store := newTestLifecycleStore()
+	session, out, err := StartSignDigestWithStore(shares[1], restored, sid, digest[:], store)
+	if err != nil {
+		t.Fatalf("first post-restart sign attempt failed: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatal("first post-restart sign attempt did not expose its committed outbox")
+	}
+	query := session.attempt.Query()
+	if _, err := store.QueryAttemptOutcome(context.Background(), query); err != nil {
+		t.Fatalf("committed post-restart attempt is unavailable: %v", err)
+	}
+	if _, err := store.PreparePresignCandidate(context.Background(), query.Binding, query.PresignID); !errors.Is(err, tssrun.ErrPresignUnavailable) {
+		t.Fatalf("claimed presign remained available after commit: %v", err)
+	}
 }
 
-// TestCGGMP21_Presign_ConsumedPostCrash verifies that a consumed
-// Presign remains consumed after marshal/unmarshal.
-func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
+// TestCGGMP21_Presign_ClaimedPostCrash verifies that durable attempt state,
+// rather than a caller-owned Presign encoding, remains authoritative after a
+// signing process restart.
+func TestCGGMP21_Presign_ClaimedPostCrash(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 2, 3)
@@ -117,33 +136,17 @@ func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("consume presign"))
-	_, _, err := StartSignDigest(shares[1], presigns[1], sid, digest[:])
+	store := newTestLifecycleStore()
+	session, _, err := StartSignDigestWithStore(shares[1], presigns[1], sid, digest[:], store)
 	if err != nil {
 		t.Fatalf("StartSignDigest failed: %v", err)
 	}
-
-	if !IsPresignConsumed(presigns[1]) {
-		t.Fatal("presign not marked consumed after StartSignDigest")
+	query := session.attempt.Query()
+	if _, err := store.PreparePresignCandidate(context.Background(), query.Binding, query.PresignID); !errors.Is(err, tssrun.ErrPresignUnavailable) {
+		t.Fatalf("claimed presign remained available after sign commit: %v", err)
 	}
-
-	raw, err := presigns[1].MarshalBinary()
-	if err != nil {
-		t.Fatalf("MarshalBinary on consumed presign failed: %v", err)
-	}
-
-	restored, err := tss.DecodeBinary[Presign](raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !IsPresignConsumed(restored) {
-		t.Fatal("consumed flag not preserved through marshal/unmarshal")
-	}
-
-	sid2, _ := tss.NewSessionID(nil)
-	digest2 := sha256.Sum256([]byte("attempt reuse"))
-	_, _, err = StartSignDigest(shares[1], restored, sid2, digest2[:])
-	if err == nil {
-		t.Fatal("StartSignDigest succeeded with consumed presign")
+	if _, _, err := ResumeSign(context.Background(), store, query, session.Guard()); err != nil {
+		t.Fatalf("durable attempt did not resume after process restart: %v", err)
 	}
 }
 

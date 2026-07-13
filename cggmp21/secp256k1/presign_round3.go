@@ -2,45 +2,43 @@ package secp256k1
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
-	"github.com/islishude/tss/internal/zk/signprep"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
+	"github.com/islishude/tss/tssrun"
 )
 
-type mtaContributionEquivocationError struct {
-	party tss.PartyID
-	left  []byte
-	right []byte
-}
+type presignRedAlertKind string
 
-// Error describes the signed Round 2 equivocation.
-func (e *mtaContributionEquivocationError) Error() string {
-	return fmt.Sprintf("signed MTA round2 equivocation by party %d", e.party)
+const (
+	presignRedAlertNonce presignRedAlertKind = "nonce"
+	presignRedAlertChi   presignRedAlertKind = "chi"
+)
+
+type presignRedAlertError struct{ kind presignRedAlertKind }
+
+// errUnattributedPresignFailure marks a mathematically valid Figure 8
+// transcript whose aggregate cannot produce a usable ECDSA presign. No party
+// can be blamed for cancellation to zero, but the one-use PresignID and every
+// retained witness must still be destroyed immediately.
+var errUnattributedPresignFailure = errors.New("unattributed Figure 8 presign failure")
+
+// Error reports which Figure 8 aggregate equation triggered the red alert.
+func (e *presignRedAlertError) Error() string {
+	return "Figure 8 " + string(e.kind) + " aggregate equation failed"
 }
 
 func (s *PresignSession) buildAcceptPresignRound3Tx(env tss.Envelope) (*acceptPresignRound3Tx, error) {
-	// ---- 1. PARSE ----
 	p, err := tss.DecodeBinaryValueWithLimits[presignRound3Payload](env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindPresignRound3,
-			"malformed presign round3 payload",
-			tss.NewPartySet(env.From),
-			err,
-			fields...,
-		)
+		return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPresignRound3,
+			"malformed Figure 8 round3 payload", tss.NewPartySet(env.From), err, fields...)
 	}
 	if p.Delta == nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("missing presign delta"))
@@ -49,71 +47,25 @@ func (s *PresignSession) buildAcceptPresignRound3Tx(env tss.Envelope) (*acceptPr
 	defer func() {
 		if owned {
 			p.Delta.Destroy()
+			p.Proof.Destroy()
+			clear(p.S)
+			clear(p.DeltaPoint)
 		}
 	}()
-
-	// ---- 2. POLICY VALIDATE ----
-	// (round and duplicate checks done in dispatcher)
 	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
-
-	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	if _, err := secpScalarFromSecret(p.Delta); err != nil {
+	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
+	if _, err := secpScalarFromSecretAllowZero(p.Delta); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-
-	material, err := s.verifyRemoteSignprepProof(env.From, p)
-	if err != nil {
-		var equivocation *mtaContributionEquivocationError
-		if errors.As(err, &equivocation) {
-			evidenceEnv, decodeErr := tss.UnmarshalEnvelopeWithLimits(equivocation.left, defaultEnvelopeLimitsForEvidence())
-			if decodeErr != nil {
-				return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, decodeErr)
-			}
-			record := &tss.IdentificationRecord{
-				FailureClass:    "presign_round2_signed_equivocation",
-				Accused:         equivocation.party,
-				SignedEnvelopeA: bytes.Clone(equivocation.left),
-				SignedEnvelopeB: bytes.Clone(equivocation.right),
-				TranscriptHashes: []tss.EvidenceField{
-					rawEvidenceField(evidenceFieldKeygenTranscriptHash, s.key.state.KeygenTranscriptHash),
-					rawEvidenceField(evidenceFieldSignerSetHash, tss.PartySetHash(s.signers, partySetHashLabel)),
-				},
-			}
-			alert := record.ComputeAlertDigest()
-			record.AlertDigest = alert[:]
-			recordField, recordErr := tss.IdentificationEvidenceField(record)
-			if recordErr != nil {
-				return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, recordErr)
-			}
-			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-			fields = append(fields, recordField)
-			return nil, verificationErrorWithEvidence(
-				evidenceEnv, tss.EvidenceKindPresignRound2, "signed presign round2 equivocation",
-				tss.NewPartySet(equivocation.party), err,
-				fields...,
-			)
-		}
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeVerification,
-			env,
-			tss.EvidenceKindPresignRound3,
-			"invalid presign sign verification material",
-			tss.NewPartySet(env.From),
-			err,
-			s.presignRound3EvidenceFields(p)...,
-		)
+	if err := s.verifyFigure8Round3(env.From, p); err != nil {
+		return nil, verificationErrorWithEvidence(env, tss.EvidenceKindPresignRound3,
+			"invalid Figure 8 round3 proof", tss.NewPartySet(env.From), err, s.presignRound3EvidenceFields(p)...)
 	}
-
-	if _, ok := s.partyState(env.From); !ok {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errPresignSignerMissing)
-	}
-	tx := &acceptPresignRound3Tx{
-		from:        env.From,
-		delta:       p.Delta,
-		verifyShare: material,
-	}
+	tx := &acceptPresignRound3Tx{from: env.From, payload: p}
 	owned = false
 	if err := tx.prepare(s); err != nil {
 		tx.cleanupOnReject()
@@ -122,169 +74,115 @@ func (s *PresignSession) buildAcceptPresignRound3Tx(env tss.Envelope) (*acceptPr
 	return tx, nil
 }
 
-func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRound3Payload) (signVerifyShare, error) {
-	if p.KPoint == nil {
-		return signVerifyShare{}, errors.New("missing KPoint")
-	}
-	if p.ChiPoint == nil {
-		return signVerifyShare{}, errors.New("missing ChiPoint")
-	}
-	if err := p.Proof.Validate(); err != nil {
-		return signVerifyShare{}, fmt.Errorf("invalid signprep proof: %w", err)
-	}
-	round2CommitmentsHash, err := s.verifyRound2Commitments(from, p.Round2Commitments)
+func (s *PresignSession) verifyFigure8Round3(from tss.PartyID, p presignRound3Payload) error {
+	gamma, err := s.aggregateGamma()
 	if err != nil {
-		return signVerifyShare{}, err
+		return err
 	}
-	mtaContributionsHash, mtaBasePoint, mtaOffsetPoint, deltaBasePoint, deltaOffsetPoint, err := s.verifyMTAContributions(from, p.MTAContributions)
+	deltaPoint, err := secp.PointFromBytes(p.DeltaPoint)
 	if err != nil {
-		return signVerifyShare{}, err
+		return err
 	}
-	kPointBytes, err := secp.PointBytes(p.KPoint)
+	if _, err := decodePresignGroupElement(p.S); err != nil {
+		return err
+	}
+	state, ok := s.partyState(from)
+	if !ok || !state.round1.havePayload {
+		return fmt.Errorf("missing Figure 8 round1 state for party %d", from)
+	}
+	round1 := state.round1.payload
+	yPoint, err := secp.PointFromBytes(round1.Y)
 	if err != nil {
-		return signVerifyShare{}, err
+		return err
 	}
-	chiPointBytes, err := secp.PointBytes(p.ChiPoint)
+	a1Point, err := secp.PointFromBytes(round1.A1)
 	if err != nil {
-		return signVerifyShare{}, err
+		return err
 	}
-	lambda, err := shamir.LagrangeCoefficient(from, s.signers)
+	a2Point, err := secp.PointFromBytes(round1.A2)
 	if err != nil {
-		return signVerifyShare{}, err
+		return err
 	}
-	verificationShare, ok := s.key.verificationShare(from)
-	if !ok {
-		return signVerifyShare{}, fmt.Errorf("missing verification share for party %d", from)
-	}
-	verificationPoint, err := secp.PointFromBytes(verificationShare)
+	domain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash,
+		s.signers, presignRound3, from, tss.BroadcastPartyId, "elog-delta")
 	if err != nil {
-		return signVerifyShare{}, err
+		return err
 	}
-	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, lambda))
-	if err != nil {
-		return signVerifyShare{}, err
-	}
-	fromState, ok := s.partyState(from)
-	if !ok || !fromState.round1.havePayload {
-		return signVerifyShare{}, fmt.Errorf("missing presign round1 state for party %d", from)
-	}
-	round1From := fromState.round1.payload
-	if !bytes.Equal(kPointBytes, round1From.KPoint) {
-		return signVerifyShare{}, errors.New("round3 KPoint does not match round1 encrypted nonce relation")
-	}
-	paillierPublicKeyBytes, err := canonicalWireMessageBytes(round1From.PaillierPublicKey, s.limits)
-	if err != nil {
-		return signVerifyShare{}, err
-	}
-	deltaBytes := p.Delta.FixedBytes()
-	defer clear(deltaBytes)
-	stmt := signprep.Statement{
-		Protocol:              tss.ProtocolCGGMP21Secp256k1,
-		SessionID:             s.sessionID,
-		Party:                 from,
-		Signers:               slices.Clone(s.signers),
-		PlanHash:              slices.Clone(s.planHash),
-		ContextHash:           slices.Clone(s.contextHash),
-		AdditiveShift:         slices.Clone(s.derivation.AdditiveShift),
-		PublicKey:             slices.Clone(s.key.state.PublicKey),
-		KeygenTranscriptHash:  slices.Clone(s.key.state.KeygenTranscriptHash),
-		PartiesHash:           tss.PartySetHash(s.key.state.Parties, partySetHashLabel),
-		KPoint:                kPointBytes,
-		ChiPoint:              chiPointBytes,
-		XBarPoint:             xBarPoint,
-		Gamma:                 slices.Clone(round1From.Gamma),
-		EncK:                  slices.Clone(round1From.EncK),
-		PaillierPublicKey:     paillierPublicKeyBytes,
-		Round1Echo:            s.round1Echo(),
-		Round2CommitmentsHash: round2CommitmentsHash,
-		MTAContributionsHash:  mtaContributionsHash,
-		MTABasePoint:          mtaBasePoint,
-		MTAOffsetPoint:        mtaOffsetPoint,
-		DeltaBasePoint:        deltaBasePoint,
-		DeltaOffsetPoint:      deltaOffsetPoint,
-		Delta:                 deltaBytes,
-	}
-	if err := signprep.Verify(stmt, p.Proof); err != nil {
-		return signVerifyShare{}, err
-	}
-	return signVerifyShare{
-		Party:                 from,
-		KPoint:                secp.Clone(p.KPoint),
-		ChiPoint:              secp.Clone(p.ChiPoint),
-		Proof:                 p.Proof.Clone(),
-		Round2CommitmentsHash: bytes.Clone(round2CommitmentsHash),
-		MTAContributionsHash:  bytes.Clone(mtaContributionsHash),
-		MTABasePoint:          bytes.Clone(mtaBasePoint),
-		MTAOffsetPoint:        bytes.Clone(mtaOffsetPoint),
-		DeltaBasePoint:        bytes.Clone(deltaBasePoint),
-		DeltaOffsetPoint:      bytes.Clone(deltaOffsetPoint),
-		mtaContributions:      cloneMTAContributions(p.MTAContributions),
-	}, nil
+	return zkpai.VerifyElog(domain, zkpai.ElogStatement{
+		Generator:         secp.G,
+		LambdaCommitment:  a1Point,
+		ElGamalCommitment: a2Point,
+		ElGamalBase:       yPoint,
+		ResultCommitment:  deltaPoint,
+		ResultBase:        gamma,
+	}, &p.Proof)
 }
 
 func (s *PresignSession) presignRound3EvidenceFields(p presignRound3Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-	kPointBytes, _ := secp.PointBytes(p.KPoint)
-	chiPointBytes, _ := secp.PointBytes(p.ChiPoint)
-	proofBytes, _ := p.Proof.MarshalBinary()
-	deltaBytes := p.Delta.FixedBytes()
-	defer clear(deltaBytes)
+	delta := p.Delta.FixedBytes()
+	defer clear(delta)
+	proof, _ := p.Proof.MarshalBinary()
 	return append(fields,
-		hashEvidenceField("delta_hash", deltaBytes),
-		hashEvidenceField(evidenceFieldSignVerifyKPointHash, kPointBytes),
-		hashEvidenceField(evidenceFieldSignVerifyChiPointHash, chiPointBytes),
-		hashEvidenceField(evidenceFieldSignPrepProofHash, proofBytes),
+		hashEvidenceField("delta_hash", delta),
+		hashEvidenceField("delta_point_hash", p.DeltaPoint),
+		hashEvidenceField("s_point_hash", p.S),
+		hashEvidenceField("elog_proof_hash", proof),
+		rawEvidenceField("epoch_id", p.EpochID),
+		rawEvidenceField("presign_id", p.PresignID),
 	)
 }
 
 func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	prepared, ok, err := s.preparePresignRound3Output()
-	if err != nil {
+	if err != nil || !ok {
 		return nil, err
-	}
-	if !ok {
-		return nil, nil
 	}
 	defer prepared.destroy()
-	terminal, terminalReady, err := s.preparePresignCompletionWithStagedLocalRound3(prepared)
+	terminal, ready, err := s.preparePresignCompletionWithStagedLocalRound3(prepared)
 	if err != nil {
 		return nil, err
 	}
-	if terminalReady {
+	if ready {
 		defer terminal.destroy()
 	}
 	effects, err := s.commitPresignRound3Output(prepared)
 	if err != nil {
 		return nil, err
 	}
-	if terminalReady {
-		terminalEffects := s.commitPresignCompletionEffects(terminal)
+	if ready {
+		terminalEffects, err := s.commitPresignCompletionEffects(terminal)
+		if err != nil {
+			for i := range effects.envelopes {
+				clearEnvelope(&effects.envelopes[i])
+			}
+			return nil, err
+		}
 		effects.envelopes = append(effects.envelopes, terminalEffects.envelopes...)
 	}
 	return effects.envelopes, nil
 }
 
 type preparedPresignRound3Output struct {
-	delta       *secret.Scalar
-	verifyShare signVerifyShare
-	presign     *Presign
-	env         tss.Envelope
-	committed   bool
+	payload   presignRound3Payload
+	chi       *secret.Scalar
+	env       tss.Envelope
+	committed bool
 }
 
 func (p *preparedPresignRound3Output) destroy() {
 	if p == nil || p.committed {
 		return
 	}
-	if p.delta != nil {
-		p.delta.Destroy()
-		p.delta = nil
+	if p.payload.Delta != nil {
+		p.payload.Delta.Destroy()
 	}
-	if p.presign != nil {
-		p.presign.Destroy()
-		p.presign = nil
+	if p.chi != nil {
+		p.chi.Destroy()
 	}
-	p.verifyShare.destroy()
+	p.payload.Proof.Destroy()
+	clear(p.payload.S)
+	clear(p.payload.DeltaPoint)
 	clear(p.env.Payload)
 }
 
@@ -296,7 +194,7 @@ func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Out
 	if err != nil {
 		return nil, false, err
 	}
-	gamma, err := secpScalarFromSecret(s.gamma)
+	gammaShare, err := secpScalarFromSecret(s.gamma)
 	if err != nil {
 		return nil, false, err
 	}
@@ -304,898 +202,217 @@ func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Out
 	if err != nil {
 		return nil, false, err
 	}
-	deltaShare := secp.ScalarMul(kShare, gamma)
+	deltaShare := secp.ScalarMul(kShare, gammaShare)
 	chiShare := secp.ScalarMul(kShare, xBar)
 	for _, peer := range s.signers {
 		if peer == s.key.state.Party {
 			continue
 		}
-		peerState, ok := s.partyState(peer)
+		state, ok := s.partyState(peer)
 		if !ok {
 			return nil, false, fmt.Errorf("missing presign state for party %d", peer)
 		}
-		alphaDelta, err := secpScalarFromSecret(peerState.mta.alphaDelta)
-		if err != nil {
-			return nil, false, err
-		}
-		betaDelta, err := secpScalarFromSecret(peerState.mta.betaDelta)
-		if err != nil {
-			return nil, false, err
-		}
-		alphaSigma, err := secpScalarFromSecret(peerState.mta.alphaSigma)
-		if err != nil {
-			return nil, false, err
-		}
-		betaSigma, err := secpScalarFromSecret(peerState.mta.betaSigma)
-		if err != nil {
-			return nil, false, err
-		}
-		deltaShare = secp.ScalarAdd(deltaShare, alphaDelta)
-		deltaShare = secp.ScalarAdd(deltaShare, betaDelta)
-		chiShare = secp.ScalarAdd(chiShare, alphaSigma)
-		chiShare = secp.ScalarAdd(chiShare, betaSigma)
-	}
-	baseChi := secp.ScalarMul(kShare, xBar)
-	mtaSum := secp.ScalarSub(chiShare, baseChi)
-	if len(s.derivation.AdditiveShift) > 0 {
-		shift, err := secp.ScalarFromBytesAllowZero(s.derivation.AdditiveShift)
-		if err != nil {
-			return nil, false, err
-		}
-		if !shift.IsZero() {
-			chiShare = secp.ScalarAdd(chiShare, secp.ScalarMul(kShare, shift))
+		for _, item := range []struct {
+			name string
+			ptr  *secret.Scalar
+			add  func(secp.Scalar)
+		}{
+			{"alpha delta", state.mta.alphaDelta, func(v secp.Scalar) { deltaShare = secp.ScalarAdd(deltaShare, v) }},
+			{"beta delta", state.mta.betaDelta, func(v secp.Scalar) { deltaShare = secp.ScalarAdd(deltaShare, v) }},
+			{"alpha chi", state.mta.alphaSigma, func(v secp.Scalar) { chiShare = secp.ScalarAdd(chiShare, v) }},
+			{"beta chi", state.mta.betaSigma, func(v secp.Scalar) { chiShare = secp.ScalarAdd(chiShare, v) }},
+		} {
+			value, err := secpScalarFromSecretAllowZero(item.ptr)
+			if err != nil {
+				return nil, false, fmt.Errorf("party %d %s: %w", peer, item.name, err)
+			}
+			item.add(value)
 		}
 	}
-	deltaSecret, err := secpSecretScalarFromScalar(deltaShare)
+	deltaSecret, err := secpSecretScalarFromScalarAllowZero(deltaShare)
 	if err != nil {
 		return nil, false, err
 	}
-	deltaOwned := false
+	chiSecret, err := secpSecretScalarFromScalarAllowZero(chiShare)
+	if err != nil {
+		deltaSecret.Destroy()
+		return nil, false, err
+	}
+	prepared := &preparedPresignRound3Output{
+		payload: presignRound3Payload{Delta: deltaSecret},
+		chi:     chiSecret,
+	}
+	success := false
 	defer func() {
-		if !deltaOwned {
-			deltaSecret.Destroy()
+		if !success {
+			prepared.destroy()
 		}
 	}()
-	selfState, ok := s.partyState(s.key.state.Party)
-	if !ok {
-		return nil, false, errors.New("missing local presign party state")
-	}
-	round2Commitments, round2CommitmentsHash, err := s.localRound2Commitments()
+	gamma, err := s.aggregateGamma()
 	if err != nil {
 		return nil, false, err
 	}
-	mtaContributions, mtaContributionsHash, mtaBasePoint, mtaOffsetPoint, deltaBasePoint, deltaOffsetPoint, err := s.localMTAContributions()
+	deltaPoint := secp.ScalarMult(gamma, kShare)
+	deltaPointBytes, err := secp.PointBytes(deltaPoint)
 	if err != nil {
 		return nil, false, err
 	}
-	defer destroyMTAContributions(mtaContributions)
-
-	// Compute KPoint and ChiPoint.
-	kPoint := secp.ScalarBaseMult(kShare)
-	kPointBytes, err := secp.PointBytes(kPoint)
+	sPointBytes, err := encodePresignGroupElement(secp.ScalarMult(gamma, chiShare))
 	if err != nil {
 		return nil, false, err
 	}
-	chiPoint := secp.ScalarBaseMult(chiShare)
-	chiPointBytes, err := secp.PointBytes(chiPoint)
+	self, ok := s.partyState(s.key.state.Party)
+	if !ok || !self.round1.havePayload {
+		return nil, false, errors.New("missing local Figure 8 round1 state")
+	}
+	yPoint, err := secp.PointFromBytes(self.round1.payload.Y)
 	if err != nil {
 		return nil, false, err
 	}
-
-	// Compute XBarPoint.
-	lambda, err := shamir.LagrangeCoefficient(s.key.state.Party, s.signers)
+	a1Point, err := secp.PointFromBytes(self.round1.payload.A1)
 	if err != nil {
 		return nil, false, err
 	}
-	verificationShare, ok := s.key.verificationShare(s.key.state.Party)
-	if !ok {
-		return nil, false, fmt.Errorf("missing local verification share for party %d", s.key.state.Party)
-	}
-	verificationPoint, err := secp.PointFromBytes(verificationShare)
+	a2Point, err := secp.PointFromBytes(self.round1.payload.A2)
 	if err != nil {
 		return nil, false, err
 	}
-	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, lambda))
+	domain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash,
+		s.signers, presignRound3, s.key.state.Party, tss.BroadcastPartyId, "elog-delta")
 	if err != nil {
 		return nil, false, err
 	}
-
-	// Build signprep proof.
-	localPaillierPublicKey, err := s.key.paillierPublicFor(s.key.state.Party, s.limits)
+	proof, err := zkpai.ProveElog(domain, zkpai.ElogStatement{
+		Generator:         secp.G,
+		LambdaCommitment:  a1Point,
+		ElGamalCommitment: a2Point,
+		ElGamalBase:       yPoint,
+		ResultCommitment:  deltaPoint,
+		ResultBase:        gamma,
+	}, zkpai.ElogWitness{Y: s.kShare, Lambda: s.a}, s.config.Reader())
 	if err != nil {
 		return nil, false, err
 	}
-	paillierPublicKey, err := canonicalWireMessageBytes(localPaillierPublicKey, s.limits)
+	prepared.payload.S = sPointBytes
+	prepared.payload.DeltaPoint = deltaPointBytes
+	prepared.payload.Proof = *proof
+	prepared.payload.PlanHash = bytes.Clone(s.planHash)
+	prepared.payload.EpochID = bytes.Clone(s.epochID)
+	prepared.payload.PresignID = bytes.Clone(s.presignID)
+	payload, err := prepared.payload.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, false, err
 	}
-	stmt := signprep.Statement{
-		Protocol:              tss.ProtocolCGGMP21Secp256k1,
-		SessionID:             s.sessionID,
-		Party:                 s.key.state.Party,
-		Signers:               slices.Clone(s.signers),
-		PlanHash:              slices.Clone(s.planHash),
-		ContextHash:           slices.Clone(s.contextHash),
-		AdditiveShift:         slices.Clone(s.derivation.AdditiveShift),
-		PublicKey:             slices.Clone(s.key.state.PublicKey),
-		KeygenTranscriptHash:  slices.Clone(s.key.state.KeygenTranscriptHash),
-		PartiesHash:           tss.PartySetHash(s.key.state.Parties, partySetHashLabel),
-		KPoint:                kPointBytes,
-		ChiPoint:              chiPointBytes,
-		XBarPoint:             xBarPoint,
-		Gamma:                 slices.Clone(selfState.round1.payload.Gamma),
-		EncK:                  slices.Clone(selfState.round1.payload.EncK),
-		PaillierPublicKey:     paillierPublicKey,
-		Round1Echo:            s.round1Echo(),
-		Round2CommitmentsHash: round2CommitmentsHash,
-		MTAContributionsHash:  mtaContributionsHash,
-		MTABasePoint:          mtaBasePoint,
-		MTAOffsetPoint:        mtaOffsetPoint,
-		DeltaBasePoint:        deltaBasePoint,
-		DeltaOffsetPoint:      deltaOffsetPoint,
-		Delta:                 deltaShare.Bytes(),
-	}
-	mtaSumSecret, err := secpSecretScalarFromScalarAllowZero(mtaSum)
-	if err != nil {
-		return nil, false, err
-	}
-	defer mtaSumSecret.Destroy()
-	chiSecret, err := secpSecretScalarFromScalar(chiShare)
-	if err != nil {
-		return nil, false, err
-	}
-	chiOwned := false
-	defer func() {
-		if !chiOwned {
-			chiSecret.Destroy()
-		}
-	}()
-	wit := signprep.Witness{
-		KShare:   s.kShare,
-		MTASum:   mtaSumSecret,
-		ChiShare: chiSecret,
-	}
-	proof, err := signprep.Prove(s.config.Reader(), stmt, wit)
-	if err != nil {
-		return nil, false, fmt.Errorf("signprep proof generation: %w", err)
-	}
-
-	payload, err := (presignRound3Payload{
-		Delta:             deltaSecret,
-		KPoint:            kPoint,
-		ChiPoint:          chiPoint,
-		Proof:             proof,
-		PlanHash:          s.planHash,
-		Round2Commitments: round2Commitments,
-		MTAContributions:  mtaContributions,
-	}).MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		return nil, false, err
-	}
-	verifyShare := signVerifyShare{
-		Party:                 s.key.state.Party,
-		KPoint:                secp.Clone(kPoint),
-		ChiPoint:              secp.Clone(chiPoint),
-		Proof:                 proof.Clone(),
-		Round2CommitmentsHash: bytes.Clone(round2CommitmentsHash),
-		MTAContributionsHash:  bytes.Clone(mtaContributionsHash),
-		MTABasePoint:          bytes.Clone(mtaBasePoint),
-		MTAOffsetPoint:        bytes.Clone(mtaOffsetPoint),
-		DeltaBasePoint:        bytes.Clone(deltaBasePoint),
-		DeltaOffsetPoint:      bytes.Clone(deltaOffsetPoint),
-		mtaContributions:      cloneMTAContributions(mtaContributions),
-	}
-	context := s.context.Clone()
-	publicKeyPoint, err := secp.PointFromBytes(s.key.state.PublicKey)
-	if err != nil {
-		clear(payload)
-		return nil, false, err
-	}
-	stagedPresign := &Presign{state: &presignState{
-		Consumed:             NewAtomicBoolWire(false),
-		attempt:              newPresignAttemptBinding(false),
-		SecurityParams:       s.securityParams,
-		Party:                s.key.state.Party,
-		Threshold:            s.key.state.Threshold,
-		Signers:              s.signers.Clone(),
-		Context:              context,
-		ContextHash:          append([]byte(nil), s.contextHash...),
-		Derivation:           s.derivation.Clone(),
-		PlanHash:             append([]byte(nil), s.planHash...),
-		PublicKey:            publicKeyPoint,
-		KeygenTranscriptHash: append([]byte(nil), s.key.state.KeygenTranscriptHash...),
-		PartiesHash:          tss.PartySetHash(s.key.state.Parties, partySetHashLabel),
-		KShare:               s.kShare.Clone(),
-	}}
-	stagedPresign.state.ChiShare = chiSecret
-	chiOwned = true
-	env, err := newEnvelope(s.config, presignRound3, s.key.state.Party, tss.BroadcastPartyId, payloadPresignRound3, payload)
+	prepared.env, err = newEnvelope(s.config, presignRound3, s.key.state.Party, tss.BroadcastPartyId, payloadPresignRound3, payload)
 	clear(payload)
 	if err != nil {
-		stagedPresign.Destroy()
 		return nil, false, err
 	}
-	deltaOwned = true
-	return &preparedPresignRound3Output{
-		delta:       deltaSecret,
-		verifyShare: verifyShare,
-		presign:     stagedPresign,
-		env:         env,
-	}, true, nil
+	success = true
+	return prepared, true, nil
 }
 
-func (s *PresignSession) localRound2Commitments() ([]presignRound2Commitment, []byte, error) {
-	commitments := make([]presignRound2Commitment, 0, len(s.signers)-1)
-	for _, recipient := range s.signers {
-		if recipient == s.key.state.Party {
-			continue
-		}
-		state, ok := s.partyState(recipient)
-		if !ok || len(state.round2.outboundHash) != sha256.Size {
-			return nil, nil, fmt.Errorf("missing round2 commitment for recipient %d", recipient)
-		}
-		commitments = append(commitments, presignRound2Commitment{
-			Recipient: recipient,
-			Hash:      bytes.Clone(state.round2.outboundHash),
-		})
-	}
-	return commitments, round2CommitmentsDigest(commitments), nil
-}
-
-func (s *PresignSession) verifyRound2Commitments(from tss.PartyID, commitments []presignRound2Commitment) ([]byte, error) {
-	if len(commitments) != len(s.signers)-1 {
-		return nil, errors.New("round2 commitment set has wrong size")
-	}
-	index := 0
-	for _, recipient := range s.signers {
-		if recipient == from {
-			continue
-		}
-		if commitments[index].Recipient != recipient {
-			return nil, errors.New("round2 commitment recipients do not match signer set")
-		}
-		index++
-	}
-	fromState, ok := s.partyState(from)
-	if !ok || !fromState.round2.havePayload {
-		return nil, errors.New("missing verified round2 payload for commitment check")
-	}
-	raw, err := fromState.round2.payload.MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		return nil, err
-	}
-	defer clear(raw)
-	want := sha256.Sum256(raw)
-	for _, commitment := range commitments {
-		if commitment.Recipient == s.key.state.Party {
-			if !bytes.Equal(commitment.Hash, want[:]) {
-				return nil, errors.New("round2 commitment does not match verified payload")
-			}
-			return round2CommitmentsDigest(commitments), nil
-		}
-	}
-	return nil, errors.New("round2 commitment set omits local recipient")
-}
-
-func round2CommitmentsDigest(commitments []presignRound2Commitment) []byte {
-	t := transcript.New("cggmp21-secp256k1-presign-round2-commitments")
-	for _, commitment := range commitments {
-		t.AppendUint32("recipient", commitment.Recipient)
-		t.AppendBytes("payload_hash", commitment.Hash)
-	}
-	return t.Sum()
-}
-
-func (s *PresignSession) localMTAContributions() ([]presignMTAContribution, []byte, []byte, []byte, []byte, []byte, error) {
-	contributions := make([]presignMTAContribution, 0, len(s.signers)-1)
-	base := secp.NewInfinity()
-	offset := secp.NewInfinity()
-	deltaBase := secp.NewInfinity()
-	deltaOffset := secp.NewInfinity()
+func (s *PresignSession) aggregateGamma() (*secp.Point, error) {
+	points := make([]*secp.Point, 0, len(s.signers))
 	for _, signer := range s.signers {
-		state, ok := s.partyState(signer)
-		if !ok || !state.round1.havePayload {
-			return nil, nil, nil, nil, nil, nil, fmt.Errorf("missing round1 gamma for signer %d", signer)
-		}
-		gamma, err := secp.PointFromBytes(state.round1.payload.Gamma)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
-		}
-		deltaBase = secp.Add(deltaBase, gamma)
-	}
-	for _, peer := range s.signers {
-		if peer == s.key.state.Party {
-			continue
-		}
-		state, ok := s.partyState(peer)
-		if !ok || !state.round2.havePayload || !state.round2.haveOutboundSigma || !state.round2.haveOutboundDelta {
-			return nil, nil, nil, nil, nil, nil, fmt.Errorf("missing MtA contribution for peer %d", peer)
-		}
-		inboundEnvelope, err := s.round2EnvelopeBytes(state.round2.payloadEnvelope, peer, s.key.state.Party, state.round2.payload)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, fmt.Errorf("encode inbound round2 envelope for peer %d: %w", peer, err)
-		}
-		outboundPayload := presignRound2Payload{
-			Delta: state.round2.outboundDelta, Sigma: state.round2.outboundSigma,
-			Round1Echo: s.round1Echo(), PlanHash: s.planHash,
-		}
-		outboundEnvelope, err := s.round2EnvelopeBytes(state.round2.outboundEnvelope, s.key.state.Party, peer, outboundPayload)
-		if err != nil {
-			clear(inboundEnvelope)
-			return nil, nil, nil, nil, nil, nil, fmt.Errorf("encode outbound round2 envelope for peer %d: %w", peer, err)
-		}
-		contributions = append(contributions, presignMTAContribution{
-			Peer:             peer,
-			Inbound:          state.round2.payload.Sigma.Clone(),
-			Outbound:         state.round2.outboundSigma.Clone(),
-			InboundDelta:     state.round2.payload.Delta.Clone(),
-			OutboundDelta:    state.round2.outboundDelta.Clone(),
-			InboundEnvelope:  inboundEnvelope,
-			OutboundEnvelope: outboundEnvelope,
-		})
-		xBar, err := s.xBarCommitment(peer)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
-		}
-		xBarPoint, err := secp.PointFromBytes(xBar)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
-		}
-		base = secp.Add(base, xBarPoint)
-		inboundY, err := mtaMaskPoint(state.round2.payload.Sigma)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
-		}
-		outboundY, err := mtaMaskPoint(state.round2.outboundSigma)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
-		}
-		offset = secp.Add(offset, inboundY)
-		negOutbound := secp.Clone(outboundY)
-		negOutbound.Y = secp.FieldNeg(negOutbound.Y)
-		offset = secp.Add(offset, negOutbound)
-		inboundDeltaY, err := mtaMaskPoint(state.round2.payload.Delta)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
-		}
-		outboundDeltaY, err := mtaMaskPoint(state.round2.outboundDelta)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
-		}
-		deltaOffset = secp.Add(deltaOffset, inboundDeltaY)
-		negOutboundDelta := secp.Clone(outboundDeltaY)
-		negOutboundDelta.Y = secp.FieldNeg(negOutboundDelta.Y)
-		deltaOffset = secp.Add(deltaOffset, negOutboundDelta)
-	}
-	baseBytes, err := optionalSecpPointBytes(base)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
-	}
-	offsetBytes, err := optionalSecpPointBytes(offset)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
-	}
-	deltaBaseBytes, err := optionalSecpPointBytes(deltaBase)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
-	}
-	deltaOffsetBytes, err := optionalSecpPointBytes(deltaOffset)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
-	}
-	digest, err := mtaContributionsDigest(contributions)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, err
-	}
-	return contributions, digest, baseBytes, offsetBytes, deltaBaseBytes, deltaOffsetBytes, nil
-}
-
-func (s *PresignSession) round2EnvelopeBytes(env tss.Envelope, from, to tss.PartyID, payload presignRound2Payload) ([]byte, error) {
-	if env.Protocol != "" {
-		return env.MarshalBinary()
-	}
-	policy, err := s.guard.Policies.Match(tss.ProtocolCGGMP21Secp256k1, presignRound2, payloadPresignRound2)
-	if err != nil {
-		return nil, err
-	}
-	if policy.RequireSenderSignature {
-		return nil, errors.New("missing signed round2 envelope")
-	}
-	payloadBytes, err := payload.MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		return nil, err
-	}
-	defer clear(payloadBytes)
-	synthetic, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol: tss.ProtocolCGGMP21Secp256k1, SessionID: s.sessionID,
-		Round: presignRound2, From: from, To: to, PayloadType: payloadPresignRound2,
-		Payload: payloadBytes,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return synthetic.MarshalBinary()
-}
-
-func optionalSecpPointBytes(point *secp.Point) ([]byte, error) {
-	if point == nil || point.Inf != 0 {
-		return nil, nil
-	}
-	return secp.PointBytes(point)
-}
-
-func mtaMaskPoint(response mta.ResponseMessage) (*secp.Point, error) {
-	if len(response.Proof.YPoint) == 0 {
-		return secp.NewInfinity(), nil
-	}
-	return secp.PointFromBytes(response.Proof.YPoint)
-}
-
-func mtaContributionsDigest(contributions []presignMTAContribution) ([]byte, error) {
-	t := transcript.New("cggmp21-secp256k1-presign-mta-contributions")
-	for i := range contributions {
-		inbound, err := contributions[i].Inbound.MarshalBinary()
-		if err != nil {
-			return nil, fmt.Errorf("encode inbound sigma contribution: %w", err)
-		}
-		outbound, err := contributions[i].Outbound.MarshalBinary()
-		if err != nil {
-			clear(inbound)
-			return nil, fmt.Errorf("encode outbound sigma contribution: %w", err)
-		}
-		inboundDelta, err := contributions[i].InboundDelta.MarshalBinary()
-		if err != nil {
-			clear(inbound)
-			clear(outbound)
-			return nil, fmt.Errorf("encode inbound delta contribution: %w", err)
-		}
-		outboundDelta, err := contributions[i].OutboundDelta.MarshalBinary()
-		if err != nil {
-			clear(inbound)
-			clear(outbound)
-			clear(inboundDelta)
-			return nil, fmt.Errorf("encode outbound delta contribution: %w", err)
-		}
-		t.AppendUint32("peer", contributions[i].Peer)
-		inboundHash := sha256.Sum256(inbound)
-		outboundHash := sha256.Sum256(outbound)
-		inboundDeltaHash := sha256.Sum256(inboundDelta)
-		outboundDeltaHash := sha256.Sum256(outboundDelta)
-		inboundEnvelopeHash := sha256.Sum256(contributions[i].InboundEnvelope)
-		outboundEnvelopeHash := sha256.Sum256(contributions[i].OutboundEnvelope)
-		t.AppendBytes("inbound_hash", inboundHash[:])
-		t.AppendBytes("outbound_hash", outboundHash[:])
-		t.AppendBytes("inbound_delta_hash", inboundDeltaHash[:])
-		t.AppendBytes("outbound_delta_hash", outboundDeltaHash[:])
-		t.AppendBytes("inbound_envelope_hash", inboundEnvelopeHash[:])
-		t.AppendBytes("outbound_envelope_hash", outboundEnvelopeHash[:])
-		clear(inbound)
-		clear(outbound)
-		clear(inboundDelta)
-		clear(outboundDelta)
-	}
-	return t.Sum(), nil
-}
-
-func (s *PresignSession) verifyMTAContributions(from tss.PartyID, contributions []presignMTAContribution) ([]byte, []byte, []byte, []byte, []byte, error) {
-	if len(contributions) != len(s.signers)-1 {
-		return nil, nil, nil, nil, nil, errors.New("MtA contribution set has wrong size")
-	}
-	base := secp.NewInfinity()
-	offset := secp.NewInfinity()
-	deltaBase := secp.NewInfinity()
-	deltaOffset := secp.NewInfinity()
-	for _, signer := range s.signers {
-		state, ok := s.partyState(signer)
-		if !ok || !state.round1.havePayload {
-			return nil, nil, nil, nil, nil, fmt.Errorf("missing round1 gamma for signer %d", signer)
-		}
-		gamma, err := secp.PointFromBytes(state.round1.payload.Gamma)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		deltaBase = secp.Add(deltaBase, gamma)
-	}
-	index := 0
-	for _, peer := range s.signers {
-		if peer == from {
-			continue
-		}
-		contribution := contributions[index]
-		index++
-		if contribution.Peer != peer {
-			return nil, nil, nil, nil, nil, errors.New("MtA contribution peers do not match signer set")
-		}
-		if err := s.verifyPublicSigmaResponse(from, peer, contribution.Inbound); err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("invalid inbound sigma contribution from %d: %w", peer, err)
-		}
-		if err := s.verifyPublicSigmaResponse(peer, from, contribution.Outbound); err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("invalid outbound sigma contribution to %d: %w", peer, err)
-		}
-		if err := s.verifyPublicDeltaResponse(from, peer, contribution.InboundDelta); err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("invalid inbound delta contribution from %d: %w", peer, err)
-		}
-		if err := s.verifyPublicDeltaResponse(peer, from, contribution.OutboundDelta); err != nil {
-			return nil, nil, nil, nil, nil, fmt.Errorf("invalid outbound delta contribution to %d: %w", peer, err)
-		}
-		xBar, err := s.xBarCommitment(peer)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		xBarPoint, err := secp.PointFromBytes(xBar)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		base = secp.Add(base, xBarPoint)
-		inboundY, err := mtaMaskPoint(contribution.Inbound)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		outboundY, err := mtaMaskPoint(contribution.Outbound)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		offset = secp.Add(offset, inboundY)
-		negOutbound := secp.Clone(outboundY)
-		negOutbound.Y = secp.FieldNeg(negOutbound.Y)
-		offset = secp.Add(offset, negOutbound)
-		inboundDeltaY, err := mtaMaskPoint(contribution.InboundDelta)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		outboundDeltaY, err := mtaMaskPoint(contribution.OutboundDelta)
-		if err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-		deltaOffset = secp.Add(deltaOffset, inboundDeltaY)
-		negOutboundDelta := secp.Clone(outboundDeltaY)
-		negOutboundDelta.Y = secp.FieldNeg(negOutboundDelta.Y)
-		deltaOffset = secp.Add(deltaOffset, negOutboundDelta)
-		if err := s.verifyMTAContributionConsistency(from, peer, contribution); err != nil {
-			return nil, nil, nil, nil, nil, err
-		}
-	}
-	baseBytes, err := optionalSecpPointBytes(base)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	offsetBytes, err := optionalSecpPointBytes(offset)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	deltaBaseBytes, err := optionalSecpPointBytes(deltaBase)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	deltaOffsetBytes, err := optionalSecpPointBytes(deltaOffset)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	digest, err := mtaContributionsDigest(contributions)
-	if err != nil {
-		return nil, nil, nil, nil, nil, err
-	}
-	return digest, baseBytes, offsetBytes, deltaBaseBytes, deltaOffsetBytes, nil
-}
-
-func (s *PresignSession) verifyPublicSigmaResponse(initiator, responder tss.PartyID, response mta.ResponseMessage) error {
-	initiatorState, ok := s.partyState(initiator)
-	if !ok || !initiatorState.round1.havePayload {
-		return fmt.Errorf("missing round1 state for initiator %d", initiator)
-	}
-	initiatorPK, err := s.key.paillierPublicFor(initiator, s.limits)
-	if err != nil {
-		return err
-	}
-	responderPK, err := s.key.paillierPublicFor(responder, s.limits)
-	if err != nil {
-		return err
-	}
-	initiatorRP, err := s.key.ringPedersenPublicFor(initiator, s.limits)
-	if err != nil {
-		return err
-	}
-	responderXBar, err := s.xBarCommitment(responder)
-	if err != nil {
-		return err
-	}
-	domain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, initiator, responder, initiatorPK, s.contextHash, s.planHash, s.limits)
-	if err != nil {
-		return err
-	}
-	return mta.VerifyResponse(s.securityParams, domain,
-		mta.StartMessage{Ciphertext: initiatorState.round1.payload.EncK}, response,
-		initiatorState.round1.payload.KPoint, responderXBar, initiatorPK, responderPK, initiatorRP)
-}
-
-func (s *PresignSession) verifyPublicDeltaResponse(initiator, responder tss.PartyID, response mta.ResponseMessage) error {
-	initiatorState, ok := s.partyState(initiator)
-	if !ok || !initiatorState.round1.havePayload {
-		return fmt.Errorf("missing round1 state for initiator %d", initiator)
-	}
-	responderState, ok := s.partyState(responder)
-	if !ok || !responderState.round1.havePayload {
-		return fmt.Errorf("missing round1 state for responder %d", responder)
-	}
-	initiatorPK, err := s.key.paillierPublicFor(initiator, s.limits)
-	if err != nil {
-		return err
-	}
-	responderPK, err := s.key.paillierPublicFor(responder, s.limits)
-	if err != nil {
-		return err
-	}
-	initiatorRP, err := s.key.ringPedersenPublicFor(initiator, s.limits)
-	if err != nil {
-		return err
-	}
-	domain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, initiator, responder, initiatorPK, s.contextHash, s.planHash, s.limits)
-	if err != nil {
-		return err
-	}
-	return mta.VerifyResponse(s.securityParams, domain,
-		mta.StartMessage{Ciphertext: initiatorState.round1.payload.EncK}, response,
-		initiatorState.round1.payload.KPoint, responderState.round1.payload.Gamma,
-		initiatorPK, responderPK, initiatorRP)
-}
-
-func (s *PresignSession) verifyMTAContributionConsistency(from, peer tss.PartyID, contribution presignMTAContribution) error {
-	if err := s.verifyMTAContributionEnvelopes(from, peer, contribution); err != nil {
-		return err
-	}
-	if peer == s.key.state.Party {
-		state, ok := s.partyState(from)
-		if !ok || !state.round2.havePayload || !state.round2.haveOutboundSigma || !state.round2.haveOutboundDelta {
-			return errors.New("missing local MTA contribution state")
-		}
-		if !sameSigmaResponse(contribution.Inbound, state.round2.outboundSigma) ||
-			!sameSigmaResponse(contribution.Outbound, state.round2.payload.Sigma) ||
-			!sameSigmaResponse(contribution.InboundDelta, state.round2.outboundDelta) ||
-			!sameSigmaResponse(contribution.OutboundDelta, state.round2.payload.Delta) {
-			if !sameEnvelopeSigningContent(contribution.OutboundEnvelope, mustEnvelopeBytes(state.round2.payloadEnvelope)) {
-				return &mtaContributionEquivocationError{party: from, left: bytes.Clone(contribution.OutboundEnvelope), right: mustEnvelopeBytes(state.round2.payloadEnvelope)}
+		var encoded []byte
+		if signer == s.key.state.Party {
+			encoded = s.gammaComm
+		} else {
+			state, ok := s.partyState(signer)
+			if !ok || !state.round2.havePayload {
+				return nil, fmt.Errorf("missing Figure 8 Gamma for party %d", signer)
 			}
-			return errors.New("MTA contribution does not match verified round2 exchange")
+			encoded = state.round2.payload.Gamma
 		}
-	}
-	peerState, ok := s.partyState(peer)
-	if !ok || !peerState.round3.haveVerifyShare {
-		return nil
-	}
-	other, ok := mtaContributionFor(peerState.round3.verifyShare.mtaContributions, from)
-	if !ok {
-		return errors.New("stored peer MTA contribution is incomplete")
-	}
-	if !sameEnvelopeSigningContent(contribution.OutboundEnvelope, other.InboundEnvelope) {
-		return &mtaContributionEquivocationError{party: from, left: bytes.Clone(contribution.OutboundEnvelope), right: bytes.Clone(other.InboundEnvelope)}
-	}
-	if !sameEnvelopeSigningContent(contribution.InboundEnvelope, other.OutboundEnvelope) {
-		return &mtaContributionEquivocationError{party: peer, left: bytes.Clone(contribution.InboundEnvelope), right: bytes.Clone(other.OutboundEnvelope)}
-	}
-	if !sameSigmaResponse(contribution.Outbound, other.Inbound) || !sameSigmaResponse(contribution.Inbound, other.Outbound) ||
-		!sameSigmaResponse(contribution.OutboundDelta, other.InboundDelta) || !sameSigmaResponse(contribution.InboundDelta, other.OutboundDelta) {
-		return errors.New("identical signed round2 envelopes decoded to inconsistent MtA contributions")
-	}
-	return nil
-}
-
-func defaultEnvelopeLimitsForEvidence() tss.EnvelopeLimits {
-	return tss.EnvelopeLimits{MaxBytes: tss.DefaultMaxEnvelopeBytes, MaxPayloadBytes: tss.DefaultMaxEnvelopePayloadBytes, MaxPayloadTypeBytes: tss.DefaultMaxPayloadTypeBytes, MaxProtocolNameBytes: tss.DefaultMaxProtocolNameBytes, MaxSignatureBytes: tss.DefaultMaxEnvelopeSignatureBytes, TLV: tss.TLVLimits{MaxFields: tss.DefaultMaxWireFields, MaxFieldBytes: tss.DefaultMaxWireFieldBytes}}
-}
-
-func mustEnvelopeBytes(env tss.Envelope) []byte {
-	raw, err := env.MarshalBinary()
-	if err != nil {
-		return nil
-	}
-	return raw
-}
-
-func sameEnvelopeSigningContent(left, right []byte) bool {
-	leftEnvelope, leftErr := tss.UnmarshalEnvelopeWithLimits(left, defaultEnvelopeLimitsForEvidence())
-	rightEnvelope, rightErr := tss.UnmarshalEnvelopeWithLimits(right, defaultEnvelopeLimitsForEvidence())
-	if leftErr != nil || rightErr != nil {
-		return false
-	}
-	return tss.EnvelopeSigningDigest(leftEnvelope) == tss.EnvelopeSigningDigest(rightEnvelope)
-}
-
-func (s *PresignSession) verifyMTAContributionEnvelopes(from, peer tss.PartyID, contribution presignMTAContribution) error {
-	inbound, err := tss.UnmarshalEnvelopeWithLimits(contribution.InboundEnvelope, tss.EnvelopeLimits{
-		MaxBytes: tss.DefaultMaxEnvelopeBytes, MaxPayloadBytes: tss.DefaultMaxEnvelopePayloadBytes,
-		MaxPayloadTypeBytes: tss.DefaultMaxPayloadTypeBytes, MaxProtocolNameBytes: tss.DefaultMaxProtocolNameBytes,
-		MaxSignatureBytes: tss.DefaultMaxEnvelopeSignatureBytes,
-		TLV:               tss.TLVLimits{MaxFields: tss.DefaultMaxWireFields, MaxFieldBytes: tss.DefaultMaxWireFieldBytes},
-	})
-	if err != nil {
-		return fmt.Errorf("invalid claimed inbound round2 envelope: %w", err)
-	}
-	outbound, err := tss.UnmarshalEnvelopeWithLimits(contribution.OutboundEnvelope, tss.EnvelopeLimits{
-		MaxBytes: tss.DefaultMaxEnvelopeBytes, MaxPayloadBytes: tss.DefaultMaxEnvelopePayloadBytes,
-		MaxPayloadTypeBytes: tss.DefaultMaxPayloadTypeBytes, MaxProtocolNameBytes: tss.DefaultMaxProtocolNameBytes,
-		MaxSignatureBytes: tss.DefaultMaxEnvelopeSignatureBytes,
-		TLV:               tss.TLVLimits{MaxFields: tss.DefaultMaxWireFields, MaxFieldBytes: tss.DefaultMaxWireFieldBytes},
-	})
-	if err != nil {
-		return fmt.Errorf("invalid claimed outbound round2 envelope: %w", err)
-	}
-	if inbound.Protocol != tss.ProtocolCGGMP21Secp256k1 || inbound.SessionID != s.sessionID || inbound.Round != presignRound2 || inbound.From != peer || inbound.To != from || inbound.PayloadType != payloadPresignRound2 {
-		return errors.New("claimed inbound round2 envelope identity mismatch")
-	}
-	if outbound.Protocol != tss.ProtocolCGGMP21Secp256k1 || outbound.SessionID != s.sessionID || outbound.Round != presignRound2 || outbound.From != from || outbound.To != peer || outbound.PayloadType != payloadPresignRound2 {
-		return errors.New("claimed outbound round2 envelope identity mismatch")
-	}
-	if s.guard != nil {
-		policy, policyErr := s.guard.Policies.Match(tss.ProtocolCGGMP21Secp256k1, presignRound2, payloadPresignRound2)
-		if policyErr != nil {
-			return policyErr
+		point, err := secp.PointFromBytes(encoded)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Figure 8 Gamma for party %d: %w", signer, err)
 		}
-		if policy.RequireSenderSignature {
-			if err := tss.VerifyEnvelopeSignature(inbound, s.guard.EnvelopeVerifier); err != nil {
-				return err
-			}
-			if err := tss.VerifyEnvelopeSignature(outbound, s.guard.EnvelopeVerifier); err != nil {
-				return err
-			}
-		}
+		points = append(points, point)
 	}
-	inPayload, err := tss.DecodeBinaryValueWithLimits[presignRound2Payload](inbound.Payload, s.limits)
-	if err != nil {
-		return err
+	gamma := secp.AddPoints(points...)
+	if gamma == nil || gamma.Inf != 0 {
+		return nil, fmt.Errorf("%w: aggregate Gamma is the identity; retry with a new PresignID", errUnattributedPresignFailure)
 	}
-	outPayload, err := tss.DecodeBinaryValueWithLimits[presignRound2Payload](outbound.Payload, s.limits)
-	if err != nil {
-		return err
-	}
-	if !sameSigmaResponse(inPayload.Sigma, contribution.Inbound) || !sameSigmaResponse(inPayload.Delta, contribution.InboundDelta) ||
-		!sameSigmaResponse(outPayload.Sigma, contribution.Outbound) || !sameSigmaResponse(outPayload.Delta, contribution.OutboundDelta) {
-		return errors.New("claimed round2 envelope payload does not match MtA contribution")
-	}
-	return nil
-}
-
-func sameSigmaResponse(left, right mta.ResponseMessage) bool {
-	leftBytes, leftErr := left.MarshalBinary()
-	rightBytes, rightErr := right.MarshalBinary()
-	defer clear(leftBytes)
-	defer clear(rightBytes)
-	return leftErr == nil && rightErr == nil && bytes.Equal(leftBytes, rightBytes)
-}
-
-func mtaContributionFor(contributions []presignMTAContribution, peer tss.PartyID) (presignMTAContribution, bool) {
-	for i := range contributions {
-		if contributions[i].Peer == peer {
-			return contributions[i], true
-		}
-	}
-	return presignMTAContribution{}, false
-}
-
-func cloneMTAContributions(in []presignMTAContribution) []presignMTAContribution {
-	out := make([]presignMTAContribution, len(in))
-	for i := range in {
-		out[i] = presignMTAContribution{
-			Peer:             in[i].Peer,
-			Inbound:          in[i].Inbound.Clone(),
-			Outbound:         in[i].Outbound.Clone(),
-			InboundDelta:     in[i].InboundDelta.Clone(),
-			OutboundDelta:    in[i].OutboundDelta.Clone(),
-			InboundEnvelope:  bytes.Clone(in[i].InboundEnvelope),
-			OutboundEnvelope: bytes.Clone(in[i].OutboundEnvelope),
-		}
-	}
-	return out
-}
-
-func destroyMTAContributions(in []presignMTAContribution) {
-	for i := range in {
-		in[i].Inbound.Destroy()
-		in[i].Outbound.Destroy()
-		in[i].InboundDelta.Destroy()
-		in[i].OutboundDelta.Destroy()
-		clear(in[i].InboundEnvelope)
-		clear(in[i].OutboundEnvelope)
-	}
+	return gamma, nil
 }
 
 func (s *PresignSession) commitPresignRound3Output(p *preparedPresignRound3Output) (sessionEffects, error) {
-	if p == nil {
-		return sessionEffects{}, nil
+	if p == nil || p.payload.Delta == nil || p.chi == nil {
+		return sessionEffects{}, errors.New("invalid prepared Figure 8 round3 output")
 	}
-	selfState, ok := s.partyState(s.key.state.Party)
+	self, ok := s.partyState(s.key.state.Party)
 	if !ok {
-		return sessionEffects{}, errors.New("missing local presign party state")
+		return sessionEffects{}, errors.New("missing local presign state")
 	}
-	selfState.round3.delta = p.delta
-	selfState.round3.verifyShare = p.verifyShare
-	selfState.round3.haveDelta = true
-	selfState.round3.haveVerifyShare = true
+	self.round3 = presignRound3State{
+		delta: p.payload.Delta, chi: p.chi, deltaPoint: bytes.Clone(p.payload.DeltaPoint),
+		sPoint: bytes.Clone(p.payload.S), proof: *p.payload.Proof.Clone(), havePayload: true,
+	}
 	s.round3Sent = true
-	s.presign = p.presign
 	p.committed = true
 	return sessionEffects{envelopes: []tss.Envelope{p.env}}, nil
 }
 
 type preparedPresignCompletionEffects struct {
-	completion     *preparedPresignCompletion
-	identification *preparedPresignIdentification
+	completion *preparedPresignCompletion
+	redAlert   *preparedPresignRedAlert
 }
 
 func (p *preparedPresignCompletionEffects) destroy() {
-	if p == nil {
-		return
-	}
-	if p.completion != nil {
+	if p != nil && p.completion != nil {
 		p.completion.destroy()
 	}
-	if p.identification != nil {
-		p.identification.destroy()
+	if p != nil && p.redAlert != nil {
+		p.redAlert.destroy()
 	}
 }
 
 func (s *PresignSession) preparePresignCompletionEffects() (*preparedPresignCompletionEffects, bool, error) {
-	completion, ok, err := s.maybePreparePresignCompletion()
-	if err == nil {
-		if !ok {
-			return nil, false, nil
+	completion, ready, err := s.maybePreparePresignCompletion()
+	if err != nil {
+		var redAlert *presignRedAlertError
+		if !errors.As(err, &redAlert) {
+			return nil, false, err
 		}
-		return &preparedPresignCompletionEffects{completion: completion}, true, nil
-	}
-	var alert *presignAggregateAlertError
-	if !errors.As(err, &alert) {
-		return nil, false, err
-	}
-	identification, ready, prepareErr := s.preparePresignIdentification(alert.err)
-	if prepareErr != nil {
-		return nil, false, prepareErr
+		preparedRedAlert, prepareErr := s.preparePresignRedAlert(redAlert.kind)
+		if prepareErr != nil {
+			return nil, false, prepareErr
+		}
+		return &preparedPresignCompletionEffects{redAlert: preparedRedAlert}, true, nil
 	}
 	if !ready {
 		return nil, false, nil
 	}
-	return &preparedPresignCompletionEffects{identification: identification}, true, nil
+	return &preparedPresignCompletionEffects{completion: completion}, true, nil
 }
 
-func (s *PresignSession) commitPresignCompletionEffects(p *preparedPresignCompletionEffects) sessionEffects {
-	if p == nil {
-		return sessionEffects{}
+func (s *PresignSession) commitPresignCompletionEffects(p *preparedPresignCompletionEffects) (sessionEffects, error) {
+	if p != nil && p.completion != nil {
+		if err := s.commitPresignCompletion(p.completion); err != nil {
+			return sessionEffects{}, err
+		}
 	}
-	if p.completion != nil {
-		s.commitPresignCompletion(p.completion)
-		return sessionEffects{}
+	if p != nil && p.redAlert != nil {
+		return s.commitPresignRedAlert(p.redAlert), nil
 	}
-	return s.commitPresignIdentification(p.identification)
+	return sessionEffects{}, nil
 }
 
 func (s *PresignSession) preparePresignCompletionWithStagedLocalRound3(p *preparedPresignRound3Output) (*preparedPresignCompletionEffects, bool, error) {
-	if p == nil {
-		return nil, false, errors.New("nil prepared local presign round3 output")
-	}
-	selfState, ok := s.partyState(s.key.state.Party)
+	self, ok := s.partyState(s.key.state.Party)
 	if !ok {
-		return nil, false, errors.New("missing local presign party state")
+		return nil, false, errors.New("missing local presign state")
 	}
-	previousRound3 := selfState.round3
-	previousSent := s.round3Sent
-	previousPresign := s.presign
-	selfState.round3 = presignRound3State{
-		delta:           p.delta,
-		verifyShare:     p.verifyShare,
-		haveDelta:       true,
-		haveVerifyShare: true,
+	previous := self.round3
+	self.round3 = presignRound3State{
+		delta: p.payload.Delta, chi: p.chi, deltaPoint: p.payload.DeltaPoint,
+		sPoint: p.payload.S, proof: p.payload.Proof, havePayload: true,
 	}
-	s.round3Sent = true
-	s.presign = p.presign
-	prepared, ok, err := s.preparePresignCompletionEffects()
-	selfState.round3 = previousRound3
-	s.round3Sent = previousSent
-	s.presign = previousPresign
-	if err != nil {
-		return nil, false, err
-	}
-	if !ok {
-		return nil, false, nil
-	}
-	return prepared, true, nil
+	completion, ready, err := s.preparePresignCompletionEffects()
+	self.round3 = previous
+	return completion, ready, err
 }
 
 type preparedPresignCompletion struct {
@@ -1209,7 +426,6 @@ func (p *preparedPresignCompletion) destroy() {
 	}
 	if p.presign != nil {
 		p.presign.Destroy()
-		p.presign = nil
 	}
 }
 
@@ -1217,209 +433,173 @@ func (s *PresignSession) maybePreparePresignCompletion() (*preparedPresignComple
 	if s.completed || !s.allRound3Accepted() {
 		return nil, false, nil
 	}
+	gamma, err := s.aggregateGamma()
+	if err != nil {
+		return nil, false, err
+	}
 	delta := secp.ScalarZero()
-	gammaPoints := make([]*secp.Point, 0, len(s.parties))
-	for i := range s.parties {
-		st := &s.parties[i]
-		if !st.round3.haveDelta || !st.round3.haveVerifyShare {
-			return nil, false, nil
-		}
-		deltaShare, err := secpScalarFromSecret(st.round3.delta)
+	deltaPoints := make([]*secp.Point, 0, len(s.signers))
+	sPoints := make([]*secp.Point, 0, len(s.signers))
+	for _, signer := range s.signers {
+		state, _ := s.partyState(signer)
+		value, err := secpScalarFromSecretAllowZero(state.round3.delta)
 		if err != nil {
 			return nil, false, err
 		}
-		delta = secp.ScalarAdd(delta, deltaShare)
-		gammaPoint, err := secp.PointFromBytes(st.round1.payload.Gamma)
+		delta = secp.ScalarAdd(delta, value)
+		deltaPoint, err := secp.PointFromBytes(state.round3.deltaPoint)
 		if err != nil {
 			return nil, false, err
 		}
-		gammaPoints = append(gammaPoints, gammaPoint)
+		sPoint, err := decodePresignGroupElement(state.round3.sPoint)
+		if err != nil {
+			return nil, false, err
+		}
+		deltaPoints = append(deltaPoints, deltaPoint)
+		sPoints = append(sPoints, sPoint)
 	}
 	if delta.IsZero() {
-		return nil, false, errors.New("zero presign delta")
+		return nil, false, fmt.Errorf("%w: aggregate delta is zero; retry with a new PresignID", errUnattributedPresignFailure)
 	}
-	deltaInv, err := secp.ScalarInvert(delta)
+	if !secp.Equal(secp.ScalarBaseMult(delta), secp.AddPoints(deltaPoints...)) {
+		return nil, false, &presignRedAlertError{kind: presignRedAlertNonce}
+	}
+	publicKey, err := secp.PointFromBytes(s.key.state.PublicKey)
 	if err != nil {
-		return nil, false, errors.New("non-invertible presign delta")
+		return nil, false, err
 	}
-	gamma := secp.AddPoints(gammaPoints...)
-	RPoint := secp.ScalarMult(gamma, deltaInv)
-	littleR := secp.ScalarFromFieldElement(RPoint.X)
-	if littleR.IsZero() {
-		return nil, false, errors.New("zero ECDSA r")
+	if !secp.Equal(secp.ScalarMult(publicKey, delta), secp.AddPoints(sPoints...)) {
+		return nil, false, &presignRedAlertError{kind: presignRedAlertChi}
 	}
-	if s.presign == nil {
-		return nil, false, errors.New("local presign shares not computed")
+	deltaInverse, err := secp.ScalarInvert(delta)
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: aggregate delta is not invertible; retry with a new PresignID", errUnattributedPresignFailure)
 	}
-	verifyShares := make([]signVerifyShare, 0, len(s.signers))
-	identificationTranscripts := make([]presignIdentificationTranscript, 0, len(s.signers))
-	for _, id := range s.signers {
-		st, ok := s.partyState(id)
-		if !ok {
-			return nil, false, fmt.Errorf("missing presign state for party %d", id)
+	self, _ := s.partyState(s.key.state.Party)
+	k, err := secpScalarFromSecret(s.kShare)
+	if err != nil {
+		return nil, false, err
+	}
+	chi, err := secpScalarFromSecretAllowZero(self.round3.chi)
+	if err != nil {
+		return nil, false, err
+	}
+	kTilde := secp.ScalarMul(k, deltaInverse)
+	chiTilde := secp.ScalarMul(chi, deltaInverse)
+	kSecret, err := secpSecretScalarFromScalar(kTilde)
+	if err != nil {
+		return nil, false, err
+	}
+	chiSecret, err := secpSecretScalarFromScalarAllowZero(chiTilde)
+	if err != nil {
+		kSecret.Destroy()
+		return nil, false, err
+	}
+	commitments := make([]normalizedPresignCommitment, 0, len(s.signers))
+	for i, signer := range s.signers {
+		deltaTilde := secp.ScalarMult(deltaPoints[i], deltaInverse)
+		sTilde := secp.ScalarMult(sPoints[i], deltaInverse)
+		deltaEncoded, err := encodePresignGroupElement(deltaTilde)
+		if err != nil {
+			kSecret.Destroy()
+			chiSecret.Destroy()
+			return nil, false, err
 		}
-		share := st.round3.verifyShare.Clone()
-		identificationTranscripts = append(identificationTranscripts, presignIdentificationTranscript{
-			Party: id, Contributions: cloneMTAContributions(share.mtaContributions),
-		})
-		destroyMTAContributions(share.mtaContributions)
-		share.mtaContributions = nil
-		verifyShares = append(verifyShares, share)
+		sEncoded, err := encodePresignGroupElement(sTilde)
+		if err != nil {
+			kSecret.Destroy()
+			chiSecret.Destroy()
+			return nil, false, err
+		}
+		commitments = append(commitments, normalizedPresignCommitment{Party: signer, DeltaTilde: deltaEncoded, STilde: sEncoded})
 	}
-	verification, err := s.buildPresignVerificationContext()
-	if err != nil {
+	littleR := secp.ScalarFromFieldElement(gamma.X)
+	if littleR.IsZero() {
+		kSecret.Destroy()
+		chiSecret.Destroy()
+		return nil, false, fmt.Errorf("%w: aggregate Gamma yields zero ECDSA r; retry with a new PresignID", errUnattributedPresignFailure)
+	}
+	if err := validateNormalizedPresignArtifact(s.signers, commitments, s.key.state.Party, gamma, publicKey, kTilde, chiTilde); err != nil {
+		kSecret.Destroy()
+		chiSecret.Destroy()
 		return nil, false, err
 	}
-	sigmaOpenings, err := s.cloneSigmaIdentificationOpenings()
-	if err != nil {
-		return nil, false, err
-	}
-	sigmaOpeningRecords, err := buildPresignSigmaOpeningRecords(sigmaOpenings)
-	if err != nil {
-		destroyPresignSigmaOpenings(sigmaOpenings)
-		return nil, false, err
-	}
-	deltaSecret, err := secpSecretScalarFromScalar(delta)
-	if err != nil {
-		destroyPresignSigmaOpenings(sigmaOpenings)
-		destroyPresignSigmaOpeningRecords(sigmaOpeningRecords)
-		return nil, false, err
-	}
-	base := s.presign.state
 	completed := &Presign{state: &presignState{
-		SecurityParams:            base.SecurityParams,
-		Party:                     base.Party,
-		Threshold:                 base.Threshold,
-		Signers:                   base.Signers.Clone(),
-		R:                         secp.Clone(RPoint),
-		LittleR:                   littleR,
-		TranscriptHash:            s.presignTranscriptHash(RPoint, littleR, delta),
-		Context:                   base.Context.Clone(),
-		ContextHash:               bytes.Clone(base.ContextHash),
-		Derivation:                base.Derivation.Clone(),
-		PlanHash:                  bytes.Clone(base.PlanHash),
-		PublicKey:                 secp.Clone(base.PublicKey),
-		KeygenTranscriptHash:      bytes.Clone(base.KeygenTranscriptHash),
-		PartiesHash:               bytes.Clone(base.PartiesHash),
-		VerifyShares:              verifyShares,
-		Verification:              verification,
-		IdentificationTranscripts: identificationTranscripts,
-		SigmaOpeningRecords:       sigmaOpeningRecords,
-		sigmaOpenings:             sigmaOpenings,
-		KShare:                    base.KShare.Clone(),
-		ChiShare:                  base.ChiShare.Clone(),
-		DeltaAggregate:            deltaSecret,
-		Consumed:                  NewAtomicBoolWire(false),
-		attempt:                   newPresignAttemptBinding(false),
+		Party: s.key.state.Party, Threshold: s.key.state.Threshold, Signers: s.signers.Clone(),
+		PresignID: bytes.Clone(s.presignID), EpochID: bytes.Clone(s.epochID), Gamma: secp.Clone(gamma), LittleR: littleR,
+		KShare: kSecret, ChiShare: chiSecret, Commitments: commitments,
+		TranscriptHash: s.presignTranscriptHash(gamma, littleR, commitments), Context: s.context.Clone(),
+		ContextHash: bytes.Clone(s.contextHash), PublicKey: publicKey,
+		KeygenTranscriptHash: bytes.Clone(s.key.state.KeygenTranscriptHash),
+		PartiesHash:          tss.PartySetHash(s.key.state.Parties, partySetHashLabel), PlanHash: bytes.Clone(s.planHash),
+		SecurityParams: s.securityParams, Derivation: s.derivation.Clone(), Epoch: s.key.state.Epoch.Clone(),
+		Consumed: NewAtomicBoolWire(false), attempt: newPresignAttemptBinding(false),
 	}}
-	if err := completed.VerifyCryptographicMaterialWithLimits(s.limits); err != nil {
+	if err := completed.ValidateWithLimits(s.limits); err != nil {
 		completed.Destroy()
-		return nil, false, &presignAggregateAlertError{err: err}
+		return nil, false, err
 	}
 	return &preparedPresignCompletion{presign: completed}, true, nil
 }
 
-func (s *PresignSession) cloneSigmaIdentificationOpenings() ([]presignSigmaOpening, error) {
-	openings := make([]presignSigmaOpening, 0, len(s.signers)-1)
-	for _, peer := range s.signers {
-		if peer == s.key.state.Party {
-			continue
-		}
-		state, ok := s.partyState(peer)
-		if !ok || state.mta.sigmaOpening == nil || !state.round2.haveOutboundSigma {
-			destroyPresignSigmaOpenings(openings)
-			return nil, fmt.Errorf("missing sigma identification opening for peer %d", peer)
-		}
-		openings = append(openings, presignSigmaOpening{
-			Peer:     peer,
-			Response: state.round2.outboundSigma.Clone(),
-			Opening:  state.mta.sigmaOpening.Clone(),
-		})
+func (s *PresignSession) commitPresignCompletion(p *preparedPresignCompletion) error {
+	if p == nil || p.presign == nil {
+		return errors.New("missing prepared presign completion")
 	}
-	return openings, nil
-}
-
-func destroyPresignSigmaOpenings(openings []presignSigmaOpening) {
-	for i := range openings {
-		openings[i].destroy()
+	metadata, ok := p.presign.PublicMetadata()
+	if !ok {
+		p.presign.Destroy()
+		p.presign = nil
+		p.committed = true
+		return s.abortPresignRun(errors.New("prepared presign has no valid public metadata"))
 	}
-}
-
-func (s *PresignSession) buildPresignVerificationContext() (presignVerificationContext, error) {
-	context := presignVerificationContext{
-		SessionID:  s.sessionID,
-		Round1Echo: s.round1Echo(),
-		Entries:    make([]presignVerificationEntry, 0, len(s.signers)),
+	expectedSlot, err := PresignSlotID(metadata.PresignID)
+	if err != nil {
+		p.presign.Destroy()
+		p.presign = nil
+		p.committed = true
+		return s.abortPresignRun(err)
 	}
-	for _, id := range s.signers {
-		state, ok := s.partyState(id)
-		if !ok || !state.round1.havePayload || !state.round3.haveDelta {
-			context.destroy()
-			return presignVerificationContext{}, fmt.Errorf("missing persisted verification material for party %d", id)
-		}
-		lambda, err := shamir.LagrangeCoefficient(id, s.signers)
-		if err != nil {
-			context.destroy()
-			return presignVerificationContext{}, err
-		}
-		verificationShare, ok := s.key.verificationShare(id)
-		if !ok {
-			context.destroy()
-			return presignVerificationContext{}, fmt.Errorf("missing verification share for party %d", id)
-		}
-		verificationPoint, err := secp.PointFromBytes(verificationShare)
-		if err != nil {
-			context.destroy()
-			return presignVerificationContext{}, err
-		}
-		delta, err := secpScalarFromSecret(state.round3.delta)
-		if err != nil {
-			context.destroy()
-			return presignVerificationContext{}, err
-		}
-		context.Entries = append(context.Entries, presignVerificationEntry{
-			Party:             id,
-			Gamma:             bytes.Clone(state.round1.payload.Gamma),
-			EncK:              bytes.Clone(state.round1.payload.EncK),
-			EncGamma:          bytes.Clone(state.round1.payload.EncGamma),
-			PaillierPublicKey: state.round1.payload.PaillierPublicKey.Clone(),
-			XBarPoint:         secp.ScalarMult(verificationPoint, lambda),
-			Delta:             &delta,
-			KPoint:            bytes.Clone(state.round1.payload.KPoint),
-		})
+	storeCtx, cancel := durableStoreContext(s.config.Ctx(), s.lifecycleTimeout)
+	slot, err := PersistPresignFromLeaseWithLimits(storeCtx, s.lifecycleStore, s.lifecycleLease, p.presign, s.limits)
+	cancel()
+	if err != nil {
+		p.presign.Destroy()
+		p.presign = nil
+		p.committed = true
+		return s.abortPresignRun(fmt.Errorf("persist completed presign: %w", err))
 	}
-	return context, nil
-}
-
-func (s *PresignSession) commitPresignCompletion(p *preparedPresignCompletion) {
-	if p == nil {
-		return
+	if slot != expectedSlot {
+		// PersistPresignFromLease validates this before the atomic store call, so
+		// reaching this branch means the local lifecycle integration is corrupt.
+		p.presign.Destroy()
+		p.presign = nil
+		p.committed = true
+		return s.abortPresignRun(fmt.Errorf("%w: persisted presign slot mismatch", tssrun.ErrLifecycleCorrupt))
 	}
-	if s.presign != nil {
-		s.presign.Destroy()
-	}
-	s.presign = p.presign
+	s.leaseFinished = true
+	s.persistedPresign = func() *PersistedPresign {
+		descriptor := newPersistedPresign(slot, metadata)
+		return &descriptor
+	}()
+	p.presign.Destroy()
+	p.presign = nil
+	p.committed = true
 	s.completed = true
 	s.clearCompletedWitnesses()
-	s.log.Info(s.config.Ctx(), "presign complete",
-		"party_id", s.key.state.Party,
-		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
-	)
-	p.committed = true
+	return nil
 }
 
 func (s *PresignSession) clearCompletedWitnesses() {
-	if s.kShare != nil {
-		s.kShare.Destroy()
-		s.kShare = nil
+	for _, value := range []**secret.Scalar{&s.kShare, &s.gamma, &s.a, &s.b, &s.xBar} {
+		if *value != nil {
+			(*value).Destroy()
+			*value = nil
+		}
 	}
-	if s.gamma != nil {
-		s.gamma.Destroy()
-		s.gamma = nil
-	}
-	if s.xBar != nil {
-		s.xBar.Destroy()
-		s.xBar = nil
+	if s.paillier != nil {
+		s.paillier.Destroy()
+		s.paillier = nil
 	}
 	if s.startOpening != nil {
 		s.startOpening.Destroy()
@@ -1429,75 +609,53 @@ func (s *PresignSession) clearCompletedWitnesses() {
 		s.gammaOpening.Destroy()
 		s.gammaOpening = nil
 	}
-	if s.paillier != nil {
-		s.paillier.Destroy()
-		s.paillier = nil
-	}
-	if s.derivation != nil {
-		s.derivation.Destroy()
-		s.derivation = nil
-	}
 	for i := range s.parties {
 		s.parties[i].destroy()
 	}
-	clear(s.partyIndex)
-	s.parties = nil
+	if s.ownsKey && s.key != nil {
+		s.key.Destroy()
+		s.key = nil
+	}
 }
 
-func (s *PresignSession) presignTranscriptHash(R *secp.Point, littleR, delta secp.Scalar) []byte {
+func (s *PresignSession) presignTranscriptHash(gamma *secp.Point, littleR secp.Scalar, commitments []normalizedPresignCommitment) []byte {
 	t := transcript.New(presignTranscriptHashLabel)
-	rBytes, _ := secp.PointBytes(R)
 	t.AppendBytes("session_id", s.sessionID[:])
+	t.AppendBytes("epoch_id", s.epochID)
+	t.AppendBytes("presign_id", s.presignID)
 	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("context_hash", s.contextHash)
-	t.AppendBytes("additive_shift", s.derivation.AdditiveShift)
-	t.AppendBytes("public_key", s.key.state.PublicKey)
-	t.AppendBytes("keygen_transcript_hash", s.key.state.KeygenTranscriptHash)
-	t.AppendBytes("parties_hash", tss.PartySetHash(s.key.state.Parties, partySetHashLabel))
-	for _, id := range s.signers {
-		st, ok := s.partyState(id)
-		if !ok {
-			continue
-		}
-		t.AppendUint32("signer", id)
-		t.AppendBytes("gamma", st.round1.payload.Gamma)
-		t.AppendBytes("enc_k", st.round1.payload.EncK)
-		t.AppendBytes("enc_gamma", st.round1.payload.EncGamma)
-		t.AppendBytes("delta_share", st.round3.delta.FixedBytes())
-		vs := st.round3.verifyShare
-		kPointBytes, _ := vs.kPointBytes()
-		chiPointBytes, _ := vs.chiPointBytes()
-		proofBytes, _ := vs.proofBytes()
-		t.AppendBytes("k_point", kPointBytes)
-		t.AppendBytes("chi_point", chiPointBytes)
-		proofHash := sha256.Sum256(proofBytes)
-		t.AppendBytes("proof_hash", proofHash[:])
-	}
-	t.AppendBytes("r_point", rBytes)
+	t.AppendUint32List("signers", s.signers)
+	gammaBytes, _ := secp.PointBytes(gamma)
+	t.AppendBytes("gamma", gammaBytes)
 	t.AppendBytes("little_r", littleR.Bytes())
-	t.AppendBytes("delta", delta.Bytes())
+	for i := range commitments {
+		t.AppendUint32("party", commitments[i].Party)
+		t.AppendBytes("delta_tilde", commitments[i].DeltaTilde)
+		t.AppendBytes("s_tilde", commitments[i].STilde)
+	}
 	return t.Sum()
 }
 
 func (s *PresignSession) round1Echo() []byte {
 	t := transcript.New(presignRound1EchoLabel)
 	t.AppendBytes("session_id", s.sessionID[:])
+	t.AppendBytes("epoch_id", s.epochID)
+	t.AppendBytes("presign_id", s.presignID)
 	t.AppendBytes("plan_hash", s.planHash)
-	t.AppendBytes("context_hash", s.contextHash)
-	t.AppendBytes("additive_shift", s.derivation.AdditiveShift)
-	for _, id := range s.signers {
-		st, ok := s.partyState(id)
-		if !ok {
-			continue
+	for _, signer := range s.signers {
+		state, ok := s.partyState(signer)
+		if !ok || !state.round1.havePayload {
+			return nil
 		}
-		p := st.round1.payload
-		t.AppendUint32("signer", id)
-		t.AppendBytes("gamma", p.Gamma)
-		t.AppendBytes("enc_k", p.EncK)
-		t.AppendBytes("enc_gamma", p.EncGamma)
-		t.AppendBytes("k_point", p.KPoint)
-		paillierPublicKeyBytes, _ := canonicalWireMessageBytes(p.PaillierPublicKey, s.limits)
-		t.AppendBytes("paillier_public_key", paillierPublicKeyBytes)
+		encoded, err := state.round1.payload.MarshalBinaryWithLimits(s.limits)
+		if err != nil {
+			return nil
+		}
+		t.AppendUint32("party", signer)
+		t.AppendBytes("round1_payload", encoded)
 	}
 	return t.Sum()
 }
+
+func defaultEnvelopeLimitsForEvidence() tss.EnvelopeLimits { return tss.DefaultEnvelopeLimits() }

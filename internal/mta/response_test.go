@@ -23,18 +23,21 @@ func TestResponseMessageValidate(t *testing.T) {
 	tests := []struct {
 		name       string
 		ciphertext []byte
+		f          []byte
 		proof      zkpai.AffGProof
 		wantErr    bool
 	}{
-		{name: "valid", ciphertext: validResponse.Ciphertext, proof: validResponse.Proof, wantErr: false},
-		{name: "empty ciphertext", ciphertext: nil, proof: validResponse.Proof, wantErr: true},
-		{name: "empty proof", ciphertext: validResponse.Ciphertext, proof: zkpai.AffGProof{}, wantErr: true},
-		{name: "leading zero ciphertext", ciphertext: []byte{0x00, 0x01}, proof: validResponse.Proof, wantErr: true},
-		{name: "garbled proof", ciphertext: validResponse.Ciphertext, proof: badProof, wantErr: true},
+		{name: "valid", ciphertext: validResponse.Ciphertext, f: validResponse.F, proof: validResponse.Proof, wantErr: false},
+		{name: "empty ciphertext", ciphertext: nil, f: validResponse.F, proof: validResponse.Proof, wantErr: true},
+		{name: "empty F", ciphertext: validResponse.Ciphertext, proof: validResponse.Proof, wantErr: true},
+		{name: "empty proof", ciphertext: validResponse.Ciphertext, f: validResponse.F, proof: zkpai.AffGProof{}, wantErr: true},
+		{name: "leading zero ciphertext", ciphertext: []byte{0x00, 0x01}, f: validResponse.F, proof: validResponse.Proof, wantErr: true},
+		{name: "leading zero F", ciphertext: validResponse.Ciphertext, f: []byte{0x00, 0x01}, proof: validResponse.Proof, wantErr: true},
+		{name: "garbled proof", ciphertext: validResponse.Ciphertext, f: validResponse.F, proof: badProof, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := ResponseMessage{Ciphertext: tt.ciphertext, Proof: tt.proof}
+			m := ResponseMessage{Ciphertext: tt.ciphertext, F: tt.f, Proof: tt.proof}
 			err := m.Validate()
 			if tt.wantErr && err == nil {
 				t.Fatal("expected error, got nil")
@@ -85,7 +88,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 		},
 		{
 			name:    "wrong version",
-			data:    mustMarshalResponseAtVersion(t, 99, validResponse.Ciphertext, validResponse.Proof),
+			data:    mustMarshalResponseAtVersion(t, 99, validResponse.Ciphertext, validResponse.F, validResponse.Proof),
 			wantErr: "wire ResponseMessage: got version 99, want 1",
 		},
 		{
@@ -93,6 +96,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 			data: func() []byte {
 				b, _ := wire.MarshalFields(responseMessageWireVersion, responseMessageWireType, []wire.Field{
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: validResponse.Ciphertext},
+					{Tag: testutil.MustFieldTag(ResponseMessage{}, "F"), Value: validResponse.F},
 				})
 				return b
 			}(),
@@ -102,6 +106,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 			data: func() []byte {
 				b, _ := wire.MarshalFields(responseMessageWireVersion, responseMessageWireType, []wire.Field{
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: validResponse.Ciphertext},
+					{Tag: testutil.MustFieldTag(ResponseMessage{}, "F"), Value: validResponse.F},
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: validProofRaw},
 					{Tag: 99, Value: []byte{0x01}},
 				})
@@ -129,10 +134,11 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 }
 
 // mustMarshalResponseAtVersion marshals a ResponseMessage with an overridden version.
-func mustMarshalResponseAtVersion(t *testing.T, version uint16, ciphertext []byte, proof zkpai.AffGProof) []byte {
+func mustMarshalResponseAtVersion(t *testing.T, version uint16, ciphertext, f []byte, proof zkpai.AffGProof) []byte {
 	t.Helper()
 	b, err := wire.MarshalFields(version, responseMessageWireType, []wire.Field{
 		{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: ciphertext},
+		{Tag: testutil.MustFieldTag(ResponseMessage{}, "F"), Value: f},
 		{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: mustMarshalAffGProof(t, proof)},
 	})
 	if err != nil {
@@ -174,6 +180,9 @@ func TestResponseMessageBinaryRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(decoded.Ciphertext, validResponse.Ciphertext) {
 		t.Fatal("ciphertext mismatch after round trip")
+	}
+	if !bytes.Equal(decoded.F, validResponse.F) {
+		t.Fatal("F mismatch after round trip")
 	}
 	if !bytes.Equal(mustMarshalAffGProof(t, decoded.Proof), mustMarshalAffGProof(t, validResponse.Proof)) {
 		t.Fatal("proof mismatch after round trip")

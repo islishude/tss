@@ -25,7 +25,7 @@ func TestCompletedReshareStillValidatesIgnoredEnvelope(t *testing.T) {
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    "wrong-protocol",
 		SessionID:   sessionID,
-		Round:       keygenConfirmationRound,
+		Round:       reshareConfirmationRound,
 		From:        2,
 		PayloadType: payloadKeygenConfirmation,
 	})

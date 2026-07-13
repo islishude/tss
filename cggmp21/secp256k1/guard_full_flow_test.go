@@ -3,6 +3,7 @@
 package secp256k1
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -215,11 +216,15 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 		}
 		g.AckVerifier = km.verifier
 		g.EnvelopeVerifier = km.verifier
-		plan, err := NewPresignPlan(PresignPlanOption{Key: shares[id], SessionID: presignSessionID, Signers: signers, Context: testPresignContext(), Limits: testLimitsPtr(), SecurityParams: testSecurityParamsPtr()})
+		plan, err := NewPresignPlan(PresignPlanOption{Key: shares[id], SessionID: presignSessionID, PresignID: presignSessionID[:], Signers: signers, Context: testPresignContext(), Limits: testLimitsPtr(), SecurityParams: testSecurityParamsPtr()})
 		if err != nil {
 			t.Fatal(err)
 		}
-		session, out, err := StartPresign(shares[id], plan, tss.LocalConfig{Self: id, EnvelopeSigner: km.signerFor(id).(*ed25519Signer)}, g)
+		runtime, err := prepareTestPresignRuntime(context.Background(), shares[id], plan, tss.LocalConfig{Self: id, EnvelopeSigner: km.signerFor(id).(*ed25519Signer)}, g)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, out, err := StartPresign(plan, runtime)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,9 +250,9 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 
 	presigns := make(map[tss.PartyID]*Presign, len(signers))
 	for _, id := range signers {
-		p, ok := psSessions[id].Presign()
-		if !ok {
-			t.Fatalf("presign did not complete for party %d", id)
+		p, err := loadPersistedPresignForTest(psSessions[id])
+		if err != nil {
+			t.Fatalf("load persisted presign for party %d: %v", id, err)
 		}
 		presigns[id] = p
 	}
@@ -267,10 +272,10 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 		}
 		g.AckVerifier = km.verifier
 		g.EnvelopeVerifier = km.verifier
-		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signSessionID, SignRequest{
+		session, out, err := startCGGMP21SignWithLocal(shares[id], presigns[id], signSessionID, SignRequest{
 			Context: testPresignContext(),
 			Message: []byte("hello guard-protected world"),
-		}, g)
+		}, tss.LocalConfig{Self: id, EnvelopeSigner: km.signerFor(id).(*ed25519Signer)}, g)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -305,15 +310,6 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	}, sig) {
 		t.Fatal("produced ECDSA signature failed verification")
 	}
-	for _, id := range signers {
-		if len(signSessions[id].sigmaOpenings) != 0 {
-			t.Fatalf("party %d retained attempt-owned sigma identification witnesses after successful signing", id)
-		}
-		if len(signSessions[id].presign.state.SigmaOpeningRecords) != len(signers)-1 {
-			t.Fatalf("party %d mutated caller-owned presign witness records", id)
-		}
-	}
-
 	t.Logf("Full guard-protected flow completed: keygen→presign→sign with broadcast certificates")
 }
 
@@ -346,7 +342,7 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 		Round:       1,
 		From:        72,
 		To:          0,
-		PayloadType: payloadKeygenCommitments,
+		PayloadType: payloadFigure6Commitment,
 		Payload:     []byte("test-commitments"),
 	})
 	if err != nil {

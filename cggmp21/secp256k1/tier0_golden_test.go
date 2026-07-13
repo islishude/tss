@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -11,8 +10,6 @@ import (
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
-// TestFast_GoldenPresignMarshalBinary verifies deterministic wire encoding of
-// a full Presign record including VerifyShares. No keygen is required.
 func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
@@ -20,14 +17,12 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/Presign.fast.golden", raw)
-
-	// Round-trip: unmarshal → marshal must produce identical bytes.
 	decoded, err := tss.DecodeBinaryWithLimits[Presign](raw, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer decoded.Destroy()
 	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -40,237 +35,131 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	}
 }
 
-func TestFast_GoldenVerificationShare(t *testing.T) {
+func TestFast_GoldenPublicShareRecords(t *testing.T) {
 	t.Parallel()
-	share := testVerificationShare(t)
-	raw, err := share.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		name   string
+		golden string
+		encode func() ([]byte, error)
+	}{
+		{name: "verification", golden: "wire/v1/cggmp21/VerificationShare.golden", encode: func() ([]byte, error) {
+			return testVerificationShare(t).MarshalBinaryWithLimits(testLimits())
+		}},
+		{name: "paillier", golden: "wire/v1/cggmp21/PaillierPublicShare.golden", encode: func() ([]byte, error) {
+			return testPaillierPublicShare(t).MarshalBinaryWithLimits(testLimits())
+		}},
+		{name: "ring-pedersen", golden: "wire/v1/cggmp21/RingPedersenPublicShare.golden", encode: func() ([]byte, error) {
+			return testRingPedersenPublicShare(t).MarshalBinaryWithLimits(testLimits())
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := tc.encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			testvectors.CheckHexGolden(t, tc.golden, raw)
+		})
 	}
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/VerificationShare.golden", raw)
 }
 
-func TestFast_GoldenPaillierPublicShare(t *testing.T) {
+func TestFast_GoldenFigure6AndAuxInfoCommitments(t *testing.T) {
 	t.Parallel()
-	share := testPaillierPublicShare(t)
-	raw, err := share.MarshalBinaryWithLimits(testLimits())
+	figure6, err := (figure6CommitmentPayload{
+		Commitment: bytes.Repeat([]byte{0x41}, 32), ChainCodeCommit: bytes.Repeat([]byte{0x42}, 32), PlanHash: bytes.Repeat([]byte{0x43}, 32),
+	}).MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/PaillierPublicShare.golden", raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/Figure6CommitmentPayload.golden", figure6)
+	aux, err := (auxInfoCommitmentPayload{Commitment: bytes.Repeat([]byte{0x51}, 32), PlanHash: bytes.Repeat([]byte{0x52}, 32)}).MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/AuxInfoCommitmentPayload.golden", aux)
 }
 
-func TestFast_GoldenRingPedersenPublicShare(t *testing.T) {
+func TestFast_GoldenKeygenConfirmation(t *testing.T) {
 	t.Parallel()
-	share := testRingPedersenPublicShare(t)
-	raw, err := share.MarshalBinaryWithLimits(testLimits())
+	confirmation := KeygenConfirmation{
+		SessionID:       tss.SessionID(bytes.Repeat([]byte{0x61}, 32)),
+		Sender:          1,
+		Threshold:       1,
+		Parties:         tss.NewPartySet(1),
+		PublicKey:       testCurvePointBytes(t, 7),
+		TranscriptHash:  bytes.Repeat([]byte{0x62}, 32),
+		CommitmentsHash: bytes.Repeat([]byte{0x63}, 32),
+		ChainCode:       bytes.Repeat([]byte{0x64}, 32),
+		PlanHash:        bytes.Repeat([]byte{0x65}, 32),
+		EpochID:         bytes.Repeat([]byte{0x66}, 32),
+	}
+	raw, err := confirmation.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/RingPedersenPublicShare.golden", raw)
-}
-
-// TestFast_GoldenKeygenSharePayload verifies deterministic wire encoding of
-// keygen share payloads. No keygen or crypto is required.
-func TestFast_GoldenKeygenSharePayload(t *testing.T) {
-	t.Parallel()
-	proof := testEncProof(1)
-	proof.TranscriptHash = bytes.Repeat([]byte{0x91}, 32)
-	payload := keygenSharePayload{Ciphertext: []byte{1}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x90}, 32), FactorProof: testFactorProof(10)}
-	raw, err := payload.MarshalBinaryWithLimits(testLimits())
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/KeygenConfirmation.golden", raw)
+	decoded, err := tss.DecodeBinaryWithLimits[KeygenConfirmation](raw, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/KeygenSharePayload.golden", raw)
-
-	decoded, err := unmarshalKeygenSharePayload(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, raw2) {
-		t.Error("round-trip produced different encoding")
-	}
-	if _, err := unmarshalKeygenSharePayload(append(raw, 0)); err == nil {
-		t.Error("accepted trailing byte")
+	if !bytes.Equal(decoded.EpochID, confirmation.EpochID) {
+		t.Fatal("keygen confirmation golden lost epoch binding")
 	}
 }
 
-// TestFast_GoldenRefreshSharePayload verifies deterministic wire encoding of
-// refresh share payloads. No refresh protocol run is required.
-func TestFast_GoldenRefreshSharePayload(t *testing.T) {
-	t.Parallel()
-	proof := testEncProof(2)
-	proof.TranscriptHash = bytes.Repeat([]byte{0x92}, 32)
-	payload := refreshSharePayload{Ciphertext: []byte{2}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x91}, 32), FactorProof: testFactorProof(30)}
-	raw, err := payload.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/RefreshSharePayload.golden", raw)
-
-	decoded, err := unmarshalRefreshSharePayload(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, raw2) {
-		t.Error("round-trip produced different encoding")
-	}
-	if _, err := unmarshalRefreshSharePayload(append(raw, 0)); err == nil {
-		t.Error("accepted trailing byte")
-	}
-}
-
-func testFactorProof(seed int64) zkpai.FactorProof {
-	return zkpai.FactorProof{
-		P: big.NewInt(seed), Q: big.NewInt(seed + 1), A: big.NewInt(seed + 2), B: big.NewInt(seed + 3),
-		T: big.NewInt(seed + 4), Sigma: big.NewInt(seed + 5), Z1: big.NewInt(seed + 6), Z2: big.NewInt(seed + 7),
-		W1: big.NewInt(seed + 8), W2: big.NewInt(seed + 9), V: big.NewInt(seed + 10), TranscriptHash: bytes.Repeat([]byte{byte(seed)}, 32),
-	}
-}
-
-// TestFast_GoldenReshareSharePayload verifies deterministic wire encoding of
-// reshare dealer-to-receiver share payloads.
-func TestFast_GoldenReshareSharePayload(t *testing.T) {
-	t.Parallel()
-	proof := testEncProof(3)
-	proof.TranscriptHash = bytes.Repeat([]byte{0x91}, 32)
-	payload := reshareSharePayload{
-		Dealer:               1,
-		Receiver:             2,
-		Ciphertext:           []byte{3},
-		Proof:                proof,
-		DealerCommitmentHash: bytes.Repeat([]byte{0x92}, 32),
-		PlanHash:             bytes.Repeat([]byte{0x93}, 32),
-	}
-	raw, err := marshalReshareSharePayload(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/ReshareSharePayload.golden", raw)
-
-	decoded, err := unmarshalReshareSharePayload(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw2, err := marshalReshareSharePayload(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, raw2) {
-		t.Error("round-trip produced different encoding")
-	}
-	if _, err := unmarshalReshareSharePayload(append(raw, 0)); err == nil {
-		t.Error("accepted trailing byte")
-	}
-}
-
-// TestFast_GoldenSignPartialPayload verifies deterministic wire encoding of
-// sign partial payloads. No keygen or crypto is required.
 func TestFast_GoldenSignPartialPayload(t *testing.T) {
 	t.Parallel()
 	payload := signPartialPayload{
 		S:                   testSecretScalar(t, 1),
+		PresignID:           bytes.Repeat([]byte{0xa1}, 32),
+		EpochID:             bytes.Repeat([]byte{0xa2}, 32),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
 		PartialEquationHash: bytes.Repeat([]byte{0xdd}, 32),
 		PlanHash:            bytes.Repeat([]byte{0xde}, 32),
 	}
+	defer payload.S.Destroy()
 	raw, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignPartialPayload.golden", raw)
-
 	decoded, err := unmarshalSignPartialPayload(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer decoded.S.Destroy()
 	raw2, err := marshalSignPartialPayload(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, raw2) {
-		t.Error("round-trip produced different encoding")
-	}
-	if _, err := unmarshalSignPartialPayload(append(raw, 0)); err == nil {
-		t.Error("accepted trailing byte")
+	if err != nil || !bytes.Equal(raw, raw2) {
+		t.Fatalf("sign partial canonical round-trip failed: %v", err)
 	}
 }
 
-// TestFast_GoldenSignAttemptRecord verifies the durable attempt/outbox wire
-// contract without running protocol setup.
-func TestFast_GoldenSignAttemptRecord(t *testing.T) {
-	t.Parallel()
-	record := testSignAttemptRecord(t, 0x77)
-	raw, err := record.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignAttemptRecord.golden", raw)
-
-	decoded, err := tss.DecodeBinaryValue[SignAttemptRecord](raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw2, err := decoded.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, raw2) {
-		t.Error("round-trip produced different encoding")
-	}
-	if _, err := tss.DecodeBinaryValue[SignAttemptRecord](append(raw, 0)); err == nil {
-		t.Error("accepted trailing byte")
-	}
-}
-
-// TestFast_GoldenPresignRound3Payload verifies deterministic wire encoding of
-// presign round 3 payloads. No keygen or crypto is required.
 func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 	t.Parallel()
-	kPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1)))
-	chiPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2)))
-	proof := mustMinimalSignPrepProofForTest(t)
-	payload := presignRound3Payload{
-		Delta:    testSecretScalar(t, 42),
-		KPoint:   kPoint,
-		ChiPoint: chiPoint,
-		Proof:    proof,
-		PlanHash: bytes.Repeat([]byte{0x91}, 32),
+	point := testCurvePointBytes(t, 1)
+	proof := zkpai.ElogProof{
+		A: bytes.Clone(point), N: bytes.Clone(point), B: bytes.Clone(point),
+		Z: secp.ScalarOne().Bytes(), U: secp.ScalarOne().Bytes(),
+		TranscriptHash: bytes.Repeat([]byte{0x91}, 32),
 	}
+	payload := presignRound3Payload{
+		Delta: testSecretScalar(t, 42), S: bytes.Clone(point), DeltaPoint: bytes.Clone(point), Proof: proof,
+		PlanHash: bytes.Repeat([]byte{0x92}, 32), EpochID: bytes.Repeat([]byte{0x93}, 32), PresignID: bytes.Repeat([]byte{0x94}, 32),
+	}
+	defer payload.Delta.Destroy()
 	raw, err := marshalPresignRound3Payload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/PresignRound3Payload.golden", raw)
-
 	decoded, err := unmarshalPresignRound3Payload(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer decoded.Delta.Destroy()
 	raw2, err := marshalPresignRound3Payload(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, raw2) {
-		t.Error("round-trip produced different encoding")
-	}
-	if _, err := unmarshalPresignRound3Payload(append(raw, 0)); err == nil {
-		t.Error("accepted trailing byte")
+	if err != nil || !bytes.Equal(raw, raw2) {
+		t.Fatalf("round3 canonical round-trip failed: %v", err)
 	}
 }

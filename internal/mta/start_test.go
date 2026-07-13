@@ -75,6 +75,7 @@ func TestUnmarshalStartMessageErrors(t *testing.T) {
 			data: func() []byte {
 				b, _ := wire.MarshalFields(startMessageWireVersion, "mta.response-message", []wire.Field{
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: []byte{0x01}},
+					{Tag: testutil.MustFieldTag(ResponseMessage{}, "F"), Value: []byte{0x01}},
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: []byte{0x02}},
 				})
 				return b

@@ -1,6 +1,7 @@
 package tssrun
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -22,7 +23,7 @@ func TestMemoryRunStoreRejectsDuplicateSessionAndDigestConflict(t *testing.T) {
 	if err := store.CreateRun(ctx, duplicate); !errors.Is(err, ErrSessionAlreadyUsed) {
 		t.Fatalf("expected ErrSessionAlreadyUsed, got %v", err)
 	}
-	digest := run.PlanDigest
+	digest := run.AcceptanceDigest()
 	if err := store.AcceptPlan(ctx, run.RunID, 1, digest); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
@@ -31,6 +32,85 @@ func TestMemoryRunStoreRejectsDuplicateSessionAndDigestConflict(t *testing.T) {
 	}
 	if err := store.AcceptPlan(ctx, run.RunID, 1, testRunDigest("other-digest")); !errors.Is(err, ErrPlanDigestConflict) {
 		t.Fatalf("expected ErrPlanDigestConflict, got %v", err)
+	}
+}
+
+func TestRunIntentAcceptanceDigestBindsEveryImmutableField(t *testing.T) {
+	base := testRunIntent(t, "run-acceptance")
+	base.Kind = RunRefresh
+	base.Signers = tss.NewPartySet(1, 2)
+	base.ParentKeyID = "parent-key"
+	base.PresignID = "presign-1"
+	base.TargetKeyID = base.Binding.KeyID
+	base.TargetKeyGeneration = "gen-2"
+	base.ContextDigest = testRunDigest("context")
+	want := base.AcceptanceDigest()
+
+	otherSession, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatalf("NewSessionID: %v", err)
+	}
+	mutations := map[string]func(*RunIntent){
+		"run id":            func(run *RunIntent) { run.RunID = "other-run" },
+		"protocol":          func(run *RunIntent) { run.Protocol = tss.ProtocolCGGMP21Secp256k1 },
+		"kind":              func(run *RunIntent) { run.Kind = RunReshare },
+		"session id":        func(run *RunIntent) { run.SessionID = otherSession },
+		"parties":           func(run *RunIntent) { run.Parties = tss.NewPartySet(1, 2) },
+		"signers":           func(run *RunIntent) { run.Signers = tss.NewPartySet(2, 3) },
+		"threshold":         func(run *RunIntent) { run.Threshold++ },
+		"source key id":     func(run *RunIntent) { run.Binding.KeyID = "other-key" },
+		"source generation": func(run *RunIntent) { run.Binding.KeyGeneration = "other-generation" },
+		"source epoch": func(run *RunIntent) {
+			run.Binding.EpochID = testGenerationBinding("unused", "unused", "other-epoch").EpochID
+		},
+		"target key id":     func(run *RunIntent) { run.TargetKeyID = "other-target" },
+		"target generation": func(run *RunIntent) { run.TargetKeyGeneration = "gen-3" },
+		"parent key id":     func(run *RunIntent) { run.ParentKeyID = "other-parent" },
+		"presign id":        func(run *RunIntent) { run.PresignID = "other-presign" },
+		"protocol plan":     func(run *RunIntent) { run.PlanDigest = testRunDigest("other-plan") },
+		"context":           func(run *RunIntent) { run.ContextDigest = testRunDigest("other-context") },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			changed := base.Clone()
+			mutate(&changed)
+			if bytes.Equal(changed.AcceptanceDigest(), want) {
+				t.Fatalf("AcceptanceDigest did not bind %s", name)
+			}
+		})
+	}
+
+	callerOwned := base.AcceptanceDigest()
+	callerOwned[0] ^= 0xff
+	if !bytes.Equal(base.AcceptanceDigest(), want) {
+		t.Fatal("caller mutation changed a later acceptance digest")
+	}
+}
+
+func TestMemoryRunStoreRejectsTargetSubstitutionUnderSameProtocolPlan(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryRunStore()
+	run := testRunIntent(t, "refresh-run")
+	run.Kind = RunRefresh
+	run.TargetKeyID = run.Binding.KeyID
+	run.TargetKeyGeneration = "gen-2"
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	substituted := run.Clone()
+	substituted.TargetKeyGeneration = "gen-3"
+	if !bytes.Equal(substituted.PlanDigest, run.PlanDigest) {
+		t.Fatal("test setup changed the opaque protocol plan digest")
+	}
+	if err := store.AcceptPlan(ctx, run.RunID, 1, substituted.AcceptanceDigest()); !errors.Is(err, ErrPlanDigestConflict) {
+		t.Fatalf("target substitution got %v, want ErrPlanDigestConflict", err)
+	}
+	if err := AcceptPlanDigest(ctx, store, run, 1, run.PlanDigest); !errors.Is(err, ErrPlanDigestConflict) {
+		t.Fatalf("raw protocol plan digest got %v, want ErrPlanDigestConflict", err)
+	}
+	if err := AcceptPlanDigest(ctx, store, run, 1, run.AcceptanceDigest()); err != nil {
+		t.Fatalf("AcceptPlanDigest: %v", err)
 	}
 }
 
@@ -44,7 +124,7 @@ func TestMemoryRunStoreLookupLifecycle(t *testing.T) {
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, ErrRunNotAccepted) {
 		t.Fatalf("expected ErrRunNotAccepted, got %v", err)
 	}
-	if err := store.AcceptPlan(ctx, run.RunID, 1, run.PlanDigest); err != nil {
+	if err := store.AcceptPlan(ctx, run.RunID, 1, run.AcceptanceDigest()); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
 	if got, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); err != nil || got.RunID != run.RunID {
@@ -68,7 +148,7 @@ func TestMemoryRunStoreCompletionIsScopedToLocalParty(t *testing.T) {
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	digest := run.PlanDigest
+	digest := run.AcceptanceDigest()
 	for _, party := range tss.NewPartySet(1, 2) {
 		if err := store.AcceptPlan(ctx, run.RunID, party, digest); err != nil {
 			t.Fatalf("AcceptPlan party %d: %v", party, err)
@@ -114,7 +194,7 @@ func TestMemoryRunStoreRejectsLateAcceptAfterAbort(t *testing.T) {
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	digest := run.PlanDigest
+	digest := run.AcceptanceDigest()
 	if err := store.AcceptPlan(ctx, run.RunID, 1, digest); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
@@ -144,7 +224,7 @@ func TestMemoryRunStoreRejectsUnboundLifecycleMutations(t *testing.T) {
 		t.Fatalf("unbound plan digest got %v, want ErrPlanDigestConflict", err)
 	}
 	for name, mutate := range map[string]func() error{
-		"accept": func() error { return store.AcceptPlan(ctx, run.RunID, 4, run.PlanDigest) },
+		"accept": func() error { return store.AcceptPlan(ctx, run.RunID, 4, run.AcceptanceDigest()) },
 		"start":  func() error { return store.MarkStarted(ctx, run.RunID, 4) },
 		"complete": func() error {
 			return store.MarkCompleted(ctx, run.RunID, 4, LocalRunResult{OutputDigest: testRunDigest("out")})
@@ -164,7 +244,7 @@ func TestMemoryRunStoreValidatesCompletionResultBinding(t *testing.T) {
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := store.AcceptPlan(ctx, run.RunID, 1, run.PlanDigest); err != nil {
+	if err := store.AcceptPlan(ctx, run.RunID, 1, run.AcceptanceDigest()); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
 	if err := store.MarkStarted(ctx, run.RunID, 1); err != nil {
@@ -172,9 +252,9 @@ func TestMemoryRunStoreValidatesCompletionResultBinding(t *testing.T) {
 	}
 
 	for name, result := range map[string]LocalRunResult{
-		"empty output digest": {KeyID: run.KeyID},
-		"wrong key id":        {KeyID: "other-key", OutputDigest: testRunDigest("out")},
-		"missing generation":  {KeyID: run.KeyID, OutputDigest: testRunDigest("out")},
+		"empty output digest": {Binding: run.Binding},
+		"wrong key id":        {Binding: testGenerationBinding("other-key", "gen-1", "epoch-1"), OutputDigest: testRunDigest("out")},
+		"missing binding":     {OutputDigest: testRunDigest("out")},
 	} {
 		if err := store.MarkCompleted(ctx, run.RunID, 1, result); !errors.Is(err, ErrInvalidRunResult) {
 			t.Errorf("%s got %v, want ErrInvalidRunResult", name, err)
@@ -191,31 +271,74 @@ func TestMemoryRunStoreValidatesOutputGenerationByRunKind(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		kind      RunKind
-		input     KeyGeneration
-		output    KeyGeneration
+		input     GenerationBinding
+		output    GenerationBinding
 		presignID string
 	}{
 		{name: "keygen missing output", kind: RunKeygen},
-		{name: "refresh missing output", kind: RunRefresh, input: "gen-1"},
-		{name: "refresh reuses input", kind: RunRefresh, input: "gen-1", output: "gen-1"},
-		{name: "reshare missing output", kind: RunReshare, input: "gen-1"},
-		{name: "reshare reuses input", kind: RunReshare, input: "gen-1", output: "gen-1"},
-		{name: "presign changes input", kind: RunPresign, input: "gen-1", output: "gen-2", presignID: "presign-1"},
-		{name: "sign changes input", kind: RunSign, input: "gen-1", output: "gen-2", presignID: "presign-1"},
+		{name: "refresh missing output", kind: RunRefresh, input: testGenerationBinding("key-1", "gen-1", "epoch-1")},
+		{name: "refresh reuses input", kind: RunRefresh, input: testGenerationBinding("key-1", "gen-1", "epoch-1"), output: testGenerationBinding("key-1", "gen-1", "epoch-1")},
+		{name: "reshare missing output", kind: RunReshare, input: testGenerationBinding("key-1", "gen-1", "epoch-1")},
+		{name: "reshare reuses epoch", kind: RunReshare, input: testGenerationBinding("key-1", "gen-1", "epoch-1"), output: testGenerationBinding("key-1", "gen-2", "epoch-1")},
+		{name: "child reuses parent", kind: RunChildDerivation, input: testGenerationBinding("key-1", "gen-1", "epoch-1"), output: testGenerationBinding("key-1", "gen-1", "epoch-1")},
+		{name: "child wrong target generation", kind: RunChildDerivation, input: testGenerationBinding("key-1", "gen-1", "epoch-1"), output: testGenerationBinding("child-key", "child-gen-wrong", "epoch-2")},
+		{name: "presign changes input", kind: RunPresign, input: testGenerationBinding("key-1", "gen-1", "epoch-1"), output: testGenerationBinding("key-1", "gen-2", "epoch-2"), presignID: "presign-1"},
+		{name: "sign changes input", kind: RunSign, input: testGenerationBinding("key-1", "gen-1", "epoch-1"), output: testGenerationBinding("key-1", "gen-2", "epoch-2"), presignID: "presign-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			intent := base.Clone()
 			intent.Kind = tc.kind
-			intent.KeyGeneration = tc.input
+			intent.Binding = tc.input
 			intent.PresignID = tc.presignID
+			switch tc.kind {
+			case RunRefresh, RunReshare:
+				intent.TargetKeyID = tc.input.KeyID
+				intent.TargetKeyGeneration = "gen-2"
+			case RunChildDerivation:
+				intent.TargetKeyID = "child-key"
+				intent.TargetKeyGeneration = "child-gen-1"
+				intent.ContextDigest = testRunDigest("child-context")
+			}
 			result := LocalRunResult{
-				KeyID:         intent.KeyID,
-				KeyGeneration: tc.output,
-				PresignID:     tc.presignID,
-				OutputDigest:  testRunDigest("out"),
+				Binding:      tc.output,
+				PresignID:    tc.presignID,
+				OutputDigest: testRunDigest("out"),
 			}
 			if err := validateLocalRunResult(intent, result); !errors.Is(err, ErrInvalidRunResult) {
 				t.Fatalf("validateLocalRunResult got %v, want ErrInvalidRunResult", err)
+			}
+		})
+	}
+}
+
+func TestMemoryRunStoreAcceptsExactLifecycleTargetResults(t *testing.T) {
+	t.Parallel()
+
+	parent := testGenerationBinding("key-1", "gen-1", "epoch-1")
+	for _, tc := range []struct {
+		name   string
+		kind   RunKind
+		target GenerationBinding
+	}{
+		{name: "refresh", kind: RunRefresh, target: testGenerationBinding("key-1", "gen-2", "epoch-2")},
+		{name: "reshare", kind: RunReshare, target: testGenerationBinding("key-1", "gen-reshared", "epoch-reshared")},
+		{name: "child", kind: RunChildDerivation, target: testGenerationBinding("child-key", "child-gen-1", "child-epoch")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			intent := testRunIntent(t, "run-"+tc.name)
+			intent.Kind = tc.kind
+			intent.Binding = parent
+			intent.TargetKeyID = tc.target.KeyID
+			intent.TargetKeyGeneration = tc.target.KeyGeneration
+			if tc.kind == RunChildDerivation {
+				intent.ContextDigest = testRunDigest("child-context")
+			}
+			result := LocalRunResult{Binding: tc.target, OutputDigest: testRunDigest("output")}
+			if err := validateRunIntent(intent); err != nil {
+				t.Fatalf("validateRunIntent: %v", err)
+			}
+			if err := validateLocalRunResult(intent, result); err != nil {
+				t.Fatalf("validateLocalRunResult: %v", err)
 			}
 		})
 	}
@@ -247,7 +370,7 @@ func TestRegisterStartedSessionPreservesDispatchAcrossDurableStart(t *testing.T)
 	if err := baseStore.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := baseStore.AcceptPlan(ctx, run.RunID, 1, run.PlanDigest); err != nil {
+	if err := baseStore.AcceptPlan(ctx, run.RunID, 1, run.AcceptanceDigest()); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
 
@@ -311,7 +434,7 @@ func TestRegisterStartedSessionUnblocksDispatchOnDurableStartFailure(t *testing.
 	if err := baseStore.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := baseStore.AcceptPlan(ctx, run.RunID, 1, run.PlanDigest); err != nil {
+	if err := baseStore.AcceptPlan(ctx, run.RunID, 1, run.AcceptanceDigest()); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
 
@@ -376,7 +499,7 @@ func TestRegisterStartedSessionCleansUpWithCanceledContext(t *testing.T) {
 	if err := baseStore.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	if err := baseStore.AcceptPlan(ctx, run.RunID, 1, run.PlanDigest); err != nil {
+	if err := baseStore.AcceptPlan(ctx, run.RunID, 1, run.AcceptanceDigest()); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
 	markErr := errors.New("durable start failed")
@@ -401,13 +524,22 @@ func TestMemoryRunStoreValidatesRunKindMetadata(t *testing.T) {
 		name   string
 		mutate func(*RunIntent)
 	}{
-		{name: "missing key id", mutate: func(run *RunIntent) { run.KeyID = "" }},
-		{name: "refresh missing generation", mutate: func(run *RunIntent) { run.Kind = RunRefresh }},
-		{name: "reshare missing generation", mutate: func(run *RunIntent) { run.Kind = RunReshare }},
+		{name: "missing key id", mutate: func(run *RunIntent) { run.Binding.KeyID = "" }},
+		{name: "refresh missing generation", mutate: func(run *RunIntent) {
+			run.Kind = RunRefresh
+			run.TargetKeyID = run.Binding.KeyID
+			run.TargetKeyGeneration = "gen-2"
+			run.Binding.KeyGeneration = ""
+		}},
+		{name: "reshare zero epoch", mutate: func(run *RunIntent) {
+			run.Kind = RunReshare
+			run.TargetKeyID = run.Binding.KeyID
+			run.TargetKeyGeneration = "gen-2"
+			run.Binding.EpochID = EpochID{}
+		}},
 		{name: "FROST presign", mutate: func(run *RunIntent) {
 			run.Kind = RunPresign
 			run.Signers = tss.NewPartySet(1, 2)
-			run.KeyGeneration = "gen-1"
 			run.PresignID = "presign-1"
 			run.ContextDigest = testRunDigest("context")
 		}},
@@ -415,25 +547,47 @@ func TestMemoryRunStoreValidatesRunKindMetadata(t *testing.T) {
 			run.Protocol = tss.ProtocolCGGMP21Secp256k1
 			run.Kind = RunPresign
 			run.Signers = tss.NewPartySet(1, 2)
-			run.KeyGeneration = "gen-1"
 			run.ContextDigest = testRunDigest("context")
 		}},
 		{name: "sign missing context digest", mutate: func(run *RunIntent) {
 			run.Kind = RunSign
 			run.Signers = tss.NewPartySet(1, 2)
-			run.KeyGeneration = "gen-1"
+		}},
+		{name: "child derivation missing context digest", mutate: func(run *RunIntent) {
+			run.Kind = RunChildDerivation
+		}},
+		{name: "child derivation reuses parent key id", mutate: func(run *RunIntent) {
+			run.Kind = RunChildDerivation
+			run.ContextDigest = testRunDigest("context")
+			run.TargetKeyID = run.Binding.KeyID
+			run.TargetKeyGeneration = "child-gen"
+		}},
+		{name: "refresh changes key id", mutate: func(run *RunIntent) {
+			run.Kind = RunRefresh
+			run.TargetKeyID = "different-key"
+			run.TargetKeyGeneration = "gen-2"
+		}},
+		{name: "reshare reuses generation", mutate: func(run *RunIntent) {
+			run.Kind = RunReshare
+			run.TargetKeyID = run.Binding.KeyID
+			run.TargetKeyGeneration = run.Binding.KeyGeneration
+		}},
+		{name: "sign carries lifecycle target", mutate: func(run *RunIntent) {
+			run.Kind = RunSign
+			run.Signers = tss.NewPartySet(1, 2)
+			run.ContextDigest = testRunDigest("context")
+			run.TargetKeyID = "target"
+			run.TargetKeyGeneration = "gen-2"
 		}},
 		{name: "CGGMP21 sign missing presign id", mutate: func(run *RunIntent) {
 			run.Protocol = tss.ProtocolCGGMP21Secp256k1
 			run.Kind = RunSign
 			run.Signers = tss.NewPartySet(1, 2)
-			run.KeyGeneration = "gen-1"
 			run.ContextDigest = testRunDigest("context")
 		}},
 		{name: "FROST sign with presign id", mutate: func(run *RunIntent) {
 			run.Kind = RunSign
 			run.Signers = tss.NewPartySet(1, 2)
-			run.KeyGeneration = "gen-1"
 			run.PresignID = "presign-1"
 			run.ContextDigest = testRunDigest("context")
 		}},
@@ -447,6 +601,20 @@ func TestMemoryRunStoreValidatesRunKindMetadata(t *testing.T) {
 				t.Fatalf("CreateRun got %v, want ErrInvalidRunIntent", err)
 			}
 		})
+	}
+}
+
+func TestMemoryRunStoreAcceptsExplicitChildDerivationKind(t *testing.T) {
+	run := testRunIntent(t, "child-derivation-run")
+	run.Kind = RunChildDerivation
+	run.ContextDigest = testRunDigest("child-context")
+	run.TargetKeyID = "child-key"
+	run.TargetKeyGeneration = "child-gen-1"
+	if string(run.Kind) != "child-derivation" {
+		t.Fatalf("RunChildDerivation encoding = %q", run.Kind)
+	}
+	if err := NewMemoryRunStore().CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("CreateRun child derivation: %v", err)
 	}
 }
 
@@ -472,17 +640,23 @@ func testRunIntent(t *testing.T, runID string) RunIntent {
 		SessionID:  sessionID,
 		Parties:    tss.NewPartySet(1, 2, 3),
 		Threshold:  2,
-		KeyID:      "key-1",
+		Binding:    testGenerationBinding("key-1", "gen-1", "epoch-1"),
 		PlanDigest: testRunDigest("plan-digest"),
 	}
 }
 
 func testKeygenRunResult(run RunIntent, label string) LocalRunResult {
 	return LocalRunResult{
-		KeyID:         run.KeyID,
-		KeyGeneration: "gen-1",
-		OutputDigest:  testRunDigest(label),
+		Binding:      run.Binding,
+		OutputDigest: testRunDigest(label),
 	}
+}
+
+func testGenerationBinding(keyID string, generation KeyGeneration, epochLabel string) GenerationBinding {
+	digest := sha256.Sum256([]byte(epochLabel))
+	var epoch EpochID
+	copy(epoch[:], digest[:])
+	return GenerationBinding{KeyID: keyID, KeyGeneration: generation, EpochID: epoch}
 }
 
 func testRunDigest(label string) []byte {

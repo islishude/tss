@@ -11,13 +11,45 @@ import (
 	"io"
 	"slices"
 
-	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 // Polynomial is a secp256k1 Shamir polynomial in coefficient order.
 // The coefficient at index 0 is the constant term.
 type Polynomial []secp.Scalar
+
+// Identifier is one non-zero scalar evaluation point for a Shamir epoch.
+// Its zero value is invalid; construct identifiers with [IdentifierFromBytes].
+type Identifier struct {
+	scalar secp.Scalar
+}
+
+// IdentifierFromBytes parses a canonical, non-zero secp256k1 scalar identifier.
+func IdentifierFromBytes(in []byte) (Identifier, error) {
+	scalar, err := secp.ScalarFromBytes(in)
+	if err != nil {
+		return Identifier{}, fmt.Errorf("invalid Shamir identifier: %w", err)
+	}
+	return Identifier{scalar: scalar}, nil
+}
+
+// Bytes returns a fixed-width caller-owned encoding of id.
+func (id Identifier) Bytes() []byte {
+	return id.scalar.Bytes()
+}
+
+// Equal reports whether id and other are the same scalar identifier.
+func (id Identifier) Equal(other Identifier) bool {
+	return id.scalar.Equal(other.scalar)
+}
+
+// Validate rejects the invalid zero-value identifier.
+func (id Identifier) Validate() error {
+	if id.scalar.IsZero() {
+		return errors.New("shamir identifier is zero")
+	}
+	return nil
+}
 
 // RandomPolynomial returns coefficients for a degree threshold-1 polynomial.
 // When constant is nil, the constant term is sampled as a non-zero scalar. When
@@ -46,9 +78,15 @@ func RandomPolynomial(reader io.Reader, threshold int, constant *secp.Scalar) (P
 	return coeffs, nil
 }
 
-// Eval evaluates poly at the participant identifier modulo the secp256k1 order.
-func Eval(poly Polynomial, id tss.PartyID) secp.Scalar {
-	x := secp.ScalarFromUint64(uint64(id))
+// EvalAt evaluates poly at an explicit epoch identifier.
+func EvalAt(poly Polynomial, id Identifier) (secp.Scalar, error) {
+	if err := id.Validate(); err != nil {
+		return secp.Scalar{}, err
+	}
+	return evalAtScalar(poly, id.scalar), nil
+}
+
+func evalAtScalar(poly Polynomial, x secp.Scalar) secp.Scalar {
 	acc := secp.ScalarZero()
 	for _, p := range slices.Backward(poly) {
 		acc = secp.ScalarMul(acc, x)
@@ -57,32 +95,41 @@ func Eval(poly Polynomial, id tss.PartyID) secp.Scalar {
 	return acc
 }
 
-// LagrangeCoefficient returns the coefficient for reconstructing at x=0.
-func LagrangeCoefficient(id tss.PartyID, ids tss.PartySet) (secp.Scalar, error) {
-	if id == 0 {
-		return secp.Scalar{}, errors.New("party id 0 is reserved")
+// LagrangeCoefficientAt returns the coefficient for reconstructing at x=0
+// from an explicit set of epoch identifiers.
+func LagrangeCoefficientAt(id Identifier, ids []Identifier) (secp.Scalar, error) {
+	if err := id.Validate(); err != nil {
+		return secp.Scalar{}, err
 	}
-	xi := secp.ScalarFromUint64(uint64(id))
+	if len(ids) == 0 {
+		return secp.Scalar{}, errors.New("shamir identifier set is empty")
+	}
+
 	num := secp.ScalarOne()
 	den := secp.ScalarOne()
-	seen := make(map[tss.PartyID]struct{}, len(ids))
+	seen := make(map[[secp.ScalarSize]byte]struct{}, len(ids))
+	found := false
 	for _, other := range ids {
-		if other == 0 {
-			return secp.Scalar{}, errors.New("party id 0 is reserved")
+		if err := other.Validate(); err != nil {
+			return secp.Scalar{}, err
 		}
-		if _, ok := seen[other]; ok {
-			return secp.Scalar{}, fmt.Errorf("duplicate party id %d", other)
+		otherBytes := other.Bytes()
+		var key [secp.ScalarSize]byte
+		copy(key[:], otherBytes)
+		clear(otherBytes)
+		if _, ok := seen[key]; ok {
+			return secp.Scalar{}, errors.New("duplicate Shamir identifier")
 		}
-		seen[other] = struct{}{}
-		if other == id {
+		seen[key] = struct{}{}
+		if other.Equal(id) {
+			found = true
 			continue
 		}
-		xj := secp.ScalarFromUint64(uint64(other))
-		num = secp.ScalarMul(num, xj)
-		den = secp.ScalarMul(den, secp.ScalarSub(xj, xi))
+		num = secp.ScalarMul(num, other.scalar)
+		den = secp.ScalarMul(den, secp.ScalarSub(other.scalar, id.scalar))
 	}
-	if _, ok := seen[id]; !ok {
-		return secp.Scalar{}, fmt.Errorf("party id %d not in interpolation set", id)
+	if !found {
+		return secp.Scalar{}, errors.New("target Shamir identifier is not in interpolation set")
 	}
 	inv, err := secp.ScalarInvert(den)
 	if err != nil {

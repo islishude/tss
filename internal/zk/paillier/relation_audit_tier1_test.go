@@ -95,7 +95,7 @@ func TestAffGProofRelationCompleteness(t *testing.T) {
 	// - ProverPaillierN: CheckPaillierModulus
 	// - C: Z*_Nj^2 check + Eq1
 	// - D: Z*_Nj^2 check + Eq1
-	// - Y: Z*_Ni^2 check, matched with proof.Y, Eq3
+	// - Y: Z*_Ni^2 check + Eq3
 	// - X: non-nil check, Eq2
 	// - VerifierAux: validateRPParamsForCommit, Eq4, Eq5
 
@@ -135,11 +135,11 @@ func TestAffGProofRelationCompleteness(t *testing.T) {
 		t.Fatal("AffGProof Eq5 not enforced (F tampered)")
 	}
 
-	// Statement Y must match proof.Y.
+	// Statement Y is transcript-bound and checked by Eq3.
 	wrongYStmt := stmt
 	wrongYStmt.Y = new(big.Int).Add(stmt.Y, big.NewInt(1))
 	if err := VerifyAffG(params, state, wrongYStmt, proof); err == nil {
-		t.Fatal("AffGProof did not check statement Y == proof Y")
+		t.Fatal("AffGProof did not bind statement Y")
 	}
 
 	_ = witness
@@ -315,7 +315,7 @@ func TestNoUncheckedEncProofField(t *testing.T) {
 func TestEncProofStatementOpensCiphertext(t *testing.T) {
 	t.Parallel()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,10 +368,10 @@ func TestLogStarProofStatementOpensC(t *testing.T) {
 	}
 }
 
-// TestRingPedersenParamsModulusMatchesPaillier verifies that the Ring-Pedersen
-// modulus MUST match the Paillier modulus. The protocol enforces this explicitly
-// in key share validation.
-func TestRingPedersenParamsModulusMatchesPaillier(t *testing.T) {
+// TestRingPedersenSetupProofMatchesItsOwnModulus verifies that Πprm proves the
+// opening of its own Ring-Pedersen setup. Protocol proofs consume that setup as
+// an independent auxiliary modulus and reject equality with their Paillier key.
+func TestRingPedersenSetupProofMatchesItsOwnModulus(t *testing.T) {
 	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
@@ -379,7 +379,7 @@ func TestRingPedersenParamsModulusMatchesPaillier(t *testing.T) {
 		t.Fatal(err)
 	}
 	if params.N.Cmp(sk.N) != 0 {
-		t.Fatal("Ring-Pedersen N != Paillier N")
+		t.Fatal("Ring-Pedersen setup proof parameters do not match their private key")
 	}
 	proof, err := ProveRingPedersen(nil, []byte("match test"), sk, params, lambda, 1)
 	if err != nil {
@@ -388,7 +388,7 @@ func TestRingPedersenParamsModulusMatchesPaillier(t *testing.T) {
 
 	// If we try to verify with a different modulus that doesn't match
 	// the RP params, it should fail.
-	sk2 := testPaillierKey(t, 512)
+	sk2 := testAuxPaillierKey(t, 512)
 	if params.N.Cmp(sk2.N) == 0 {
 		t.Skip("skipping — accidentally generated matching moduli (negligible probability)")
 	}

@@ -14,7 +14,9 @@ func zkFieldLimits() wire.FieldLimits {
 		"signed_response":  2048, // signed value in [-N, N^2] range
 		"factor_response":  4096, // Pi-fac responses may contain a product of two moduli.
 		"paillier_signed":  2048, // same as above
-		"proof_rounds":     modulusProofRounds,
+		// Setup-less proofs use one repetition per challenge bit (256 at the
+		// production profile), while the setup proofs retain 128 repetitions.
+		"proof_rounds": affGStarMaxRounds,
 	}
 }
 

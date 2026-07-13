@@ -11,82 +11,74 @@ import (
 )
 
 const (
-	presignContentIDLabel           = "cggmp21-secp256k1-presign-content-v1"
+	presignContentIDLabel           = "cggmp21-secp256k1-presign-content"
 	presignContentIDPayloadWireType = "cggmp21.secp256k1.presign-content-id"
 	presignContentIDPayloadVersion  = uint16(1)
 )
 
+// presignContentIDPayload is the canonical identity of the exact normalized
+// Figure 8 artifact. It deliberately excludes mutable lifecycle state.
 type presignContentIDPayload struct {
-	ArtifactVersion           uint16                            `wire:"1,u16"`
-	SecurityParams            SecurityParams                    `wire:"2,record"`
-	Party                     tss.PartyID                       `wire:"3,u32"`
-	Threshold                 int                               `wire:"4,u32"`
-	Signers                   tss.PartySet                      `wire:"5,u32list,max_items=signers"`
-	R                         *secp.Point                       `wire:"6,custom,len=33"`
-	LittleR                   secp.Scalar                       `wire:"7,custom,len=32"`
-	TranscriptHash            []byte                            `wire:"8,bytes,len=32"`
-	Context                   tss.SigningContext                `wire:"9,nested"`
-	ContextHash               []byte                            `wire:"10,bytes,len=32"`
-	Derivation                *tss.DerivationResult             `wire:"11,record"`
-	PlanHash                  []byte                            `wire:"12,bytes,len=32"`
-	PublicKey                 *secp.Point                       `wire:"13,custom,len=33"`
-	KeygenTranscriptHash      []byte                            `wire:"14,bytes,len=32"`
-	PartiesHash               []byte                            `wire:"15,bytes,len=32"`
-	VerifyShares              []signVerifyShare                 `wire:"16,recordlist,max_items=signers"`
-	Verification              presignVerificationContext        `wire:"17,record"`
-	KShare                    *secret.Scalar                    `wire:"18,custom,len=32"`
-	ChiShare                  *secret.Scalar                    `wire:"19,custom,len=32"`
-	DeltaAggregate            *secret.Scalar                    `wire:"20,custom,len=32"`
-	IdentificationTranscripts []presignIdentificationTranscript `wire:"21,recordlist,max_items=signers"`
-	SigmaOpeningRecords       []presignSigmaOpeningRecord       `wire:"22,recordlist,max_items=signers"`
+	ArtifactVersion      uint16                        `wire:"1,u16"`
+	SecurityParams       SecurityParams                `wire:"2,record"`
+	Party                tss.PartyID                   `wire:"3,u32"`
+	Threshold            int                           `wire:"4,u32"`
+	Signers              tss.PartySet                  `wire:"5,u32list,max_items=signers"`
+	PresignID            []byte                        `wire:"6,bytes,len=32"`
+	EpochID              []byte                        `wire:"7,bytes,len=32"`
+	Gamma                *secp.Point                   `wire:"8,custom,len=33"`
+	LittleR              secp.Scalar                   `wire:"9,custom,len=32"`
+	KShare               *secret.Scalar                `wire:"10,custom,len=32"`
+	ChiShare             *secret.Scalar                `wire:"11,custom,len=32"`
+	Commitments          []normalizedPresignCommitment `wire:"12,recordlist,max_items=signers"`
+	TranscriptHash       []byte                        `wire:"13,bytes,len=32"`
+	Context              tss.SigningContext            `wire:"14,nested"`
+	ContextHash          []byte                        `wire:"15,bytes,len=32"`
+	PublicKey            *secp.Point                   `wire:"16,custom,len=33"`
+	KeygenTranscriptHash []byte                        `wire:"17,bytes,len=32"`
+	PartiesHash          []byte                        `wire:"18,bytes,len=32"`
+	PlanHash             []byte                        `wire:"19,bytes,len=32"`
+	Derivation           *tss.DerivationResult         `wire:"20,record"`
+	Epoch                *EpochContext                 `wire:"21,record"`
 }
 
-// WireType returns the private canonical content-ID payload type.
-func (presignContentIDPayload) WireType() string {
-	return presignContentIDPayloadWireType
-}
+// WireType returns the canonical wire type for a presign content-identity payload.
+func (presignContentIDPayload) WireType() string { return presignContentIDPayloadWireType }
 
-// WireVersion returns the private canonical content-ID payload version.
-func (presignContentIDPayload) WireVersion() uint16 {
-	return presignContentIDPayloadVersion
-}
+// WireVersion returns the canonical wire version for a presign content-identity payload.
+func (presignContentIDPayload) WireVersion() uint16 { return presignContentIDPayloadVersion }
 
-// contentID returns a secret-derived content commitment for the exact presign
-// nonce material and persisted protocol bindings. The result is secret-tainted:
-// it must not be logged, exposed, used as a filename, or stored as plaintext
-// metadata. SignAttemptStore implementations must derive an opaque store key
-// before using it as a durable storage key.
-func (p *Presign) contentID() ([]byte, error) {
-	return p.contentIDWithLimits(DefaultLimits())
-}
+// contentID returns a secret-derived content commitment for the exact
+// normalized presign. It is secret-tainted and must never be logged or used as
+// plaintext storage metadata.
+func (p *Presign) contentID() ([]byte, error) { return p.contentIDWithLimits(DefaultLimits()) }
 
 func (p *Presign) contentIDWithLimits(limits Limits) ([]byte, error) {
 	if p == nil || p.state == nil {
 		return nil, errors.New("nil presign")
 	}
 	payload := presignContentIDPayload{
-		ArtifactVersion:           presignWireVersion,
-		SecurityParams:            p.state.SecurityParams,
-		Party:                     p.state.Party,
-		Threshold:                 p.state.Threshold,
-		Signers:                   p.state.Signers,
-		R:                         p.state.R,
-		LittleR:                   p.state.LittleR,
-		TranscriptHash:            p.state.TranscriptHash,
-		Context:                   p.state.Context,
-		ContextHash:               p.state.ContextHash,
-		Derivation:                p.state.Derivation,
-		PlanHash:                  p.state.PlanHash,
-		PublicKey:                 p.state.PublicKey,
-		KeygenTranscriptHash:      p.state.KeygenTranscriptHash,
-		PartiesHash:               p.state.PartiesHash,
-		VerifyShares:              p.state.VerifyShares,
-		Verification:              p.state.Verification,
-		KShare:                    p.state.KShare,
-		ChiShare:                  p.state.ChiShare,
-		DeltaAggregate:            p.state.DeltaAggregate,
-		IdentificationTranscripts: p.state.IdentificationTranscripts,
-		SigmaOpeningRecords:       p.state.SigmaOpeningRecords,
+		ArtifactVersion:      presignWireVersion,
+		SecurityParams:       p.state.SecurityParams,
+		Party:                p.state.Party,
+		Threshold:            p.state.Threshold,
+		Signers:              p.state.Signers,
+		PresignID:            p.state.PresignID,
+		EpochID:              p.state.EpochID,
+		Gamma:                p.state.Gamma,
+		LittleR:              p.state.LittleR,
+		KShare:               p.state.KShare,
+		ChiShare:             p.state.ChiShare,
+		Commitments:          p.state.Commitments,
+		TranscriptHash:       p.state.TranscriptHash,
+		Context:              p.state.Context,
+		ContextHash:          p.state.ContextHash,
+		PublicKey:            p.state.PublicKey,
+		KeygenTranscriptHash: p.state.KeygenTranscriptHash,
+		PartiesHash:          p.state.PartiesHash,
+		PlanHash:             p.state.PlanHash,
+		Derivation:           p.state.Derivation,
+		Epoch:                p.state.Epoch,
 	}
 	raw, err := wire.Marshal(payload, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 	if err != nil {

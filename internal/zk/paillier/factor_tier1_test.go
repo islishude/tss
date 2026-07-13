@@ -13,7 +13,7 @@ import (
 func TestFactorProofRoundTripAndContextBinding(t *testing.T) {
 	sk := testPaillierKey(t, 1024)
 	params := SecurityParams{Ell: 256, EllPrime: 512, Epsilon: 128, ChallengeBits: 128, MinPaillierBits: 1024}
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -199,16 +199,16 @@ func TestCGGMP21PresignRound3PrepareDoesNotMutateAndDestroysStagedSecrets(t *tes
 		for _, id := range s1.signers {
 			left, _ := s1.partyState(id)
 			right, _ := s2.partyState(id)
-			if !bytes.Equal(left.round1.payload.Gamma, right.round1.payload.Gamma) {
-				t.Fatalf("round1 gamma differs for party %d", id)
+			leftPayload, err := left.round1.payload.MarshalBinaryWithLimits(s1.limits)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !bytes.Equal(left.round1.payload.EncK, right.round1.payload.EncK) {
-				t.Fatalf("round1 EncK differs for party %d", id)
+			rightPayload, err := right.round1.payload.MarshalBinaryWithLimits(s2.limits)
+			if err != nil {
+				t.Fatal(err)
 			}
-			leftPK, _ := canonicalWireMessageBytes(left.round1.payload.PaillierPublicKey, s1.limits)
-			rightPK, _ := canonicalWireMessageBytes(right.round1.payload.PaillierPublicKey, s2.limits)
-			if !bytes.Equal(leftPK, rightPK) {
-				t.Fatalf("round1 Paillier key differs for party %d", id)
+			if !bytes.Equal(leftPayload, rightPayload) {
+				t.Fatalf("Figure 8 round1 payload differs for party %d", id)
 			}
 		}
 		t.Fatal("round1 echoes differ without a field mismatch")
@@ -241,18 +241,16 @@ func TestCGGMP21PresignRound3PrepareDoesNotMutateAndDestroysStagedSecrets(t *tes
 		t.Fatalf("prepare party 1 round3: ok=%v err=%v", ok, err)
 	}
 	assertCGGMPSnapshotUnchanged(t, before, after)
-	stagedDelta := prepared3.delta
-	stagedK := prepared3.presign.state.KShare
-	stagedChi := prepared3.presign.state.ChiShare
+	stagedDelta := prepared3.payload.Delta
+	stagedChi := prepared3.chi
 	prepared3.destroy()
 	if !testutil.IsZeroBytes(stagedDelta.FixedBytes()) ||
-		!testutil.IsZeroBytes(stagedK.FixedBytes()) ||
 		!testutil.IsZeroBytes(stagedChi.FixedBytes()) {
-		t.Fatal("destroying prepared round3 output did not clear staged presign secrets")
+		t.Fatal("destroying prepared round3 output did not clear staged Figure 8 secrets")
 	}
 }
 
-func TestCGGMP21PresignRound3VerificationFailureDoesNotWriteVerifyShare(t *testing.T) {
+func TestCGGMP21PresignRound3VerificationFailureDoesNotWriteCommitment(t *testing.T) {
 	s1, s2, _, round3From2 := presignSessionsWithRound3Outputs(t)
 	defer s1.Destroy()
 	defer s2.Destroy()
@@ -260,7 +258,7 @@ func TestCGGMP21PresignRound3VerificationFailureDoesNotWriteVerifyShare(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload.KPoint = secp.ScalarBaseMult(secp.ScalarOne())
+	payload.DeltaPoint = testCurvePointBytes(t, 7)
 	round3From2.Payload, err = payload.MarshalBinaryWithLimits(testLimits())
 	payload.Delta.Destroy()
 	if err != nil {
@@ -274,7 +272,7 @@ func TestCGGMP21PresignRound3VerificationFailureDoesNotWriteVerifyShare(t *testi
 		if tx != nil {
 			tx.cleanupOnReject()
 		}
-		t.Fatal("expected signprep proof verification failure")
+		t.Fatal("expected Figure 8 Elog proof verification failure")
 	}
 	assertCGGMPSnapshotUnchanged(t, before, after)
 }
@@ -298,12 +296,71 @@ func TestCGGMP21PresignCompletionPrepareDoesNotMutateAndDestroysFinalPresign(t *
 	assertCGGMPSnapshotUnchanged(t, before, after)
 	stagedK := prepared.presign.state.KShare
 	stagedChi := prepared.presign.state.ChiShare
-	stagedDelta := prepared.presign.state.DeltaAggregate
+	stagedCommitment := prepared.presign.state.Commitments[0].DeltaTilde
 	prepared.destroy()
 	if !testutil.IsZeroBytes(stagedK.FixedBytes()) ||
 		!testutil.IsZeroBytes(stagedChi.FixedBytes()) ||
-		!testutil.IsZeroBytes(stagedDelta.FixedBytes()) {
+		!testutil.IsZeroBytes(stagedCommitment) {
 		t.Fatal("destroying prepared completion did not clear final presign secrets")
+	}
+}
+
+func TestCGGMP21AggregateZeroAbortsWithoutBlameAndDestroysSecrets(t *testing.T) {
+	s1, s2, _, round3From2 := presignSessionsWithRound3Outputs(t)
+	defer s1.Destroy()
+	defer s2.Destroy()
+
+	self, ok := s1.partyState(s1.key.state.Party)
+	if !ok {
+		t.Fatal("missing local Figure 8 state")
+	}
+	selfDelta, err := secpScalarFromSecretAllowZero(self.round3.delta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalPresignRound3Payload(round3From2.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.Delta.Destroy()
+	payload.Delta, err = secpSecretScalarFromScalarAllowZero(secp.ScalarNeg(selfDelta))
+	if err != nil {
+		payload.Proof.Destroy()
+		t.Fatal(err)
+	}
+	round3From2.Payload, err = payload.MarshalBinaryWithLimits(testLimits())
+	payload.Delta.Destroy()
+	payload.Proof.Destroy()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kShare := s1.kShare
+	gamma := s1.gamma
+	xBar := s1.xBar
+	out, err := s1.Handle(testutil.DeliverEnvelope(round3From2))
+	if len(out) != 0 {
+		t.Fatalf("aggregate-zero failure emitted %d envelopes", len(out))
+	}
+	if !errors.Is(err, errUnattributedPresignFailure) {
+		t.Fatalf("aggregate-zero failure = %v, want errUnattributedPresignFailure", err)
+	}
+	var protocolErr *tss.ProtocolError
+	if errors.As(err, &protocolErr) && protocolErr.Blame != nil {
+		t.Fatalf("aggregate-zero failure carried blame: %#v", protocolErr.Blame)
+	}
+	if !s1.aborted || !s1.leaseFinished || s1.completed || s1.identifying {
+		t.Fatalf("aggregate-zero terminal state = aborted:%v leaseFinished:%v completed:%v identifying:%v",
+			s1.aborted, s1.leaseFinished, s1.completed, s1.identifying)
+	}
+	if s1.kShare != nil || s1.gamma != nil || s1.xBar != nil || s1.paillier != nil || len(s1.parties) != 0 {
+		t.Fatal("aggregate-zero abort retained secret session state")
+	}
+	if !testutil.IsZeroBytes(kShare.FixedBytes()) || !testutil.IsZeroBytes(gamma.FixedBytes()) || !testutil.IsZeroBytes(xBar.FixedBytes()) {
+		t.Fatal("aggregate-zero abort did not destroy retained scalar witnesses")
+	}
+	if _, ok := s1.Presign(); ok {
+		t.Fatal("aggregate-zero abort exposed a persisted presign")
 	}
 }
 
@@ -359,8 +416,7 @@ func TestCGGMP21PresignReadinessDerivesFromPartyState(t *testing.T) {
 		t.Fatal("complete round2 party state was not ready")
 	}
 	for i := range s.parties {
-		s.parties[i].round3.haveDelta = true
-		s.parties[i].round3.haveVerifyShare = true
+		s.parties[i].round3.havePayload = true
 	}
 	if !s.allRound3Accepted() {
 		t.Fatal("complete round3 party state was not ready")
@@ -490,12 +546,16 @@ func TestCGGMP21PresignTransitionPreparationFailureDoesNotAcceptInbound(t *testi
 		assertCGGMPSnapshotUnchanged(t, before, after)
 	})
 
-	t.Run("round3_to_identification", func(t *testing.T) {
+	t.Run("round3_to_red_alert", func(t *testing.T) {
 		s1, s2, _, round3From2 := presignSessionsWithRound3Outputs(t)
 		defer s1.Destroy()
 		defer s2.Destroy()
-		originalChi := s1.presign.state.ChiShare
-		originalScalar, err := secpScalarFromSecret(originalChi)
+		self, ok := s1.partyState(s1.key.state.Party)
+		if !ok || self.round3.delta == nil {
+			t.Fatal("missing local Figure 8 round3 state")
+		}
+		originalDelta := self.round3.delta
+		originalScalar, err := secpScalarFromSecretAllowZero(originalDelta)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -507,9 +567,9 @@ func TestCGGMP21PresignTransitionPreparationFailureDoesNotAcceptInbound(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.presign.state.ChiShare = replacement
+		self.round3.delta = replacement
 		defer func() {
-			s1.presign.state.ChiShare = originalChi
+			self.round3.delta = originalDelta
 			replacement.Destroy()
 		}()
 		s1.config.EnvelopeSigner = failingPresignEnvelopeSigner{}
@@ -521,10 +581,10 @@ func TestCGGMP21PresignTransitionPreparationFailureDoesNotAcceptInbound(t *testi
 			tx.cleanupOnReject()
 		}
 		if err == nil {
-			t.Fatal("expected injected identification envelope construction failure")
+			t.Fatal("expected injected Figure 9 red-alert envelope construction failure")
 		}
-		if s1.identifying || len(s1.identificationAlert) != 0 || len(s1.identificationPayloads) != 0 {
-			t.Fatal("failed identification preparation mutated session state")
+		if s1.identifying || s1.redAlertKind != "" || len(s1.redAlertDigest) != 0 || len(s1.redAlertPayloads) != 0 {
+			t.Fatal("failed Figure 9 red-alert preparation mutated session state")
 		}
 		assertCGGMPSnapshotUnchanged(t, before, after)
 	})
@@ -779,6 +839,7 @@ func installPresignRound2Tx(t *testing.T, session *PresignSession, tx *acceptPre
 		t.Fatal("missing round2 peer state")
 	}
 	st.round2.payload = tx.payload
+	st.round2.payloadEnvelope = tx.envelope.Clone()
 	st.round2.havePayload = true
 	st.mta.alphaDelta = tx.material.alphaDelta
 	st.mta.alphaSigma = tx.material.alphaSigma
@@ -793,10 +854,13 @@ func installPresignRound3Tx(t *testing.T, session *PresignSession, tx *acceptPre
 	if !ok {
 		t.Fatal("missing round3 peer state")
 	}
-	st.round3.delta = tx.delta
-	st.round3.verifyShare = tx.verifyShare
-	st.round3.haveDelta = true
-	st.round3.haveVerifyShare = true
+	st.round3 = presignRound3State{
+		delta:       tx.payload.Delta,
+		deltaPoint:  tx.payload.DeltaPoint,
+		sPoint:      tx.payload.S,
+		proof:       tx.payload.Proof,
+		havePayload: true,
+	}
 	tx.markCommitted()
 }
 

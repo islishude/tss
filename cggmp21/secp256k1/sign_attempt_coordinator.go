@@ -6,198 +6,181 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
-	"github.com/islishude/tss"
+	"github.com/islishude/tss/tssrun"
 )
 
-// presignHandle is the store-facing secret-tainted content identity boundary
-// for one presign.
-type presignHandle []byte
-
-func newPresignHandle(presign *Presign, limits Limits) (presignHandle, error) {
-	if presign == nil || presign.state == nil {
-		return nil, errors.New("nil presign")
-	}
-	contentID, err := presign.contentIDWithLimits(limits)
-	if err != nil {
-		return nil, err
-	}
-	handle := presignHandle(contentID)
-	if len(handle) != sha256.Size {
-		return nil, errors.New("invalid presign handle")
-	}
-	return slices.Clone(handle), nil
-}
-
 type signAttemptCoordinator struct {
-	store     SignAttemptStore
-	handle    presignHandle
-	attempt   SignAttemptRecord
+	store     tssrun.LifecycleStore
+	lease     tssrun.RunLease
+	query     tssrun.AttemptQuery
+	attempt   tssrun.SignAttemptRecord
 	timeout   time.Duration
 	limits    Limits
 	hasRecord bool
 }
 
-func newSignAttemptCoordinator(store SignAttemptStore, handle presignHandle, timeout time.Duration, limits Limits) (*signAttemptCoordinator, error) {
+func newSignAttemptCoordinator(store tssrun.LifecycleStore, lease tssrun.RunLease, query tssrun.AttemptQuery, timeout time.Duration, limits Limits) (*signAttemptCoordinator, error) {
 	if store == nil {
-		return nil, errors.New("nil sign attempt store")
+		return nil, errors.New("nil lifecycle store")
 	}
-	if len(handle) != sha256.Size {
-		return nil, errors.New("invalid presign handle")
+	if err := query.Validate(); err != nil {
+		return nil, err
+	}
+	if lease.Token != 0 {
+		if lease.State != tssrun.RunLeaseActive ||
+			lease.Binding != query.Binding ||
+			lease.Kind != tssrun.RunSign {
+			return nil, fmt.Errorf("%w: invalid sign run lease", ErrSignAttemptCorrupt)
+		}
 	}
 	return &signAttemptCoordinator{
 		store:   store,
-		handle:  slices.Clone(handle),
+		lease:   lease,
+		query:   query.Clone(),
 		timeout: durableStoreTimeout(timeout),
 		limits:  limits,
 	}, nil
 }
 
-func (c *signAttemptCoordinator) claim(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
-	if err := c.validateCandidateIdentity(candidate); err != nil {
-		return SignAttemptCommit{}, err
+func (c *signAttemptCoordinator) claim(ctx context.Context, outbox signAttemptOutbox, rawOutbox []byte) (tssrun.AttemptCommit, error) {
+	if c == nil || c.store == nil {
+		return tssrun.AttemptCommit{}, errors.New("sign attempt coordinator unavailable")
+	}
+	if outbox.SessionID != c.lease.SessionID ||
+		outbox.PresignID != c.query.PresignID ||
+		outbox.AttemptID != c.query.AttemptID ||
+		!bytes.Equal(outbox.IntentDigest, c.query.IntentDigest) {
+		return tssrun.AttemptCommit{}, fmt.Errorf("%w: sign outbox query mismatch", ErrSignAttemptCorrupt)
 	}
 	storeCtx, cancel := durableStoreContext(ctx, c.timeout)
 	defer cancel()
-	commit, err := c.store.CommitSignAttempt(storeCtx, candidate)
+	commit, err := c.store.CommitSignAttempt(storeCtx, c.query.Binding, c.query.PresignID, tssrun.SignAttemptIntent{
+		AttemptID:    c.query.AttemptID,
+		SessionID:    c.lease.SessionID,
+		IntentDigest: bytes.Clone(c.query.IntentDigest),
+	}, rawOutbox)
 	if err != nil {
-		if signAttemptConsumedError(err) {
-			return SignAttemptCommit{}, err
+		if lifecycleCommitKnownError(err) {
+			return tssrun.AttemptCommit{}, err
 		}
-		return SignAttemptCommit{}, &SignAttemptOutcomeUnknownError{
-			Cause:      err,
-			Descriptor: candidate.Descriptor(),
+		var unknown *tssrun.AttemptOutcomeUnknownError
+		if errors.As(err, &unknown) {
+			return tssrun.AttemptCommit{}, err
+		}
+		return tssrun.AttemptCommit{}, &tssrun.AttemptOutcomeUnknownError{
+			Cause: err,
+			Query: c.query.Clone(),
 		}
 	}
-	if commit.Status != SignAttemptCreated && commit.Status != SignAttemptExistingSame {
-		return SignAttemptCommit{}, fmt.Errorf("%w: invalid commit status", ErrSignAttemptCorrupt)
+	if commit.Status != tssrun.AttemptCreated && commit.Status != tssrun.AttemptExistingSame {
+		return tssrun.AttemptCommit{}, fmt.Errorf("%w: invalid lifecycle commit status", ErrSignAttemptCorrupt)
 	}
 	if err := c.acceptRecord(commit.Record); err != nil {
-		return SignAttemptCommit{}, err
+		return tssrun.AttemptCommit{}, err
 	}
 	commit.Record = c.attempt.Clone()
 	return commit, nil
 }
 
-func (c *signAttemptCoordinator) load(ctx context.Context) (SignAttemptRecord, error) {
-	if c == nil || c.store == nil {
-		return SignAttemptRecord{}, errors.New("sign attempt coordinator unavailable")
+func (c *signAttemptCoordinator) markDelivered(ctx context.Context, delivery []byte) (tssrun.SignAttemptRecord, error) {
+	if err := c.requireAttempt(); err != nil {
+		return tssrun.SignAttemptRecord{}, err
 	}
-	if ctx == nil {
-		return SignAttemptRecord{}, errors.New("nil context")
-	}
-	record, err := c.store.LoadSignAttempt(ctx, slices.Clone(c.handle))
+	storeCtx, cancel := durableStoreContext(ctx, c.timeout)
+	defer cancel()
+	record, err := c.store.MarkAttemptDelivered(storeCtx, c.query, delivery)
 	if err != nil {
-		return SignAttemptRecord{}, err
+		return tssrun.SignAttemptRecord{}, err
 	}
 	if err := c.acceptRecord(record); err != nil {
-		return SignAttemptRecord{}, err
+		return tssrun.SignAttemptRecord{}, err
+	}
+	if err := c.finishLeaseIfTerminal(storeCtx); err != nil {
+		return tssrun.SignAttemptRecord{}, err
 	}
 	return c.attempt.Clone(), nil
 }
 
-func (c *signAttemptCoordinator) updateDelivery(ctx context.Context, ack *tss.BroadcastAck, certificate *tss.BroadcastCertificate, verifier tss.BroadcastAckVerifier) (SignAttemptRecord, error) {
+func (c *signAttemptCoordinator) complete(ctx context.Context, signature Signature) (tssrun.SignAttemptRecord, error) {
 	if err := c.requireAttempt(); err != nil {
-		return SignAttemptRecord{}, err
+		return tssrun.SignAttemptRecord{}, err
+	}
+	completion, err := marshalSignAttemptCompletion(c.query.IntentDigest, signature, c.limits)
+	if err != nil {
+		return tssrun.SignAttemptRecord{}, err
+	}
+	defer clear(completion)
+	storeCtx, cancel := durableStoreContext(ctx, c.timeout)
+	defer cancel()
+	record, err := c.store.CompleteAttempt(storeCtx, c.query, completion)
+	if err != nil {
+		return tssrun.SignAttemptRecord{}, fmt.Errorf("persist sign attempt completion: %w", err)
+	}
+	if err := c.acceptRecord(record); err != nil {
+		return tssrun.SignAttemptRecord{}, err
+	}
+	if err := c.finishLeaseIfTerminal(storeCtx); err != nil {
+		return tssrun.SignAttemptRecord{}, err
+	}
+	return c.attempt.Clone(), nil
+}
+
+func (c *signAttemptCoordinator) abort(ctx context.Context, reason string) error {
+	if err := c.requireAttempt(); err != nil {
+		return err
 	}
 	storeCtx, cancel := durableStoreContext(ctx, c.timeout)
 	defer cancel()
-	updated, err := c.store.UpdateSignAttemptDelivery(storeCtx, SignAttemptDeliveryUpdate{
-		PresignContentID: slices.Clone(c.attempt.PresignContentID),
-		AttemptHash:      slices.Clone(c.attempt.AttemptHash),
-		Ack:              ack,
-		Certificate:      certificate,
-		AckVerifier:      verifier,
-	})
+	record, err := c.store.AbortAttempt(storeCtx, c.query, reason)
 	if err != nil {
-		return SignAttemptRecord{}, err
-	}
-	if err := c.acceptRecord(updated); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	return c.attempt.Clone(), nil
-}
-
-func (c *signAttemptCoordinator) complete(ctx context.Context, signature Signature) (SignAttemptRecord, error) {
-	if err := c.requireAttempt(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	storeCtx, cancel := durableStoreContext(ctx, c.timeout)
-	defer cancel()
-	completed, err := c.store.CompleteSignAttempt(storeCtx, SignAttemptResult{
-		PresignContentID: slices.Clone(c.attempt.PresignContentID),
-		AttemptHash:      slices.Clone(c.attempt.AttemptHash),
-		Signature: Signature{
-			R:          slices.Clone(signature.R),
-			S:          slices.Clone(signature.S),
-			RecoveryID: signature.RecoveryID,
-		},
-	})
-	if err != nil {
-		return SignAttemptRecord{}, fmt.Errorf("persist sign attempt completion: %w", err)
-	}
-	if !completed.Completed ||
-		!bytes.Equal(completed.SignatureR, signature.R) ||
-		!bytes.Equal(completed.SignatureS, signature.S) ||
-		completed.SignatureRecoveryID != signature.RecoveryID {
-		return SignAttemptRecord{}, fmt.Errorf("%w: completion record mismatch", ErrSignAttemptCorrupt)
-	}
-	if err := c.acceptRecord(completed); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	return c.attempt.Clone(), nil
-}
-
-func (c *signAttemptCoordinator) burn(ctx context.Context, reason string) error {
-	if c == nil || c.store == nil {
-		return errors.New("sign attempt coordinator unavailable")
-	}
-	if ctx == nil {
-		return errors.New("nil context")
-	}
-	burn := SignAttemptBurn{
-		PresignContentID: slices.Clone(c.handle),
-		Reason:           reason,
-	}
-	if err := validateSignAttemptBurn(burn); err != nil {
 		return err
 	}
-	return c.store.BurnPresign(ctx, burn)
-}
-
-func (c *signAttemptCoordinator) record() (SignAttemptRecord, bool) {
-	if c == nil || !c.hasRecord {
-		return SignAttemptRecord{}, false
-	}
-	return c.attempt.Clone(), true
-}
-
-func (c *signAttemptCoordinator) validateCandidateIdentity(candidate SignAttemptRecord) error {
-	if c == nil || c.store == nil {
-		return errors.New("sign attempt coordinator unavailable")
-	}
-	if !bytes.Equal(candidate.PresignContentID, c.handle) {
-		return fmt.Errorf("%w: candidate presign identity mismatch", ErrSignAttemptCorrupt)
-	}
-	if err := validateSignAttemptRecordWithLimits(candidate, c.limits); err != nil {
+	if err := c.acceptRecord(record); err != nil {
 		return err
+	}
+	if c.lease.Token != 0 && c.lease.State == tssrun.RunLeaseActive {
+		if err := c.store.FinishRunLease(storeCtx, c.lease, tssrun.LeaseAborted); err != nil {
+			return err
+		}
+		c.lease.State = tssrun.RunLeaseAborted
 	}
 	return nil
 }
 
-func (c *signAttemptCoordinator) acceptRecord(record SignAttemptRecord) error {
+func (c *signAttemptCoordinator) acceptRecord(record tssrun.SignAttemptRecord) error {
 	if c == nil {
 		return errors.New("nil sign attempt coordinator")
 	}
-	if !bytes.Equal(record.PresignContentID, c.handle) {
-		return fmt.Errorf("%w: durable presign identity mismatch", ErrSignAttemptCorrupt)
+	if !sameLifecycleAttemptQuery(record.Query(), c.query) {
+		return fmt.Errorf("%w: durable lifecycle attempt identity mismatch", ErrSignAttemptCorrupt)
 	}
-	if err := validateSignAttemptRecordWithLimits(record, c.limits); err != nil {
-		return err
+	if c.lease.Token != 0 && record.Intent.SessionID != c.lease.SessionID {
+		return fmt.Errorf("%w: durable lifecycle attempt session mismatch", ErrSignAttemptCorrupt)
 	}
-	if c.hasRecord && !c.attempt.SameAttempt(record) {
+	if c.hasRecord && record.Intent.SessionID != c.attempt.Intent.SessionID {
+		return fmt.Errorf("%w: durable lifecycle attempt session changed", ErrSignAttemptCorrupt)
+	}
+	if len(record.OutboxDigest) != sha256.Size {
+		return fmt.Errorf("%w: invalid durable outbox digest", ErrSignAttemptCorrupt)
+	}
+	if len(record.ExactOutbox) != 0 {
+		digest := sha256.Sum256(record.ExactOutbox)
+		if !bytes.Equal(record.OutboxDigest, digest[:]) {
+			return fmt.Errorf("%w: durable outbox digest mismatch", ErrSignAttemptCorrupt)
+		}
+	}
+	if len(record.PresignMetadata) == 0 ||
+		record.Delivered != (len(record.Delivery) != 0) ||
+		record.Completed != (len(record.Completion) != 0) ||
+		(record.Aborted && record.AbortReason == "") {
+		return fmt.Errorf("%w: invalid durable attempt progress", ErrSignAttemptCorrupt)
+	}
+	if record.Aborted {
+		return fmt.Errorf("%w: durable sign attempt aborted", tssrun.ErrAttemptConflict)
+	}
+	if c.hasRecord && !sameLifecycleAttemptQuery(c.attempt.Query(), record.Query()) {
 		return fmt.Errorf("%w: durable attempt identity changed", ErrSignAttemptCorrupt)
 	}
 	c.attempt = record.Clone()
@@ -213,4 +196,36 @@ func (c *signAttemptCoordinator) requireAttempt() error {
 		return errors.New("sign attempt coordinator has no durable attempt")
 	}
 	return nil
+}
+
+func (c *signAttemptCoordinator) finishLeaseIfTerminal(ctx context.Context) error {
+	if c == nil || !c.hasRecord || !c.attempt.Terminal() ||
+		c.lease.Token == 0 || c.lease.State != tssrun.RunLeaseActive {
+		return nil
+	}
+	if err := c.store.FinishRunLease(ctx, c.lease, tssrun.LeaseCompleted); err != nil {
+		return fmt.Errorf("finish sign run lease: %w", err)
+	}
+	c.lease.State = tssrun.RunLeaseCompleted
+	return nil
+}
+
+func sameLifecycleAttemptQuery(a, b tssrun.AttemptQuery) bool {
+	return a.Binding == b.Binding &&
+		a.PresignID == b.PresignID &&
+		a.AttemptID == b.AttemptID &&
+		bytes.Equal(a.IntentDigest, b.IntentDigest)
+}
+
+func lifecycleCommitKnownError(err error) bool {
+	return errors.Is(err, tssrun.ErrInvalidLifecycleRecord) ||
+		errors.Is(err, tssrun.ErrGenerationNotCurrent) ||
+		errors.Is(err, tssrun.ErrGenerationConflict) ||
+		errors.Is(err, tssrun.ErrRunLeaseConflict) ||
+		errors.Is(err, tssrun.ErrRunLeaseNotFound) ||
+		errors.Is(err, tssrun.ErrPresignUnavailable) ||
+		errors.Is(err, tssrun.ErrPresignBurned) ||
+		errors.Is(err, tssrun.ErrAttemptConflict) ||
+		errors.Is(err, tssrun.ErrAttemptNonDeterminism) ||
+		errors.Is(err, tssrun.ErrLifecycleCorrupt)
 }

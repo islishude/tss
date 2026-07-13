@@ -386,13 +386,11 @@ keygen payload or `KeyShare` wire layouts.
 - `cggmp21/secp256k1.VerificationShare`
 - `cggmp21/secp256k1.PaillierPublicShare`
 
-The CGGMP21 `Presign` record includes a canonical persisted verification context
-containing the presign session ID, round-1 echo, and one signer-ordered entry for
-the round-1 public payload, Paillier public key, weighted verification point, and
-round-3 delta share. Missing, duplicate, extra, or out-of-order entries are
-rejected. Decoding performs structural validation only; callers use
-`VerifyCryptographicMaterialWithLimits` for proof replay and transcript
-recomputation. The retired presign field set without this context is rejected.
+The CGGMP21 private `Presign` record contains only the normalized Figure 8
+artifact and its complete public binding. Availability is runtime/store state,
+not a wire field. Decoding is structural and restores an available artifact
+only for the lifecycle store or explicit import path; callers use
+`VerifyCryptographicMaterialWithLimits` before use.
 
 `Envelope` and `BlameEvidence` carry their schema version only in the TLV frame
 header. Their field tags are contiguous and do not include a duplicate body
@@ -400,21 +398,21 @@ version field. Semantic protocol-version binding uses `tss.ProtocolVersion`
 inside transcripts instead.
 
 - `cggmp21/secp256k1.RingPedersenPublicShare`
-- `cggmp21/secp256k1.SignAttemptRecord`
-- `cggmp21/secp256k1` keygen commitments payload
-- `cggmp21/secp256k1` keygen share payload
+- `cggmp21/secp256k1.EpochContext`
+- `cggmp21/secp256k1.ChildDerivationPlan`
+- `tssrun.GenerationRecord`, `PresignCandidate`, and `SignAttemptRecord`
+- `cggmp21/secp256k1` Figure 6 commitment, reveal, and proof payloads
+- `cggmp21/secp256k1` Figure 7 commitment, reveal, proof, direct-share, and
+  decryption-error payloads
 - `cggmp21/secp256k1` presign round 1 payload
 - `cggmp21/secp256k1` presign round 1 proof payload
 - `cggmp21/secp256k1` presign round 2 payload
 - `cggmp21/secp256k1` presign round 3 payload
-- `cggmp21/secp256k1` presign identification payload
+- `cggmp21/secp256k1` Figure 9 red-alert payload
 - `cggmp21/secp256k1` online signing partial payload
-- `cggmp21/secp256k1` online-sign identification payload
 - `cggmp21/secp256k1` reshare dealer commitments payload
 - `cggmp21/secp256k1` reshare share payload (`dealer`, `receiver`, scalar share, dealer-commitment hash)
 - `cggmp21/secp256k1` reshare receiver material payload
-- `cggmp21/secp256k1` refresh commitments payload
-- `cggmp21/secp256k1` refresh share payload
 - `frost/ed25519.KeyShare`
 - `frost/ed25519.VerificationShare`
 - `frost/ed25519` keygen commitments payload
@@ -434,102 +432,94 @@ inside transcripts instead.
 - `internal/zk/paillier.EncProof` (Πenc)
 - `internal/zk/paillier.AffGProof` (Πaff-g)
 - `internal/zk/paillier.LogStarProof` (Πlog\*)
+- `internal/zk/paillier.EncElgProof` (Πenc-elg)
+- `internal/zk/paillier.ElogProof` (Πelog)
+- `internal/zk/paillier.AffGStarProof` (Πaff-g\*)
 - `internal/zk/paillier.MulProof` (Πmul)
 - `internal/zk/paillier.MulStarProof` (Πmul\*)
 - `internal/zk/paillier.DecProof` (Πdec)
-- `internal/zk/paillier.KeygenConfirmation`
 - `internal/zk/schnorr.Proof`
-- `internal/zk/signprep.Proof` (Schnorr + multi-relation DLEQ, 10 fields,
-  including the sigma-MtA and delta relation commitments)
 
-Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
-all active Paillier ZK proof types (Πmod, Πfac, Πprm, Πenc, Πaff-g, Πlog\*), and
-Schnorr share proofs all use the same strict TLV encoding as other binary
-records. CGGMP21 keygen, refresh, reshare, and presign payloads carry
+Protocol payloads, MtA messages, Paillier keys, active Paillier proof types, and
+Schnorr proofs all use the same strict TLV encoding. CGGMP21 Figure 6,
+Figure 7/F.1, reshare handoff, and Figure 8 payloads carry
 Paillier public keys, Ring-Pedersen parameters, and Paillier/MtA proofs as
 nested typed TLV records, not pre-serialized opaque byte strings. Nested fields
 still enforce the enclosing field's named `max_bytes` limit before decoding.
-Keygen, presign, and signing payloads reject
+Keygen, auxiliary, presign, and signing payloads reject
 JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings
 where integers appear.
 
 `FactorProof` is a canonical receiver-specific Πfac record. Keygen and refresh
-direct-share payloads require it as their final field. Reshare round 2 also has
-the direct `cggmp21.secp256k1.reshare.factor-proof` payload, containing prover,
-verifier, the canonical prover Paillier key, Πfac, and the reshare plan hash.
+direct-share payloads require it as tag 2, followed by the DH-masked share, RID,
+`EpochID`, and plan hash. Reshare round 2 also has the direct
+`cggmp21.secp256k1.reshare.factor-proof` payload, containing prover, verifier,
+the canonical prover Paillier key, Πfac, and the reshare plan hash.
 The corresponding receiver-material broadcast may arrive later, but its
 Paillier key must then match byte-for-byte. Key-share party data stores Πfac
 only for remote parties; the local entry is checked directly against its
 private factors. Records made before Πfac became mandatory are rejected.
 
-Ring-Pedersen wire shape remains `(N,S,T)`. New parameters are generated with
-`T=τ² mod N` and `S=T^λ mod N`; public decoding/validation additionally
-requires `Jacobi(S,N)=Jacobi(T,N)=+1`. This public check does not prove QR
-membership without the factors; that guarantee comes from local parameter
-generation by the verifier.
+Ring-Pedersen wire shape is `(Nhat,S,T)`. `Nhat` is independently generated and
+must differ from every Paillier modulus used in the statement. Parameters use
+`T=τ² mod Nhat` and `S=T^λ mod Nhat`; public decoding additionally requires
+`Jacobi(S,Nhat)=Jacobi(T,Nhat)=+1`. This public check does not prove QR
+membership without the factors; that guarantee comes from local generation by
+the verifier.
 
-Presign and online-sign identification payloads have a 384 KiB phase-specific
-cap. The certified envelope is the canonical proof carrier; once transport
-authentication is attached, `IdentificationRecord.Proof` is omitted instead of
-duplicating the same payload. This leaves room for the public statement and full
-ACK set while retaining the 1 MiB total blame-evidence hard cap.
+Figure 7 and Figure 9 use dedicated, bounded accountability records:
 
-Built-in sign/presign identification evidence uses the version-1 canonical
-`cggmp21.secp256k1.identification-statement`. It contains only public session,
-plan, security-profile, participant, transcript, verification-share,
-Paillier/Ring-Pedersen, MtA contribution, delta, partial, digest, and derivation
-material. Sign statements carry the complete verification context, a compact
-two-ciphertext MtA record for the accused signer, and ordered hashes for every
-signer's compact record. The sign alert binds those values and `little-r`, so a
-reporter cannot alter replay inputs while retaining an authenticated alert. This
-linear representation is size-tested at the supported 16-signer production
-profile. Portable evidence must also contain the exact authenticated envelope
-and, for a broadcast, its complete ACK certificate. Bare proof records are not
-portable and are rejected.
+- `cggmp21.secp256k1.payload.auxinfo.decryption-error` contains the accused
+  party, one ephemeral DH exponent, the exact signed direct envelope, SID, RID,
+  epoch, and plan hash. It is the only wire type allowed to disclose that
+  witness.
+- `cggmp21.secp256k1.payload.presign.red-alert` contains the alert kind and
+  digest, one canonical public inbound/outbound MtA pair and `Πaff-g*` per peer,
+  one `Πdec`, and exact plan/epoch/presign bindings. It is bounded before nested
+  decode. Figure 10 has no proof payload beyond the ordinary partial.
 
-Current presign wire shapes are:
+Current Figure 8 and Figure 10 payload shapes are:
 
-- `mta.start-message`: field 1 is the Paillier ciphertext only.
-- `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`,
-  prover Paillier public key, `PlanHash`, `KPoint`, and `EncGamma`.
-- `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1
-  hash, verifier-specific `EncK` and `EncGamma` `LogStarProof` records, and
-  `PlanHash`.
-- `cggmp21.secp256k1.payload.presign.round2`: fields are typed MtA `ResponseMessage` records for `Delta` and `Sigma`, plus the round-1 echo hash. Each response carries a typed `AffGProof`.
-- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta`, `KPoint`,
-  `ChiPoint`, canonical SignPrep proof bytes, `PlanHash`, ordered Round2 payload
-  commitments, and ordered inbound/outbound delta/sigma MtA contribution records.
-- `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext`/context hash (32 bytes), `DigestHash` (32 bytes), `SignPlanHash` (32 bytes), and `PartialEquationHash` (32 bytes).
+- `cggmp21.secp256k1.payload.presign.round1`: `EncK`, `EncGamma`, `Y`, `A1`,
+  `A2`, `B1`, `B2`, prover Paillier key, plan hash, epoch ID, and protocol
+  presign ID.
+- `cggmp21.secp256k1.payload.presign.round1-proof`: the canonical public
+  round-1 hash, verifier-specific `EncElgProof` records for `EncK` and
+  `EncGamma`, plan hash, epoch ID, and presign ID.
+- `cggmp21.secp256k1.payload.presign.round2`: `Gamma`, `ElogProof`, typed MtA
+  responses for delta and chi, round-1 echo, plan hash, epoch ID, and presign
+  ID. Each response carries a typed `AffGProof`.
+- `cggmp21.secp256k1.payload.presign.round3`: `delta_i`, `S_i`, `Delta_i`,
+  `ElogProof`, plan hash, epoch ID, and presign ID.
+- `cggmp21.secp256k1.payload.sign.partial`: `sigma_i`, presign ID, epoch ID,
+  presign transcript, context hash, digest hash, partial-equation hash, and sign
+  plan hash.
 
-Retired `EncryptionProof`, `MTAResponseProof`, `LogProof`, and standalone
-`cggmp21.secp256k1.sign-verify-share` wire types have no decoder or
-compatibility path.
+The canonical `cggmp21.secp256k1.presign` record has 20 fields. It stores the
+owner, threshold, signer set, protocol presign ID, epoch ID, `Gamma`, scalar
+`r`, normalized local secret scalars `kTilde_i` and `chiTilde_i`, a
+signer-ordered list of `(party,DeltaTilde,STilde)`, transcript and context
+bindings, public key bindings, plan/security profile, empty-path derivation
+binding, and the complete `EpochContext`. Raw Figure 8 witnesses and lifecycle
+availability are not encoded.
 
-The public verification, Paillier, and Ring-Pedersen share records also expose
-standalone standard binary codecs. Their record bodies remain the same bodies
-embedded in KeyShare record lists.
+`tssrun.SignAttemptRecord` is a durable store value rather than a protocol
+payload. It contains the exact `GenerationBinding`, public presign slot,
+immutable attempt identity, public Figure 10 recovery context, exact canonical
+outbox, digests, delivery record, completion record, and terminal flags. A
+committed attempt never contains the available presign's secret blob or
+normalized secret tuple.
 
-The canonical `cggmp21.secp256k1.presign` record contains the local fixed-length
-secret scalars `k_i`, `χ_i`, and `δ`, public `(R, r)`, transcript/context
-hashes, additive HD shift, consumed flag, key binding fields for the group
-public key, keygen transcript hash, and participant-set hash, and per-party
-`VerifyShares` (tag 16, a private canonical record list with one entry per
-signer: party ID, `KPoint`, `ChiPoint`, canonical signprep proof TLV bytes,
-Round2/MtA contribution hashes, and the sigma/delta relation base and offset
-points), persisted public identification transcripts, and encrypted-storage-only
-sigma response opening records (tag 22). Runtime decoding marks the Presign
-consumed and does not recreate reusable sigma witness handles. Decoders
-require the complete 22-field presign set. The former opaque party-triple byte
-field and standalone sign-verify-share object are intentionally not accepted.
+The nested `cggmp21.secp256k1.sign-outbox`, `sign-delivery`,
+`sign-completion`, and `sign-public-context` records validate their own exact
+generation, epoch, presign, attempt, signer, digest, envelope, delivery, and
+verification-key bindings. Low-S is mandatory final-signature behavior, not a
+wire option.
 
-`SignAttemptRecord` stores delivery acknowledgments directly as a canonical
-`tss.BroadcastAck` record list. Its optional certificate field contains the
-complete canonical `tss.BroadcastCertificate` TLV encoding, so nil remains an
-empty field while non-nil certificates use the public standard codec. The
-record has 28 contiguous fields. Low-S is mandatory protocol behavior and is
-not encoded as an attempt option; the retired 29-field layout containing a
-`LowS` field is rejected.
+The public verification, Paillier, Ring-Pedersen, epoch, and child-plan records
+also expose standard binary codecs. Unsupported historical layouts have no
+decoder or compatibility path.
 
 ## Decoder Policy
 

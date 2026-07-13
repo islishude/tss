@@ -15,32 +15,73 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                keygenStartRound,
-		PayloadType:          payloadKeygenCommitments,
+		Round:                keygenFigure6CommitmentRound,
+		PayloadType:          payloadFigure6Commitment,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                presignIdentificationRound,
-		PayloadType:          payloadPresignIdentification,
+		Round:                keygenFigure6RevealRound,
+		PayloadType:          payloadFigure6Reveal,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                keygenFigure6ProofRound,
+		PayloadType:          payloadFigure6Proof,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                keygenAuxInfoCommitmentRound,
+		PayloadType:          payloadAuxInfoCommitment,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                keygenAuxInfoRevealRound,
+		PayloadType:          payloadAuxInfoReveal,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                keygenAuxInfoProofRound,
+		PayloadType:          payloadAuxInfoProofs,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
 		Protocol:               tss.ProtocolCGGMP21Secp256k1,
-		Round:                  keygenShareRound,
-		PayloadType:            payloadKeygenShare,
+		Round:                  keygenAuxInfoProofRound,
+		PayloadType:            payloadAuxInfoDirect,
 		Mode:                   tss.DeliveryDirect,
 		Confidentiality:        tss.ConfidentialityRequired,
 		BroadcastConsistency:   tss.BroadcastConsistencyNone,
 		RequireSenderSignature: true,
 	},
 	tss.DeliveryPolicy{
+		Protocol:               tss.ProtocolCGGMP21Secp256k1,
+		Round:                  keygenAuxInfoProofRound,
+		PayloadType:            payloadAuxInfoDecryptionError,
+		Mode:                   tss.DeliveryBroadcast,
+		Confidentiality:        tss.ConfidentialityOptional,
+		BroadcastConsistency:   tss.BroadcastConsistencyRequired,
+		RequireSenderSignature: true,
+	},
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                keygenConfirmationRound,
+		Round:                keygenPaperConfirmationRound,
 		PayloadType:          payloadKeygenConfirmation,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -82,6 +123,14 @@ var cggmp21Policies = tss.MustNewPolicySet(
 		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                presignRedAlertRound,
+		PayloadType:          payloadPresignRedAlert,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
 
 	// --- Sign ---
 	tss.DeliveryPolicy{
@@ -92,35 +141,69 @@ var cggmp21Policies = tss.MustNewPolicySet(
 		Confidentiality:      tss.ConfidentialityRequired,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
+	// --- Refresh ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                signIdentificationRound,
-		PayloadType:          payloadSignIdentification,
+		Round:                refreshAuxInfoCommitmentRound,
+		PayloadType:          payloadAuxInfoCommitment,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
-
-	// --- Refresh ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                refreshStartRound,
-		PayloadType:          payloadRefreshCommitments,
+		Round:                refreshAuxInfoRevealRound,
+		PayloadType:          payloadAuxInfoReveal,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                refreshAuxInfoProofRound,
+		PayloadType:          payloadAuxInfoProofs,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
 		Protocol:               tss.ProtocolCGGMP21Secp256k1,
-		Round:                  refreshShareRound,
-		PayloadType:            payloadRefreshShare,
+		Round:                  refreshAuxInfoProofRound,
+		PayloadType:            payloadAuxInfoDirect,
 		Mode:                   tss.DeliveryDirect,
 		Confidentiality:        tss.ConfidentialityRequired,
 		BroadcastConsistency:   tss.BroadcastConsistencyNone,
 		RequireSenderSignature: true,
 	},
-	// Refresh round 2 uses payloadKeygenConfirmation (already registered in keygen section)
-
+	tss.DeliveryPolicy{
+		Protocol:               tss.ProtocolCGGMP21Secp256k1,
+		Round:                  refreshAuxInfoProofRound,
+		PayloadType:            payloadAuxInfoDecryptionError,
+		Mode:                   tss.DeliveryBroadcast,
+		Confidentiality:        tss.ConfidentialityOptional,
+		BroadcastConsistency:   tss.BroadcastConsistencyRequired,
+		RequireSenderSignature: true,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                refreshConfirmationRound,
+		PayloadType:          payloadKeygenConfirmation,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	// --- Child derivation ---
+	// Figure 7 uses the same round numbers and payload policies as refresh.
+	// The final confirmation has a distinct payload type so lifecycle intent
+	// cannot be confused even when a transport routes by protocol and round.
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                childConfirmationRound,
+		PayloadType:          payloadChildConfirmation,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
 	// --- Reshare ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
@@ -129,6 +212,48 @@ var cggmp21Policies = tss.MustNewPolicySet(
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                reshareAuxInfoCommitmentRound,
+		PayloadType:          payloadAuxInfoCommitment,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                reshareAuxInfoRevealRound,
+		PayloadType:          payloadAuxInfoReveal,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                reshareAuxInfoProofRound,
+		PayloadType:          payloadAuxInfoProofs,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
+	tss.DeliveryPolicy{
+		Protocol:               tss.ProtocolCGGMP21Secp256k1,
+		Round:                  reshareAuxInfoProofRound,
+		PayloadType:            payloadAuxInfoDirect,
+		Mode:                   tss.DeliveryDirect,
+		Confidentiality:        tss.ConfidentialityRequired,
+		BroadcastConsistency:   tss.BroadcastConsistencyNone,
+		RequireSenderSignature: true,
+	},
+	tss.DeliveryPolicy{
+		Protocol:               tss.ProtocolCGGMP21Secp256k1,
+		Round:                  reshareAuxInfoProofRound,
+		PayloadType:            payloadAuxInfoDecryptionError,
+		Mode:                   tss.DeliveryBroadcast,
+		Confidentiality:        tss.ConfidentialityOptional,
+		BroadcastConsistency:   tss.BroadcastConsistencyRequired,
+		RequireSenderSignature: true,
 	},
 	tss.DeliveryPolicy{
 		Protocol:               tss.ProtocolCGGMP21Secp256k1,
@@ -156,7 +281,14 @@ var cggmp21Policies = tss.MustNewPolicySet(
 		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
-	// Reshare round 2 uses payloadKeygenConfirmation (already registered in keygen section)
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
+		Round:                reshareConfirmationRound,
+		PayloadType:          payloadKeygenConfirmation,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
 )
 
 // CGGMP21Policies returns the read-only delivery policy set for the CGGMP21

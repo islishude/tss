@@ -345,6 +345,10 @@ check-transcript-api: ## Ensure custom SHA-256 transcripts use internal/transcri
 		exit 1; \
 	fi
 
+.PHONY: check-cggmp21-paper-paths
+check-cggmp21-paper-paths: ## Reject retired CGGMP21 presign/sign production paths.
+	bash ./.github/scripts/check-cggmp21-paper-paths.sh
+
 # -----------------------------------------------------------------------------
 # Combined workflows
 # -----------------------------------------------------------------------------
@@ -353,7 +357,7 @@ check-transcript-api: ## Ensure custom SHA-256 transcripts use internal/transcri
 fix-all: go-fix lint-fix fmt tidy ## Apply source-modifying fixes, formatting, and module tidy.
 
 .PHONY: check
-check: build vet lint fmt-check tidy-check verify check-wire-api check-transcript-api go-fix-check ## Fast local pre-commit check.
+check: build vet lint fmt-check tidy-check verify check-wire-api check-transcript-api check-cggmp21-paper-paths go-fix-check ## Fast local pre-commit check.
 
 .PHONY: ci
 ci: check test-fast ## PR-grade checks; excludes source-modifying fixes, slowcrypto, race, stress, and long fuzzing.

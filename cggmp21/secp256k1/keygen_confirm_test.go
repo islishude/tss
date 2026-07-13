@@ -63,7 +63,7 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 }
 
 // TestKeygenConfirmationRejectsTamperedFields verifies that a confirmation
-// with a mismatched transcript hash, public key, or commitments hash is rejected.
+// with a mismatched transcript, public key, commitments, or epoch is rejected.
 func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
@@ -96,6 +96,16 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 			tamperAt: 2,
 			mutate:   func(c *KeygenConfirmation) { c.CommitmentsHash[0] ^= 1 },
 		},
+		{
+			name:     "cross epoch",
+			tamperAt: 1,
+			mutate:   func(c *KeygenConfirmation) { c.EpochID[0] ^= 1 },
+		},
+		{
+			name:     "missing epoch",
+			tamperAt: 2,
+			mutate:   func(c *KeygenConfirmation) { c.EpochID = nil },
+		},
 	}
 
 	for _, tc := range tests {
@@ -107,6 +117,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 				clone.TranscriptHash = bytes.Clone(c.TranscriptHash)
 				clone.PublicKey = bytes.Clone(c.PublicKey)
 				clone.CommitmentsHash = bytes.Clone(c.CommitmentsHash)
+				clone.EpochID = bytes.Clone(c.EpochID)
 				confirmations[i] = &clone
 			}
 			tc.mutate(confirmations[tc.tamperAt])
@@ -275,7 +286,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	}
 }
 
-func TestKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.T) {
+func TestKeygenSessionBuffersConfirmationBeforeLocalFigure7Completion(t *testing.T) {
 	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -317,14 +328,23 @@ func TestKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.T) {
 	if early.PayloadType == "" {
 		t.Fatal("party 2 did not produce a confirmation")
 	}
-	receiver, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
+	// paperConfirmations is the authoritative buffer after Figure 6 has fixed
+	// the group key but before the local Figure 7 result is ready. Reuse party
+	// 1's verified Figure 6 view while modeling that intermediate state.
+	receiver := &KeygenSession{
+		cfg:                sessions[1].cfg,
+		limits:             sessions[1].limits,
+		planHash:           bytes.Clone(sessions[1].planHash),
+		guard:              paperKeygenTestGuard(1, parties, sessionID),
+		figure6:            sessions[1].figure6,
+		auxInfo:            new(auxInfoState),
+		paperConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
+		paperAccepted:      make(map[paperKeygenMessageKey]struct{}),
 	}
-	if _, err := receiver.Handle(testutil.DeliverEnvelope(early)); err != nil {
+	if _, err := receiver.handlePaperKeygenConfirmationLocked(testutil.DeliverEnvelope(early), newPaperKeygenMessageKey(early)); err != nil {
 		t.Fatalf("early confirmation: %v", err)
 	}
-	if receiver.aborted || receiver.pendingConfirmations[2] == nil {
+	if receiver.aborted || receiver.paperConfirmations[2] == nil {
 		t.Fatal("early confirmation was not buffered without aborting")
 	}
 }

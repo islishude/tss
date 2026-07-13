@@ -26,14 +26,14 @@ func TestDefaultSecurityParamsValues(t *testing.T) {
 	if sp.Ell != 256 {
 		t.Errorf("Ell = %d, want 256 (secp256k1 scalar bit length)", sp.Ell)
 	}
-	if sp.EllPrime != 848 {
-		t.Errorf("EllPrime = %d, want 848 (CGGMP affine secondary range)", sp.EllPrime)
+	if sp.EllPrime != 1280 {
+		t.Errorf("EllPrime = %d, want 1280 (CGGMP Appendix C.1)", sp.EllPrime)
 	}
-	if sp.Epsilon != 230 {
-		t.Errorf("Epsilon = %d, want 230 (statistical slack)", sp.Epsilon)
+	if sp.Epsilon != 512 {
+		t.Errorf("Epsilon = %d, want 512 (CGGMP Appendix C.1)", sp.Epsilon)
 	}
-	if sp.ChallengeBits != 128 {
-		t.Errorf("ChallengeBits = %d, want 128 (128-bit soundness)", sp.ChallengeBits)
+	if sp.ChallengeBits != 256 {
+		t.Errorf("ChallengeBits = %d, want 256 (secp256k1 subgroup-order width)", sp.ChallengeBits)
 	}
 	if sp.MinPaillierBits != 3072 {
 		t.Errorf("MinPaillierBits = %d, want 3072 (NIST SP 800-57)", sp.MinPaillierBits)
@@ -44,16 +44,12 @@ func TestDefaultSecurityParamsValues(t *testing.T) {
 // Ell + max(ChallengeBits, Epsilon). The mask α must be sampled from a range
 // wide enough to statistically hide e·m.
 //
-// With DefaultSecurityParams: EncRange = 256 + max(128, 230) = 486.
-// This means α ∈ [−2^486, 2^486], providing:
-//   - max(|e|) = 2^128 − 1
+// With DefaultSecurityParams: EncRange = 256 + max(256, 512) = 768.
+// This means α ∈ [−2^768, 2^768], providing:
+//   - max(|e|) < q < 2^256
 //   - max(|m|) = 2^256 − 1
-//   - max(|e·m|) ≈ 2^384
-//   - mask range = 2^487 (signed) → ~2^486 positive
-//
-// The statistical hiding per candidate is ~2^(486−384) = 2^102 candidates.
-// This is below the 2^128 claimed in the code comments but still infeasible
-// to enumerate (2^102 > 2^80 security target for statistical hiding).
+//   - max(|e·m|) < 2^512
+//   - the mask exceeds that shift by 256 bits, as required by Appendix C.1.
 func TestEncRangeFormula(t *testing.T) {
 	t.Parallel()
 	sp := DefaultSecurityParams()
@@ -63,8 +59,8 @@ func TestEncRangeFormula(t *testing.T) {
 	if encRange != expected {
 		t.Fatalf("EncRange() = %d, want %d (Ell + max(ChallengeBits, Epsilon))", encRange, expected)
 	}
-	if encRange != 486 {
-		t.Errorf("EncRange() = %d, expected 486 for DefaultSecurityParams", encRange)
+	if encRange != 768 {
+		t.Errorf("EncRange() = %d, expected 768 for DefaultSecurityParams", encRange)
 	}
 
 	affgRange := sp.AffGRange()
@@ -72,36 +68,25 @@ func TestEncRangeFormula(t *testing.T) {
 	if affgRange != expectedAffG {
 		t.Fatalf("AffGRange() = %d, want %d (EllPrime + max(ChallengeBits, Epsilon))", affgRange, expectedAffG)
 	}
-	if affgRange != 1078 {
-		t.Errorf("AffGRange() = %d, expected 1078 for DefaultSecurityParams", affgRange)
+	if affgRange != 1792 {
+		t.Errorf("AffGRange() = %d, expected 1792 for DefaultSecurityParams", affgRange)
 	}
 }
 
-// TestEncRangeStatisticalHiding computes the actual statistical hiding provided
-// by the production EncRange and documents the result. With DefaultSecurityParams:
-// mask α ∈ [0, 2^486), response z = α + e·m where e ∈ [0, 2^128) and m ∈ [0, 2^256).
-//
-// For a given (z, e), the set of possible m is {m : 0 ≤ z − e·m < 2^486, 0 ≤ m < q}.
-// The candidate count is approximately 2^486 / e ≈ 2^358 when e ≈ 2^128.
-//
-// The statistical hiding is the logarithm of the minimum candidate set size:
-// log2(2^486 / 2^128) = 358 bits. This is well above the 128-bit target.
+// TestEncRangeStatisticalHiding verifies the Appendix C.1 shift-distance
+// margin. The mask exponent must exceed the largest e*m shift exponent by at
+// least Ell bits.
 func TestEncRangeStatisticalHiding(t *testing.T) {
 	t.Parallel()
 	sp := DefaultSecurityParams()
-	maskBits := sp.EncRange() // 486
-
-	// The mask provides 2^maskBits possible α values.
-	// For a worst-case challenge e ≈ 2^128, the candidate interval is:
-	//   width ≈ 2^maskBits / e = 2^(maskBits - 128) = 2^358
-	//
-	// Even for the maximum possible challenge (2^128 − 1), the hiding is:
-	//   log2(2^486 / (2^128 − 1)) ≈ 358 bits
-	hidingBits := maskBits - sp.ChallengeBits
-	if hidingBits < 128 {
-		t.Errorf("statistical hiding = %d bits, need ≥ 128", hidingBits)
+	shiftBits := sp.Ell + sp.ChallengeBits
+	hidingBits := sp.EncRange() - shiftBits
+	if hidingBits < sp.Ell {
+		t.Errorf("statistical shift-distance margin = %d bits, need at least Ell=%d", hidingBits, sp.Ell)
 	}
-	t.Logf("EncRange statistical hiding: ~%d bits (mask=%d, challenge=%d)", hidingBits, maskBits, sp.ChallengeBits)
+	if hidingBits != 256 {
+		t.Errorf("statistical shift-distance margin = %d bits, want 256", hidingBits)
+	}
 }
 
 // TestChallengeBitsDoNotExceedHashOutput verifies that ChallengeBits ≤ 256,
@@ -152,6 +137,24 @@ func TestReducedSecurityParamsSanity(t *testing.T) {
 	}
 }
 
+func TestDefaultSecurityParamsMatchAppendixC1(t *testing.T) {
+	t.Parallel()
+	sp := DefaultSecurityParams()
+	kappa := uint32(256)
+	if sp.Ell < kappa {
+		t.Fatalf("Ell=%d is below kappa=%d", sp.Ell, kappa)
+	}
+	if sp.Epsilon < sp.Ell+kappa {
+		t.Fatalf("Epsilon=%d is below Ell+kappa=%d", sp.Epsilon, sp.Ell+kappa)
+	}
+	if sp.EllPrime < sp.Ell+sp.Epsilon+2*sp.Ell {
+		t.Fatalf("EllPrime=%d is below Appendix C.1 bound %d", sp.EllPrime, sp.Ell+sp.Epsilon+2*sp.Ell)
+	}
+	if sp.MinPaillierBits < sp.EllPrime+sp.Epsilon {
+		t.Fatalf("MinPaillierBits=%d is below plaintext no-wrap bound %d", sp.MinPaillierBits, sp.EllPrime+sp.Epsilon)
+	}
+}
+
 // TestSecurityParamsValidate verifies that Validate rejects invalid
 // parameter combinations.
 func TestSecurityParamsValidate(t *testing.T) {
@@ -174,6 +177,8 @@ func TestSecurityParamsValidate(t *testing.T) {
 		{"encryption range above hard limit", SecurityParams{Ell: maxSecurityParameterBits, EllPrime: 1, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
 		{"affine range above hard limit", SecurityParams{Ell: 1, EllPrime: maxSecurityParameterBits, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
 		{"overflowing encryption range", SecurityParams{Ell: ^uint32(0), EllPrime: 1, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
+		{"decryption product range above hard limit", SecurityParams{Ell: maxRangeForTest()/2 + 1, EllPrime: 1, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
+		{"decryption aggregation range above hard limit", SecurityParams{Ell: 1, EllPrime: maxRangeForTest() - decAggregationSlackBits, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -186,6 +191,10 @@ func TestSecurityParamsValidate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func maxRangeForTest() uint32 {
+	return maxSecurityParameterBits - proofResponseSlackBits
 }
 
 func TestSecurityParamsRangesDoNotOverflow(t *testing.T) {
@@ -204,6 +213,23 @@ func TestSecurityParamsRangesDoNotOverflow(t *testing.T) {
 	if got := params.AffGRange(); got != maxSecurityParameterBits {
 		t.Fatalf("AffGRange() = %d, want bounded value %d", got, maxSecurityParameterBits)
 	}
+	if got := params.DecPlaintextRange(); got != maxSecurityParameterBits {
+		t.Fatalf("DecPlaintextRange() = %d, want bounded value %d", got, maxSecurityParameterBits)
+	}
+	if got := params.DecRange(); got != maxSecurityParameterBits {
+		t.Fatalf("DecRange() = %d, want bounded value %d", got, maxSecurityParameterBits)
+	}
+}
+
+func TestFigure28RangesCoverProductsAndAggregation(t *testing.T) {
+	t.Parallel()
+	params := fastSecurityParams()
+	if got, want := params.DecPlaintextRange(), uint32(528); got != want {
+		t.Fatalf("DecPlaintextRange() = %d, want %d", got, want)
+	}
+	if got, want := params.DecRange(), uint32(656); got != want {
+		t.Fatalf("DecRange() = %d, want %d", got, want)
+	}
 }
 
 // TestEllPrimeExceedsEll verifies that EllPrime > Ell, which is required for
@@ -214,7 +240,7 @@ func TestEllPrimeExceedsEll(t *testing.T) {
 	if sp.EllPrime <= sp.Ell {
 		t.Errorf("EllPrime (%d) must be strictly greater than Ell (%d)", sp.EllPrime, sp.Ell)
 	}
-	if sp.EllPrime != 848 {
+	if sp.EllPrime != 1280 {
 		t.Logf("EllPrime = %d — verify this matches CGGMP paper Table 1", sp.EllPrime)
 	}
 

@@ -11,6 +11,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
@@ -53,8 +54,62 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 	t.Cleanup(betaShare.Destroy)
 	t.Cleanup(opening.Destroy)
 
-	if err := opening.Verify(params, start.Message, *response, aCommitment, bCommitment, skA.PublicKey, skB.PublicKey); err != nil {
+	if err := opening.Verify(params, start.Message, *response, skA.PublicKey, skB.PublicKey); err != nil {
 		t.Fatalf("valid response opening rejected: %v", err)
+	}
+	figure9Proof, err := opening.ProveAffGStar(
+		params,
+		testutil.DeterministicReader(4101),
+		[]byte("figure-9-aff-g-star"),
+		start.Message,
+		*response,
+		bCommitment,
+		skA.PublicKey,
+		skB.PublicKey,
+	)
+	if err != nil {
+		t.Fatalf("prove Figure 9 Πaff-g*: %v", err)
+	}
+	t.Cleanup(figure9Proof.Destroy)
+	if err := VerifyFigure9AffGStar(
+		params,
+		[]byte("figure-9-aff-g-star"),
+		start.Message,
+		*response,
+		bCommitment,
+		skA.PublicKey,
+		skB.PublicKey,
+		figure9Proof,
+	); err != nil {
+		t.Fatalf("verify Figure 9 Πaff-g*: %v", err)
+	}
+	if err := VerifyFigure9AffGStar(
+		params,
+		[]byte("wrong-figure-9-domain"),
+		start.Message,
+		*response,
+		bCommitment,
+		skA.PublicKey,
+		skB.PublicKey,
+		figure9Proof,
+	); err == nil {
+		t.Fatal("Figure 9 proof accepted the wrong transcript domain")
+	}
+	wrongCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(38)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyFigure9AffGStar(
+		params,
+		[]byte("figure-9-aff-g-star"),
+		start.Message,
+		*response,
+		wrongCommitment,
+		skA.PublicKey,
+		skB.PublicKey,
+		figure9Proof,
+	); err == nil {
+		t.Fatal("Figure 9 proof accepted a different multiplier commitment")
 	}
 
 	t.Run("alternate-y-representative", func(t *testing.T) {
@@ -88,7 +143,7 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 			t.Fatalf("alternate representative did not decode: %v", err)
 		}
 		defer decoded.Destroy()
-		err = decoded.Verify(params, start.Message, *response, aCommitment, bCommitment, skA.PublicKey, skB.PublicKey)
+		err = decoded.Verify(params, start.Message, *response, skA.PublicKey, skB.PublicKey)
 		if err == nil {
 			t.Fatal("out-of-range alternate y representative was accepted")
 		}
@@ -104,7 +159,7 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 	}{
 		{
 			name: "x",
-			want: "x does not open b commitment",
+			want: "does not reproduce response ciphertext",
 			mutate: func(t *testing.T, candidate *ResponseOpening) {
 				candidate.x.Destroy()
 				candidate.x = responseOpeningTestScalar(t, big.NewInt(38), secp.ScalarSize)
@@ -112,7 +167,7 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 		},
 		{
 			name: "y",
-			want: "y does not open proof YPoint",
+			want: "does not reproduce response ciphertext",
 			mutate: func(t *testing.T, candidate *ResponseOpening) {
 				candidate.y.Destroy()
 				candidate.y = differentResponseOpeningSignedInt(t, opening.y)
@@ -128,7 +183,7 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 		},
 		{
 			name: "rhoY",
-			want: "does not reproduce proof Y ciphertext",
+			want: "does not reproduce F ciphertext",
 			mutate: func(t *testing.T, candidate *ResponseOpening) {
 				candidate.rhoY.Destroy()
 				candidate.rhoY = differentResponseOpeningScalar(t, opening.rhoY)
@@ -150,7 +205,7 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 				t.Fatalf("structurally valid witness mutation did not decode: %v", err)
 			}
 			defer decoded.Destroy()
-			err = decoded.Verify(params, start.Message, *response, aCommitment, bCommitment, skA.PublicKey, skB.PublicKey)
+			err = decoded.Verify(params, start.Message, *response, skA.PublicKey, skB.PublicKey)
 			if err == nil {
 				t.Fatal("structurally valid witness mutation was accepted")
 			}
@@ -161,60 +216,26 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 	}
 
 	otherResponseA := differentResponseOpeningCiphertext(t, skA.PublicKey, response.Ciphertext)
-	otherResponseY := differentResponseOpeningCiphertext(t, skB.PublicKey, response.Proof.Y.Bytes())
-	otherACommitment := differentResponseOpeningPoint(t, aCommitment)
-	otherBCommitment := differentResponseOpeningPoint(t, bCommitment)
-	otherYPoint := differentResponseOpeningPoint(t, response.Proof.YPoint)
-	otherAlphaPoint := differentResponseOpeningPoint(t, response.Proof.AlphaPoint)
+	otherResponseY := differentResponseOpeningCiphertext(t, skB.PublicKey, response.F)
 	publicTests := []struct {
 		name   string
 		want   string
-		mutate func(*ResponseMessage, *[]byte, *[]byte)
+		mutate func(*ResponseMessage)
 	}{
 		{
 			name: "D",
 			want: "does not reproduce response ciphertext",
-			mutate: func(candidate *ResponseMessage, _, _ *[]byte) {
+			mutate: func(candidate *ResponseMessage) {
 				clear(candidate.Ciphertext)
 				candidate.Ciphertext = bytes.Clone(otherResponseA)
 			},
 		},
 		{
-			name: "proof-Y",
-			want: "does not reproduce proof Y ciphertext",
-			mutate: func(candidate *ResponseMessage, _, _ *[]byte) {
-				secret.ClearBigInt(candidate.Proof.Y)
-				candidate.Proof.Y = new(big.Int).SetBytes(otherResponseY)
-			},
-		},
-		{
-			name: "b-commitment",
-			want: "x does not open b commitment",
-			mutate: func(_ *ResponseMessage, _, candidateB *[]byte) {
-				*candidateB = bytes.Clone(otherBCommitment)
-			},
-		},
-		{
-			name: "proof-YPoint",
-			want: "y does not open proof YPoint",
-			mutate: func(candidate *ResponseMessage, _, _ *[]byte) {
-				clear(candidate.Proof.YPoint)
-				candidate.Proof.YPoint = bytes.Clone(otherYPoint)
-			},
-		},
-		{
-			name: "a-commitment",
-			want: "does not open proof AlphaPoint",
-			mutate: func(_ *ResponseMessage, candidateA, _ *[]byte) {
-				*candidateA = bytes.Clone(otherACommitment)
-			},
-		},
-		{
-			name: "proof-AlphaPoint",
-			want: "does not open proof AlphaPoint",
-			mutate: func(candidate *ResponseMessage, _, _ *[]byte) {
-				clear(candidate.Proof.AlphaPoint)
-				candidate.Proof.AlphaPoint = bytes.Clone(otherAlphaPoint)
+			name: "F",
+			want: "does not reproduce F ciphertext",
+			mutate: func(candidate *ResponseMessage) {
+				clear(candidate.F)
+				candidate.F = bytes.Clone(otherResponseY)
 			},
 		},
 	}
@@ -222,10 +243,8 @@ func TestResponseOpeningVerifyBindsEveryWitnessAndPublicRelation(t *testing.T) {
 		t.Run("tampered-public-"+tc.name, func(t *testing.T) {
 			candidateResponse := response.Clone()
 			defer candidateResponse.Destroy()
-			candidateA := bytes.Clone(aCommitment)
-			candidateB := bytes.Clone(bCommitment)
-			tc.mutate(&candidateResponse, &candidateA, &candidateB)
-			err := opening.Verify(params, start.Message, candidateResponse, candidateA, candidateB, skA.PublicKey, skB.PublicKey)
+			tc.mutate(&candidateResponse)
+			err := opening.Verify(params, start.Message, candidateResponse, skA.PublicKey, skB.PublicKey)
 			if err == nil {
 				t.Fatal("structurally valid public relation mutation was accepted")
 			}
@@ -293,21 +312,5 @@ func differentResponseOpeningCiphertext(t *testing.T, pk *pai.PublicKey, current
 		secret.ClearBigInt(candidate)
 	}
 	t.Fatal("failed to construct distinct Paillier ciphertext")
-	return nil
-}
-
-func differentResponseOpeningPoint(t *testing.T, current []byte) []byte {
-	t.Helper()
-	for _, scalar := range []int64{1, 2} {
-		candidate, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(scalar))))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(candidate, current) {
-			return candidate
-		}
-		clear(candidate)
-	}
-	t.Fatal("failed to construct distinct secp256k1 point")
 	return nil
 }

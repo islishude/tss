@@ -152,6 +152,11 @@ func defaultEnvelopeLimits() EnvelopeLimits {
 	}
 }
 
+// DefaultEnvelopeLimits returns a caller-owned copy of the conservative
+// production envelope limits used by NewEnvelope, MarshalBinary, and
+// UnmarshalBinary.
+func DefaultEnvelopeLimits() EnvelopeLimits { return defaultEnvelopeLimits() }
+
 // validateEnvelopeFields checks per-field limits that are not covered by wire
 // encoding (string lengths, payload size, session id validity).
 func validateEnvelopeFields(env *Envelope, limits EnvelopeLimits) error {

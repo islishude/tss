@@ -7,34 +7,47 @@ import (
 	"time"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/tssrun"
 )
 
 // RefreshRunnerOptions configures the CGGMP21 refresh protocol adapter.
 type RefreshRunnerOptions struct {
-	Rand           io.Reader
-	RoundTimeout   time.Duration
-	Log            tss.Logger
-	PaillierBits   int
-	Limits         *Limits
-	SecurityParams *SecurityParams
+	Rand                io.Reader
+	RoundTimeout        time.Duration
+	Log                 tss.Logger
+	PaillierBits        int
+	Limits              *Limits
+	SecurityParams      *SecurityParams
+	LifecycleStore      tssrun.LifecycleStore
+	Binding             tssrun.GenerationBinding
+	TargetKeyGeneration tssrun.KeyGeneration
+	DurableStoreTimeout time.Duration
 }
 
 type refreshRunner struct {
-	rand           io.Reader
-	roundTimeout   time.Duration
-	log            tss.Logger
-	paillierBits   int
-	limits         *Limits
-	securityParams *SecurityParams
+	rand                io.Reader
+	roundTimeout        time.Duration
+	log                 tss.Logger
+	paillierBits        int
+	limits              *Limits
+	securityParams      *SecurityParams
+	lifecycleStore      tssrun.LifecycleStore
+	binding             tssrun.GenerationBinding
+	targetKeyGeneration tssrun.KeyGeneration
+	durableStoreTimeout time.Duration
 }
 
 // NewRefreshRunner constructs a CGGMP21 adapter for [tss.RefreshScheduler].
 func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare] {
 	runner := &refreshRunner{
-		rand:         options.Rand,
-		roundTimeout: options.RoundTimeout,
-		log:          options.Log,
-		paillierBits: options.PaillierBits,
+		rand:                options.Rand,
+		roundTimeout:        options.RoundTimeout,
+		log:                 options.Log,
+		paillierBits:        options.PaillierBits,
+		lifecycleStore:      options.LifecycleStore,
+		binding:             options.Binding,
+		targetKeyGeneration: options.TargetKeyGeneration,
+		durableStoreTimeout: options.DurableStoreTimeout,
 	}
 	if options.Limits != nil {
 		limits := *options.Limits
@@ -80,14 +93,21 @@ func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, con
 	if err != nil {
 		return nil, nil, err
 	}
-	session, out, err := StartRefresh(current, plan, tss.LocalConfig{
-		Self:           current.PartyID(),
-		Rand:           r.rand,
-		Context:        ctx,
-		RoundTimeout:   r.roundTimeout,
-		Log:            r.log,
-		EnvelopeSigner: config.EnvelopeSigner,
-	}, guard)
+	session, out, err := StartRefresh(plan, RefreshRuntime{
+		Local: tss.LocalConfig{
+			Self:           current.PartyID(),
+			Rand:           r.rand,
+			Context:        ctx,
+			RoundTimeout:   r.roundTimeout,
+			Log:            r.log,
+			EnvelopeSigner: config.EnvelopeSigner,
+		},
+		Guard:               guard,
+		LifecycleStore:      r.lifecycleStore,
+		Binding:             r.binding,
+		TargetKeyGeneration: r.targetKeyGeneration,
+		DurableStoreTimeout: r.durableStoreTimeout,
+	})
 	if err != nil {
 		return nil, nil, err
 	}

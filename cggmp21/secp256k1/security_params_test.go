@@ -2,13 +2,28 @@ package secp256k1
 
 import (
 	"bytes"
-	"context"
+	"math/bits"
 	"sort"
 	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
 )
+
+func TestCGGMP21Figure28RangeCoversSignerAggregation(t *testing.T) {
+	t.Parallel()
+	params := testSecurityParams()
+	base := max(params.EllPrime, params.Ell+params.Ell)
+	plaintextRange := params.DecPlaintextRange()
+	if plaintextRange < base {
+		t.Fatal("Figure 28 plaintext range does not cover a product of two curve scalars")
+	}
+	carryBits := plaintextRange - base
+	requiredCarryBits := uint32(bits.Len(uint(maxCGGMPSigners - 1)))
+	if carryBits < requiredCarryBits {
+		t.Fatalf("Figure 28 aggregation slack is %d bits, need at least %d bits for %d signers", carryBits, requiredCarryBits, maxCGGMPSigners)
+	}
+}
 
 func TestCGGMP21DefaultsRemainProduction(t *testing.T) {
 	t.Parallel()
@@ -130,6 +145,36 @@ func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
 	}
 }
 
+func TestCGGMP21TrustedDealerDefaultValidationRejectsTestProfile(t *testing.T) {
+	t.Parallel()
+
+	secretKey, err := ParseSecretKey(bytes.Repeat([]byte{0x01}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secretKey.Destroy()
+	limits := testLimits()
+	params := testSecurityParams()
+	plan, contributions, err := NewTrustedDealerImport(secretKey, TrustedDealerImportOption{
+		SessionID:      cggmpPlanTestSession(0x66),
+		Parties:        tss.NewPartySet(1, 2),
+		Threshold:      2,
+		PaillierBits:   int(params.MinPaillierBits),
+		Limits:         &limits,
+		SecurityParams: &params,
+	}, bytes.NewReader(bytes.Repeat([]byte{0x42}, 4096)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer destroyCGGMPContributions(contributions)
+	if err := plan.Validate(); err == nil {
+		t.Fatal("production Validate accepted a test-profile trusted-dealer plan")
+	}
+	if err := plan.ValidateWithLimits(limits); err != nil {
+		t.Fatalf("ValidateWithLimits rejected a test-profile trusted-dealer plan: %v", err)
+	}
+}
+
 func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 	t.Parallel()
 
@@ -141,6 +186,7 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 	if _, err := NewPresignPlan(PresignPlanOption{
 		Key:            shares[1],
 		SessionID:      sessionID,
+		PresignID:      sessionID[:],
 		Signers:        tss.NewPartySet(1, 2),
 		Context:        testPresignContext(),
 		Limits:         &limits,
@@ -159,7 +205,7 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 	}
 	if _, err := NewSignPlan(SignPlanOption{
 		Key:     shares[1],
-		Presign: mismatched,
+		Presign: mustPresignMetadata(t, mismatched),
 		Intent: SignIntent{
 			SessionID: sessionID,
 			Context:   testPresignContext(),
@@ -169,18 +215,6 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 		Limits: &limits,
 	}); err == nil {
 		t.Fatal("sign plan accepted mismatched key and presign security params")
-	}
-	if _, _, err := ResumeSignWithLimits(
-		context.Background(),
-		shares[1],
-		mismatched,
-		newTestSignAttemptStore(),
-		nil,
-		limits,
-	); err == nil {
-		t.Fatal("ResumeSign accepted mismatched key and presign security params")
-	} else if err.Error() != "presign security params mismatch" {
-		t.Fatalf("ResumeSign error = %q, want security params mismatch", err)
 	}
 }
 
@@ -194,7 +228,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyRaw = flattenSecurityParamsRecordForTest(t, keyRaw, keyShareWireType, 18, shares[1].state.SecurityParams)
+	keyRaw = flattenSecurityParamsRecordForTest(t, keyRaw, keyShareWireType, 16, shares[1].state.SecurityParams)
 	if _, err := tss.DecodeBinaryWithLimits[KeyShare](keyRaw, limits); err == nil {
 		t.Fatal("key share accepted retired flattened security params")
 	}

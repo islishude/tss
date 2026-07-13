@@ -28,6 +28,10 @@ func TestCGGMP21RefreshMixedSourceGenerationsRejectsWithoutStateMutation(t *test
 		refreshed[id] = share
 		defer share.Destroy()
 	}
+	if reconstructed, err := ReconstructSecretKeyWithLimits(testLimits(), original[1], refreshed[2]); err == nil {
+		reconstructed.Destroy()
+		t.Fatal("reconstruction accepted shares from different lifecycle epochs")
+	}
 
 	originalMeta := mustKeyShareMetadata(t, original[2])
 	refreshedMeta := mustKeyShareMetadata(t, refreshed[1])
@@ -60,7 +64,7 @@ func TestCGGMP21RefreshMixedSourceGenerationsRejectsWithoutStateMutation(t *test
 		t.Fatal("mixed source generations produced the same refresh plan hash")
 	}
 
-	oldCommitment := mustCGGMPEnvelope(t, oldOut, payloadRefreshCommitments, tss.BroadcastPartyId)
+	oldCommitment := mustRefreshEnvelope(t, oldOut, payloadAuxInfoCommitment)
 	out, err := newGenerationSession.Handle(testutil.DeliverEnvelope(oldCommitment))
 	if len(out) != 0 {
 		t.Fatalf("mixed-generation commitment emitted %d envelopes", len(out))
@@ -69,13 +73,13 @@ func TestCGGMP21RefreshMixedSourceGenerationsRejectsWithoutStateMutation(t *test
 	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
 		t.Fatalf("mixed-generation commitment error = %v, want plan mismatch", protocolErr.Err)
 	}
-	remote := newGenerationSession.partyData[2]
-	if remote.commitments != nil || remote.share != nil ||
-		remote.paillierPub.PublicKey != nil || remote.paillierPub.Proof != nil ||
-		remote.ringPedersen.Params != nil || remote.ringPedersen.Proof != nil {
-		t.Fatal("mixed-generation commitment mutated remote refresh state")
+	remote := newGenerationSession.auxInfo.slots[2]
+	if remote.commitment != nil || remote.reveal != nil || remote.proofs != nil ||
+		remote.modProof != nil || remote.factor != nil || remote.share != nil {
+		t.Fatal("mixed-generation commitment mutated remote Figure 7 state")
 	}
-	if newGenerationSession.sharesSent || newGenerationSession.newShare != nil || newGenerationSession.completed || newGenerationSession.aborted {
+	if newGenerationSession.auxInfo.revealSent || newGenerationSession.auxInfo.proofsSent ||
+		newGenerationSession.newShare != nil || newGenerationSession.completed || newGenerationSession.aborted {
 		t.Fatal("mixed-generation commitment advanced or terminated refresh session")
 	}
 }
@@ -105,48 +109,15 @@ func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	}
 
 	env := out2[0]
-	beforeShares := countNonNilShares(s1.round1)
-	beforeCommits := countNonNilCommits(s1.round1)
-	beforePaillier := countNonNilPaillierPubs(s1.round1)
+	before := snapshotCGGMPKeygenSession(s1)
 	out, err := s1.Handle(testutil.DeliverEnvelope(env))
 	if len(out) != 0 {
 		t.Fatalf("plan mismatch emitted %d envelopes", len(out))
 	}
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-	if countNonNilShares(s1.round1) != beforeShares || countNonNilCommits(s1.round1) != beforeCommits || countNonNilPaillierPubs(s1.round1) != beforePaillier {
-		t.Fatal("plan mismatch mutated keygen state")
-	}
+	after := snapshotCGGMPKeygenSession(s1)
+	assertCGGMPSnapshotUnchanged(t, before, after)
 	if s1.aborted {
 		t.Fatal("plan mismatch aborted keygen session")
 	}
-}
-
-func countNonNilShares(in *keygenRound1Inbox) int {
-	n := 0
-	for _, d := range in.slots {
-		if d.share != nil {
-			n++
-		}
-	}
-	return n
-}
-
-func countNonNilCommits(in *keygenRound1Inbox) int {
-	n := 0
-	for _, d := range in.slots {
-		if d.commitments != nil {
-			n++
-		}
-	}
-	return n
-}
-
-func countNonNilPaillierPubs(in *keygenRound1Inbox) int {
-	n := 0
-	for _, d := range in.slots {
-		if d.paillierPub.PublicKey != nil {
-			n++
-		}
-	}
-	return n
 }

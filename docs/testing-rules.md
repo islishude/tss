@@ -142,9 +142,9 @@ Every wire type must have deterministic marshaling and strict decoding:
   marshaling or rejected during decoding.
 - JSON fallback decoding is forbidden for key shares, presigns, proofs,
   envelopes, and blame evidence.
-- CGGMP21 presign marshaling produces a consumed snapshot; a serialized presign
-  must restore as recovery-only unless a durable sign-attempt record authorizes
-  exact-attempt resume.
+- CGGMP21 private presign marshaling is side-effect free. Availability belongs
+  to `LifecycleStore`; copying or round-tripping artifact bytes must not create
+  a second available slot or bypass an atomic sign claim.
 
 Golden vectors are wire compatibility contracts:
 
@@ -177,9 +177,9 @@ Required behavior:
 - Direct and broadcast messages, confidentiality policy, and broadcast
   certificates are enforced before handler execution.
 - Replay and equivocation are detected deterministically.
-- Lifecycle plans for keygen, refresh, reshare, presign, and sign bind global
+- Lifecycle plans for keygen, refresh, reshare, child derivation, presign, and sign bind global
   intent before local runtime configuration. Mixed threshold, party set, session,
-  HD, PaillierBits, signer set, path, context, presign, or message intent must
+  parent/child generation, PaillierBits, signer set, context, presign, or message intent must
   fail closed at the first plan-bound payload without outbound messages or
   secret/state advancement.
 - Refresh and reshare plans must bind the exact source key generation, including
@@ -219,38 +219,29 @@ Early messages are either:
 Completion, abort, and destruction are terminal states unless the public API
 explicitly defines otherwise.
 
-Conditional identifiable-abort phases are a distinct non-terminal state before
-abort. Tests must assert that `Identifying()` is true while `Completed()` and
-all output accessors remain false, then cover both terminal outcomes:
+CGGMP21 accountability tests distinguish two paper paths:
 
-- the first malformed or invalid public identification proof attributes only
-  its authenticated sender and carries a canonical `IdentificationRecord`; and
-- a complete set of valid proofs with the original failure still present
-  returns an unblamed invariant.
+- Figure 7 decryption failure may disclose one ephemeral DH exponent only in
+  the dedicated authenticated accusation payload. Tests must reject that
+  witness in logs, ordinary errors, snapshots, or generic evidence and must
+  validate the embedded signed direct envelope.
+- Figure 9 begins only after a Figure 8 aggregate equation fails. While it is
+  active, no available presign exists. The first invalid `Πaff-g*` or `Πdec`
+  attributes only its authenticated sender; a complete valid proof set with the
+  original alert unresolved returns an unblamed invariant and destroys all
+  witnesses. Early Figure 9 payloads, duplicates, and conflicts must not alter
+  replay or protocol state incorrectly.
 
-An otherwise valid identification envelope that arrives before identification
-is active is checked with the stateless guard path and rejected with
-`ErrCodeRound`. That rejection must not change replay state, protocol state, or
-outbound effects. After activation, the exact envelope must remain acceptable;
-only then do exact duplicates and same-slot conflicts retain the ordinary
-duplicate/equivocation behavior.
+Figure 10 has no additional proof phase. Tests must attribute an invalid partial
+directly through the authenticated envelope and the normalized commitment
+equation.
 
-Identification tests must also verify witness cleanup on success, attributed
-abort, invariant fallback, presign burn, serialization/restore, and explicit
-session destruction. Public evidence mutation tests cover the accused party,
-signed envelope or broadcast certificate, statement, proof, alert digest, and
-transcript hashes. Online-sign evidence additionally mutates the verification
-context, compact accused MtA record, its ordered hash list, and `little-r`; the
-maximum 16-signer production shape must remain within both the statement and
-total evidence hard caps.
-
-CGGMP21 keygen, refresh, and reshare tests must also cover receiver-specific
-Πfac lifecycle binding: missing or mutated proofs, wrong prover/verifier,
-wrong lifecycle/session/plan/security profile, a small-factor modulus, direct
-proof versus receiver-broadcast reordering/equivocation, and KeyShare
-marshal/unmarshal revalidation. Ring-Pedersen generation tests use known local
-factors to confirm that both generated bases are quadratic residues; public
-validation separately tests the mandatory Jacobi `+1` checks.
+CGGMP21 Figure 7 tests cover missing or mutated `Πprm`, `Πmod`, and
+receiver-specific `Πfac`, wrong prover/verifier, wrong SID/RID/epoch/plan/profile,
+small or equal `N`/`Nhat`, direct versus broadcast reordering/equivocation,
+dynamic-identifier zero/collision, and key-share canonical revalidation.
+Ring-Pedersen generation tests use known local factors to confirm that both
+bases are quadratic residues; public validation separately tests Jacobi `+1`.
 
 ### 4. Domain Separation
 
@@ -263,13 +254,13 @@ must bind all context relevant to their phase:
 - committee, signer set, and threshold;
 - group public key;
 - message digest;
-- BIP32 path; and
+- exact lifecycle epoch and, for child creation, parent/child derivation binding; and
 - presign context.
 
 For each relevant field, generate a valid object in one context and verify that it
 fails after substituting another context. At minimum, test cross-session,
-cross-phase, cross-recipient, cross-signer-set, cross-digest, and cross-BIP32-path
-use. Signer-set ordering must have one canonical interpretation.
+cross-phase, cross-recipient, cross-signer-set, cross-digest, and cross-epoch or
+cross-child use. Signer-set ordering must have one canonical interpretation.
 
 Repository-defined SHA-256 transcripts must also test:
 
@@ -284,67 +275,100 @@ excluded from this rule.
 
 ### 5. CGGMP21 Presign Safety
 
-CGGMP21 presigns are one-use security material. A presign must not be reusable
-across digests, sessions, signer sets, key shares, BIP32 paths, copies,
-serialization round trips, restarts, or concurrent calls.
+CGGMP21 presigns are one-use security material. One public `PresignID` under one
+exact `GenerationBinding` may have at most one lifecycle transition from
+available to a committed attempt or burn.
 
-Required behavior:
+Figure 8 tests must cover:
 
+- round 1 `K_i,G_i,Y_i,A_i,B_i` with verifier-specific `Πenc-elg` for both
+  ciphertexts;
+- the canonical public round-1 hash and recipient-specific proof domains;
+- round 2 `Gamma_i` `Πelog` and both pairwise `Πaff-g` paths;
+- centered signed decoding of affine masks and `EllPrime` bounds;
+- round 3 `delta_i,Delta_i,S_i` with `Πelog`;
+- independent checks of `[delta]G=sum(Delta_i)` and
+  `[delta]X=sum(S_i)`;
+- zero `delta` and invalid ECDSA nonce as unattributed terminal failures; and
+- exact normalized output `(Gamma,kTilde_i,chiTilde_i,DeltaTilde,STilde)` with
+  raw witnesses destroyed.
+
+Durability tests must verify:
+
+- `StartPresign` loads and canonically revalidates the exact current generation
+  before acquiring a `RunPresign` lease or emitting output.
+- Figure 8 success atomically stores one available presign and completes the
+  lease before exposing a public persisted descriptor.
+- A presign commit failure leaves no descriptor, candidate secret, or active
+  lease.
+- Artifact byte copies and marshal/unmarshal round trips cannot create another
+  available store slot.
 - Concurrent different intents permit exactly one committed winner.
-- Concurrent identical intents return the exact same canonical envelope.
-- All conflicting intents receive the consumed error category.
-- Online completion always emits canonical low-S signatures; public verification
-  rejects the mathematically equivalent high-S form, and recovery ID parity
-  reflects any `S -> n-S` normalization.
-- MtA responder masks occupy the configured `EllPrime` integer range rather
-  than the curve-scalar range; a malicious initiator choice such as `a=q-1`
-  must not reduce the responder multiplier to a constant-size candidate set.
-- Presign round 3 binds the canonical ordered round-2 payload commitments, and
-  changing the commitment for the local receiver rejects without accepting the
-  delta or verification share.
-- Round1 Πlog\* binds `EncK` to `KPoint`; Πaff-g binds each affine mask to its
-  public curve point; and SignPrep rejects any `MTASum` or `Delta` that does not
-  satisfy the canonical pairwise contribution equations.
-- Conflicting MtA contribution views between two remote parties fail closed
-  without automatically blaming whichever valid message arrived second.
-- Shallow copies and test-only deep copies cannot create independent claims.
-- Marshal/unmarshal and encrypt/decrypt must not create a reusable presign; a
-  serialized CGGMP21 presign restores consumed.
-- Independently restored copies are still serialized by the same durable
-  `SignAttemptStore`.
-- Production code does not expose an API that clones a reusable presign.
+- Concurrent exact retries recover the same immutable attempt and canonical
+  envelope.
+- A conflicting intent, explicit burn, successful commit, or unknown outcome
+  prevents every other claim.
+- The available candidate's secret blob is absent after a sign-attempt commit;
+  only public recovery metadata and the exact outbox remain.
+- `ResumeSign` uses the exact `AttemptQuery`, never a new session or digest.
+- Production code exposes no method that returns the normalized secret tuple
+  from a completed presign session.
 
-A presign is bound before a partial signature can become externally observable.
-Validation, construction, self-verification, and encoding failures before the
-durable commit must not consume it.
+Figure 10 tests must verify every partial with:
 
-| Failure point                                                               | Consumed         |
-| --------------------------------------------------------------------------- | ---------------- |
-| Invalid digest, key share, signer set, BIP32 path, or request configuration | no               |
-| Ordinary durable load error before commit                                   | no               |
-| Corrupt durable claim, envelope, ciphertext, or completion record           | yes; discard     |
-| Commit succeeds, conflicts, or has an unknown outcome                       | yes              |
-| Candidate partial constructed but not committed                             | no               |
-| Committed envelope emitted or send outcome is uncertain                     | yes              |
-| Crash after durable commit                                                  | yes; resume only |
+```text
+Gamma^sigma_i = DeltaTilde_i^m * STilde_i^r
+```
 
-Bad input must never cause partial signature emission.
+Invalid partials are attributed immediately. Aggregation accepts only verified
+partials, emits canonical low-S output, rejects high-S public verification, and
+adjusts recovery-ID parity when `S` is normalized.
+
+| Failure point                                                         | Availability result                       |
+| --------------------------------------------------------------------- | ----------------------------------------- |
+| Invalid plan, generation, epoch, signer set, or empty-path binding    | unchanged; no lease or attempt            |
+| Ordinary load failure before an atomic mutation                       | unchanged                                 |
+| Figure 8 protocol failure                                             | no available presign                      |
+| Figure 8 store commit fails with known non-commit                     | no available presign; lease aborted       |
+| Figure 8 atomic commit succeeds                                       | exactly one available presign             |
+| Figure 10 validation or envelope construction fails before commit     | still available                           |
+| Sign-attempt commit succeeds, conflicts, burns, or is outcome-unknown | unavailable to every new intent           |
+| Crash after sign-attempt commit                                       | recover only the exact attempt and outbox |
+
+Bad input must never cause a partial signature or secret presign artifact to
+become externally visible.
 
 ### 6. Refresh and Reshare
 
 Tests must verify:
 
 - refresh and reshare preserve the group public key unless explicitly specified;
-- epochs, plans, party sets, and thresholds are bound into transcripts and proofs;
+- Figure 7/F.1 commits public material before reveal, derives RID from every
+  accepted contribution, and derives non-zero collision-free dynamic Shamir
+  identifiers;
+- independent Paillier and auxiliary moduli are generated and equality is
+  rejected even when both satisfy the bit-size floor;
+- epochs, SID, RID, plans, source epoch, party sets, and thresholds are bound
+  into transcripts and proofs;
 - FROST refresh/reshare output remains unavailable until every target key holder
   confirms the same transcript, commitments, public key, and preserved chain code;
+- CGGMP21 refresh/reshare output remains unavailable until every target holder
+  confirms the complete new epoch and the lifecycle cutover commits;
 - serialized lifecycle shares reject missing, partial, and fully stripped
   confirmation sets;
 - interrupted operations do not leave two inconsistent usable shares;
 - incomplete refresh leaves only the old share usable;
-- completed refresh makes the new share usable without unsafe old/new mixing;
+- completed CGGMP21 refresh atomically retires the source blob and burns all
+  source-epoch available presigns;
+- a protocol-level refresh failure installs the durable refresh-disabled marker,
+  while a pre-start or storage failure does not;
 - incomplete reshare does not mix old and new committee state; and
-- completed reshare rejects removed parties and accepts only the new committee.
+- completed reshare rejects removed parties and accepts only the new committee;
+- reshare provisional identifiers and transport proofs never enter the final
+  epoch; and
+- a non-hardened child uses a distinct key ID, fresh SID/RID/epoch and
+  auxiliary material, installs through the first-generation transaction, and
+  leaves the parent current.
 
 ### 7. Crash and Restart
 
@@ -355,33 +379,33 @@ Use the shared crash-store harness to inject failures around persistence and
 outbound emission. Cover the points before persist, after persist, before
 outbound, and after outbound when they are meaningful for the phase.
 
-| State at crash                       | Required state after restart                                               |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| Keygen incomplete or unconfirmed     | No exportable MPC key share                                                |
-| Keygen complete and confirmed        | Usable key share                                                           |
-| Presign incomplete                   | No usable presign                                                          |
-| Presign complete, never claimed      | Serialized snapshot is consumed; no new attempt can start from it          |
-| Attempt committed or outcome unknown | Resume only the bound attempt and exact envelope while delivery is pending |
-| Delivery certificate durable         | Resume the session without outbound replay                                 |
-| Completion computed but not durable  | Signature remains unavailable; retry persists same result                  |
-| Burn tombstone durable               | Presign cannot start or resume an attempt                                  |
-| Refresh incomplete                   | Old share is the only usable share                                         |
-| Refresh complete                     | New share is usable; old/new shares cannot mix                             |
-| Reshare incomplete                   | Committees cannot mix; prior valid state remains coherent                  |
-| Reshare complete                     | New committee state is usable; removed parties are rejected                |
+| State at crash                                  | Required state after restart                                               |
+| ----------------------------------------------- | -------------------------------------------------------------------------- |
+| Keygen or Figure 7 incomplete/unconfirmed       | No current sign-ready generation                                           |
+| Keygen and Figure 7 confirmed                   | Exactly one usable current generation                                      |
+| Presign lease active but artifact not committed | No available presign; finish or abort the exact lease                      |
+| Available-presign commit durable                | Exactly one available public slot and secret candidate                     |
+| Attempt committed or outcome unknown            | Resume only the bound attempt and exact envelope while delivery is pending |
+| Delivery certificate durable                    | Resume the session without outbound replay                                 |
+| Completion computed but not durable             | Signature remains unavailable; retry persists the same result              |
+| Burn durable                                    | Presign cannot start or resume an attempt                                  |
+| Refresh/reshare before fence                    | Source remains current                                                     |
+| Cutover fence durable, target not committed     | Reconcile the exact fenced transition; do not admit new source work        |
+| Cutover committed                               | Target current, source retired, source-epoch available presigns burned     |
+| Child generation not committed                  | Parent remains current; child lineage absent                               |
+| Child first generation committed                | Parent and distinct child lineages are both current                        |
 
-`SignAttemptStore` is the durability and outbox boundary. `CommitSignAttempt`
-must be the only StartSign linearization point; StartSign must not pre-read
-`LoadSignAttempt` to decide concurrency. Binding the presign and persisting the
-exact canonical base envelope must be one atomic commit before any partial
-signature is returned or emitted. Tests that instrument stores should distinguish
-`SignAttemptCreated`, `SignAttemptExistingSame`, conflict, burn, and
-same-intent/different-attempt non-determinism.
+`LifecycleStore` is the durability boundary. `CommitAvailablePresignFromLease`
+must atomically store availability and finish the exact lease.
+`CommitSignAttempt` must be the only online-sign linearization point. Binding
+the presign and persisting the exact canonical base envelope is one atomic
+commit before any partial is returned or emitted. Tests distinguish
+`AttemptCreated`, `AttemptExistingSame`, conflict, burn, and outcome unknown.
 
-External `SignAttemptStore` implementations should run
-`secp256k1test.RunSignAttemptStoreSuite` with backend-specific candidate
-records and add storage-specific tests for opaque store keys, at-rest
-encryption, crash consistency, and KMS or database transaction behavior.
+External lifecycle stores should run `tssrun/conformance.RunConformance` and
+add backend-specific tests for encrypted secret blobs, atomic generation
+comparison, lease fencing, opaque identifiers, crash consistency, KMS policy,
+and database transaction behavior.
 
 Delivery state is durable attempt state. Tests must cover ACK idempotency,
 certificate persistence, mismatched payload/transcript/recipient rejection, and
@@ -488,24 +512,24 @@ Cached fixtures must not weaken isolation:
 - Prevent duplicate expensive construction during concurrent first use.
 - Bypass caches for corruption, destruction, consumption, concurrency, copy
   safety, serialization, and restart tests.
-- Never broadly cache reusable presign objects. Any cached source material must
-  produce a fresh, isolated, unconsumed presign.
+- Never cache available presign candidates or lifecycle claims. Cached public
+  setup may be used only to create a fresh run with a new `PresignID` and store
+  slot.
 - Never expose private fixture material in cache errors or logs.
 
 Copy-safety tests must mutate an accessor's return value and verify that a second
 call does not expose the mutation. Apply this to byte slices, maps, commitments,
 public-key encodings, verification shares, transcript hashes, and chain codes.
 
-Long-lived validated protocol state (`KeyShare`, CGGMP21 `Presign`, and
-CGGMP21 `ResharePlan`) must remain opaque:
+Long-lived validated protocol state (`KeyShare`, private CGGMP21 presign
+artifacts, `EpochContext`, and CGGMP21 `ResharePlan`) must remain opaque:
 
 - reflection tests assert that the public type has no exported fields;
 - byte, slice, map, context-path, and nested-record getters return independent
   snapshots;
-- shallow key-share and presign copies share `Destroy` and consumed lifecycle
-  state; and
-- session completion accessors return independent secret state that requires a
-  separate `Destroy`.
+- shallow secret-handle copies share destruction state; and
+- CGGMP21 presign completion returns only a repeatable public descriptor after
+  the store owns the normalized secret tuple.
 
 Reshare-plan wire tests must cover deterministic encoding, round trips, total
 size limits, canonical tag order, exact field sets, old-party verification-share

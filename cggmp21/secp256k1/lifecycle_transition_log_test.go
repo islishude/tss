@@ -2,11 +2,7 @@ package secp256k1
 
 import (
 	"context"
-	"errors"
 	"testing"
-
-	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/testutil"
 )
 
 type captureLifecycleLogger struct {
@@ -68,35 +64,5 @@ func TestFast_StagedLifecycleLoggerFlushesOnlyCommittedEffects(t *testing.T) {
 	staged.flush(target)
 	if len(target.entries) != 4 {
 		t.Fatal("discarded lifecycle log reached target")
-	}
-}
-
-func TestCGGMP21KeygenReplayCommitFailureDoesNotLogStagedSuccess(t *testing.T) {
-	session1, out1, session2, out2 := cggmpTwoPartyKeygenSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
-	_, sharesFrom2 := exchangeKeygenCommitmentsForShares(t, session1, out1, session2, out2)
-	share := mustCGGMPEnvelope(t, sharesFrom2, payloadKeygenShare, session1.cfg.Self)
-
-	logger := new(captureLifecycleLogger)
-	session1.cfg.Log = logger
-	cache := tss.NewBoundedReplayCache(1)
-	if err := cache.CheckAndStore(tss.MessageSlotKey{
-		Protocol: "full-cache", SessionID: session1.cfg.SessionID, Round: 1,
-		From: 99, To: 100, PayloadType: "full-cache",
-	}, [32]byte{1}); err != nil {
-		t.Fatal(err)
-	}
-	session1.guard.ReplayCache = cache
-
-	out, err := session1.Handle(testutil.DeliverEnvelope(share))
-	if !errors.Is(err, tss.ErrReplayCacheFull) {
-		t.Fatalf("keygen replay commit failure = %v, want ErrReplayCacheFull", err)
-	}
-	if len(out) != 0 {
-		t.Fatalf("keygen replay commit failure emitted %d envelopes", len(out))
-	}
-	if len(logger.entries) != 0 {
-		t.Fatalf("keygen replay commit failure emitted %d staged success logs", len(logger.entries))
 	}
 }

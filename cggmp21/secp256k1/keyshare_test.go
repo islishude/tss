@@ -74,6 +74,7 @@ func TestFast_KeySharePublicMetadataReturnsCopy(t *testing.T) {
 	k.state.ShareProof = testSchnorrProof(t)
 	k.state.KeygenTranscriptHash = []byte{0xde, 0xad, 0xbe, 0xef}
 	k.state.GroupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
+	attachTestEpoch(t, k)
 
 	meta := mustKeyShareMetadata(t, k)
 	originalShareProof := append([]byte(nil), meta.ShareProof...)

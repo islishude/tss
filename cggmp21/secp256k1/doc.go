@@ -23,6 +23,8 @@
 //
 // Rejected transitions destroy uncommitted secret material. Readiness is
 // derived from accepted per-party state rather than manually maintained counts.
-// Persisted presigns contain the public verification context required to replay
-// signprep proofs and recompute their transcript before StartSign or ResumeSign.
+// Persisted presigns contain only the normalized Figure 8 tuple and public
+// commitments needed to verify Figure 10 partial signatures. Sign recovery is
+// driven by the durable lifecycle attempt and exact outbox, never by reusing
+// the one-use signing tuple.
 package secp256k1

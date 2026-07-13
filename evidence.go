@@ -35,14 +35,12 @@ const (
 	EvidenceKindPresignRound2 EvidenceKind = "presign_round2"
 	// EvidenceKindPresignRound3 marks invalid presign delta broadcast material.
 	EvidenceKindPresignRound3 EvidenceKind = "presign_round3"
-	// EvidenceKindPresignIdentification marks an invalid conditional presign identification proof.
-	EvidenceKindPresignIdentification EvidenceKind = "presign_identification"
+	// EvidenceKindPresignRedAlert marks an invalid Figure 9 presign red-alert proof.
+	EvidenceKindPresignRedAlert EvidenceKind = "presign_red_alert"
 	// EvidenceKindSignPartial marks invalid online signing partial material.
 	EvidenceKindSignPartial EvidenceKind = "sign_partial"
 	// EvidenceKindAggregateSign marks a final aggregate signature verification failure.
 	EvidenceKindAggregateSign EvidenceKind = "aggregate_signature"
-	// EvidenceKindSignIdentification marks an invalid conditional online-sign identification proof.
-	EvidenceKindSignIdentification EvidenceKind = "sign_identification"
 	// EvidenceKindFrostKeygenShare marks an invalid FROST DKG share.
 	EvidenceKindFrostKeygenShare EvidenceKind = "frost_keygen_share"
 	// EvidenceKindFrostReshareShare marks an invalid FROST reshare share.
@@ -90,6 +88,21 @@ type BlameEvidence struct {
 	PublicInputs   []EvidenceField `wire:"11,max_items=evidence_fields"`
 }
 
+// blameEvidenceWire has the exact canonical wire schema of BlameEvidence but
+// deliberately does not implement Validator. Limits-aware entry points first
+// validate against their caller-supplied EvidenceLimits and then encode or
+// decode this private object-level wire type. Encoding BlameEvidence directly
+// would make internal/wire invoke BlameEvidence.Validate a second time with the
+// conservative defaults, incorrectly rejecting explicitly authorized Figure 9
+// public proof records.
+type blameEvidenceWire BlameEvidence
+
+// WireType returns the canonical wire type identifier for the private codec shape.
+func (blameEvidenceWire) WireType() string { return blameWireType }
+
+// WireVersion returns the wire format version for the private codec shape.
+func (blameEvidenceWire) WireVersion() uint16 { return blameWireVersion }
+
 // WireType returns the canonical wire type identifier for BlameEvidence.
 func (BlameEvidence) WireType() string { return blameWireType }
 
@@ -113,6 +126,10 @@ func defaultEvidenceLimits() EvidenceLimits {
 	}
 }
 
+// DefaultEvidenceLimits returns a caller-owned copy of the conservative
+// production limits used by NewBlameEvidence and BlameEvidence.MarshalBinary.
+func DefaultEvidenceLimits() EvidenceLimits { return defaultEvidenceLimits() }
+
 // evidenceFieldLimits converts EvidenceLimits into wire.FieldLimits for
 // use with wire.Marshal / wire.Unmarshal.
 func evidenceFieldLimits(l EvidenceLimits) wire.FieldLimits {
@@ -130,6 +147,14 @@ func evidenceFieldLimits(l EvidenceLimits) wire.FieldLimits {
 // evidence records produce identical hashes regardless of caller-provided
 // slice ordering.
 func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []EvidenceField) (*BlameEvidence, error) {
+	return NewBlameEvidenceWithLimits(env, kind, reason, inputs, defaultEvidenceLimits())
+}
+
+// NewBlameEvidenceWithLimits builds public evidence using explicit resource
+// limits. This is intended for protocol phases whose canonical public proof is
+// deliberately larger than the conservative default; it does not widen any
+// default decoder or encoder.
+func NewBlameEvidenceWithLimits(env Envelope, kind EvidenceKind, reason string, inputs []EvidenceField, limits EvidenceLimits) (*BlameEvidence, error) {
 	payloadHash := sha256.Sum256(env.Payload)
 	envelopeDigest := env.Digest()
 	evidence := &BlameEvidence{
@@ -145,7 +170,7 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 		Reason:         reason,
 		PublicInputs:   canonicalEvidenceFields(inputs),
 	}
-	if err := evidence.ValidateWithLimits(defaultEvidenceLimits()); err != nil {
+	if err := evidence.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
 	return evidence, nil
@@ -245,7 +270,10 @@ func MarshalEvidenceWithLimits(e *BlameEvidence, l EvidenceLimits) ([]byte, erro
 	if err := e.ValidateWithLimits(l); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(e, wire.WithFieldLimitsForMarshal(evidenceFieldLimits(l)))
+	prepared := *e
+	prepared.PublicInputs = canonicalEvidenceFields(e.PublicInputs)
+	wireValue := blameEvidenceWire(prepared)
+	return wire.Marshal(&wireValue, wire.WithFieldLimitsForMarshal(evidenceFieldLimits(l)))
 }
 
 // UnmarshalBlameEvidenceWithLimits decodes and validates public blame evidence
@@ -271,10 +299,10 @@ func (e *BlameEvidence) UnmarshalBinaryWithLimits(in []byte, l EvidenceLimits) e
 		return fmt.Errorf("blame evidence too large: %d > %d", len(in), l.MaxBytes)
 	}
 
-	var evidence BlameEvidence
+	var wireValue blameEvidenceWire
 	if err := wire.Unmarshal(
 		in,
-		&evidence,
+		&wireValue,
 		wire.WithFrameLimits(wire.FrameLimits{
 			MaxTotalBytes: l.MaxBytes,
 			MaxFields:     l.TLV.MaxFields,
@@ -284,6 +312,7 @@ func (e *BlameEvidence) UnmarshalBinaryWithLimits(in []byte, l EvidenceLimits) e
 	); err != nil {
 		return err
 	}
+	evidence := BlameEvidence(wireValue)
 	if err := evidence.ValidateWithLimits(l); err != nil {
 		return err
 	}
@@ -304,10 +333,9 @@ func validEvidenceKind(kind EvidenceKind) bool {
 		EvidenceKindPresignRound1,
 		EvidenceKindPresignRound2,
 		EvidenceKindPresignRound3,
-		EvidenceKindPresignIdentification,
+		EvidenceKindPresignRedAlert,
 		EvidenceKindSignPartial,
 		EvidenceKindAggregateSign,
-		EvidenceKindSignIdentification,
 		EvidenceKindFrostKeygenShare,
 		EvidenceKindFrostReshareShare,
 		EvidenceKindFrostNonceCommitment,

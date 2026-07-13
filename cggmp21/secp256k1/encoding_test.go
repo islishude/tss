@@ -483,8 +483,8 @@ func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) 
 		return nil, err
 	}
 	mutate(&payload)
-	if !bytes.Equal(original.Gamma, payload.Gamma) {
-		return testutil.RewriteWireFieldByName(raw, presignRound1PayloadWireType, presignRound1Payload{}, "Gamma", payload.Gamma)
+	if !bytes.Equal(original.Y, payload.Y) {
+		return testutil.RewriteWireFieldByName(raw, presignRound1PayloadWireType, presignRound1Payload{}, "Y", payload.Y)
 	}
 	if !bytes.Equal(original.EncK, payload.EncK) {
 		return testutil.RewriteWireFieldByName(raw, presignRound1PayloadWireType, presignRound1Payload{}, "EncK", payload.EncK)

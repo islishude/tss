@@ -24,24 +24,25 @@ func (s *KeygenSession) Completed() bool {
 // Keygen deviations are verified and attributed in their originating round.
 func (s *KeygenSession) Identifying() bool { return false }
 
-// Completed reports whether the presign session has produced a presign record.
+// Completed reports whether the presign session has durably committed its
+// presign and exposed the corresponding public descriptor.
 func (s *PresignSession) Completed() bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.completed && !s.identifying
+	return s.completed
 }
 
-// Identifying reports whether conditional presign identification is active.
+// Identifying reports whether Figure 9 attributable abort is active.
 func (s *PresignSession) Identifying() bool {
 	if s == nil {
 		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.identifying && !s.completed && !s.aborted
+	return s.identifying
 }
 
 // Completed reports whether the signing session has produced a signature.
@@ -51,18 +52,11 @@ func (s *SignSession) Completed() bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.completed && !s.identifying
+	return s.completed
 }
 
-// Identifying reports whether conditional online-sign identification is active.
-func (s *SignSession) Identifying() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.identifying && !s.completed && !s.aborted
-}
+// Identifying is always false: Figure 10 attributes an invalid partial directly.
+func (s *SignSession) Identifying() bool { return false }
 
 // Completed reports whether the refresh lifecycle reached terminal success.
 func (s *RefreshSession) Completed() bool {

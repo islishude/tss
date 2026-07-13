@@ -36,6 +36,19 @@ type IdentificationRecord struct {
 	TranscriptHashes     []EvidenceField `wire:"9,recordlist,max_items=identification_hashes"`
 }
 
+// identificationRecordWire is the reflection codec shape used after the
+// caller-selected limits have already been applied. It deliberately does not
+// implement Validator: invoking IdentificationRecord.Validate from wire.Marshal
+// or wire.Unmarshal would reapply the conservative default limits and make the
+// explicit Figure 9 opt-in limits ineffective.
+type identificationRecordWire IdentificationRecord
+
+// WireType returns the canonical wire type identifier for the private codec shape.
+func (identificationRecordWire) WireType() string { return identificationRecordWireType }
+
+// WireVersion returns the wire format version for the private codec shape.
+func (identificationRecordWire) WireVersion() uint16 { return identificationRecordWireVersion }
+
 // WireType returns the canonical wire type identifier.
 func (IdentificationRecord) WireType() string { return identificationRecordWireType }
 
@@ -83,10 +96,16 @@ func (r *IdentificationRecord) BeforeMarshalWire() error {
 
 // Validate rejects incomplete, non-public, or non-canonical record shapes.
 func (r *IdentificationRecord) Validate() error {
+	return r.ValidateWithLimits(defaultIdentificationRecordLimits())
+}
+
+// ValidateWithLimits rejects incomplete, non-public, or non-canonical record
+// shapes using explicit resource limits.
+func (r *IdentificationRecord) ValidateWithLimits(limits IdentificationRecordLimits) error {
 	if r == nil {
 		return errors.New("nil identification record")
 	}
-	if r.FailureClass == "" || len(r.FailureClass) > 128 {
+	if r.FailureClass == "" || len(r.FailureClass) > limits.MaxFailureClassBytes {
 		return errors.New("invalid identification failure class")
 	}
 	if len(r.AlertDigest) != sha256.Size {
@@ -102,15 +121,24 @@ func (r *IdentificationRecord) Validate() error {
 	if len(r.SignedEnvelopeA) == 0 && len(r.BroadcastCertificate) == 0 && (len(r.Statement) == 0 || len(r.Proof) == 0) {
 		return errors.New("identification record has no verifiable artifact")
 	}
-	if len(r.SignedEnvelopeA) > DefaultMaxEnvelopeBytes || len(r.SignedEnvelopeB) > DefaultMaxEnvelopeBytes {
+	if len(r.SignedEnvelopeA) > limits.MaxEnvelopeBytes || len(r.SignedEnvelopeB) > limits.MaxEnvelopeBytes {
 		return errors.New("identification signed envelope exceeds hard cap")
 	}
-	if len(r.Proof) > DefaultMaxZKProofBytes {
+	if len(r.BroadcastCertificate) > limits.MaxBroadcastCertificateBytes {
+		return errors.New("identification broadcast certificate exceeds hard cap")
+	}
+	if len(r.Statement) > limits.MaxStatementBytes {
+		return errors.New("identification statement exceeds hard cap")
+	}
+	if len(r.Proof) > limits.MaxProofBytes {
 		return errors.New("identification proof exceeds hard cap")
+	}
+	if len(r.TranscriptHashes) > limits.MaxTranscriptHashCount {
+		return errors.New("too many identification transcript hashes")
 	}
 	seen := make(map[string]struct{}, len(r.TranscriptHashes))
 	for _, field := range r.TranscriptHashes {
-		if field.Key == "" || len(field.Key) > DefaultMaxEvidenceFieldKeyBytes {
+		if field.Key == "" || len(field.Key) > limits.MaxTranscriptHashKeyBytes {
 			return errors.New("invalid identification transcript hash key")
 		}
 		if len(field.Value) != sha256.Size {
@@ -137,6 +165,12 @@ func (r *IdentificationRecord) Validate() error {
 
 // MarshalBinary returns the strict canonical wire encoding.
 func (r *IdentificationRecord) MarshalBinary() ([]byte, error) {
+	return r.MarshalBinaryWithLimits(defaultIdentificationRecordLimits())
+}
+
+// MarshalBinaryWithLimits returns the strict canonical wire encoding under
+// explicit resource limits.
+func (r *IdentificationRecord) MarshalBinaryWithLimits(limits IdentificationRecordLimits) ([]byte, error) {
 	if r == nil {
 		return nil, errors.New("nil identification record")
 	}
@@ -144,47 +178,92 @@ func (r *IdentificationRecord) MarshalBinary() ([]byte, error) {
 	if err := clone.BeforeMarshalWire(); err != nil {
 		return nil, err
 	}
-	if err := clone.Validate(); err != nil {
+	if err := clone.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(&clone, wire.WithFieldLimitsForMarshal(identificationFieldLimits()))
+	wireRecord := identificationRecordWire(clone)
+	encoded, err := wire.Marshal(&wireRecord, wire.WithFieldLimitsForMarshal(identificationFieldLimits(limits)))
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > limits.MaxBytes {
+		return nil, fmt.Errorf("identification record too large: %d > %d", len(encoded), limits.MaxBytes)
+	}
+	return encoded, nil
 }
 
 // UnmarshalBinary decodes a strict canonical wire record.
 func (r *IdentificationRecord) UnmarshalBinary(in []byte) error {
-	if len(in) == 0 || len(in) > DefaultMaxBlameEvidenceBytes {
+	return r.UnmarshalBinaryWithLimits(in, defaultIdentificationRecordLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a strict canonical identification record
+// under explicit resource limits.
+func (r *IdentificationRecord) UnmarshalBinaryWithLimits(in []byte, limits IdentificationRecordLimits) error {
+	if len(in) == 0 || len(in) > limits.MaxBytes {
 		return errors.New("invalid identification record size")
 	}
-	var decoded IdentificationRecord
-	if err := wire.Unmarshal(in, &decoded,
-		wire.WithFrameLimits(wire.FrameLimits{MaxTotalBytes: DefaultMaxBlameEvidenceBytes, MaxFields: DefaultMaxWireFields, MaxFieldBytes: DefaultMaxWireFieldBytes}),
-		wire.WithFieldLimits(identificationFieldLimits()),
+	var wireRecord identificationRecordWire
+	if err := wire.Unmarshal(in, &wireRecord,
+		wire.WithFrameLimits(wire.FrameLimits{MaxTotalBytes: limits.MaxBytes, MaxFields: limits.TLV.MaxFields, MaxFieldBytes: limits.TLV.MaxFieldBytes}),
+		wire.WithFieldLimits(identificationFieldLimits(limits)),
 	); err != nil {
 		return err
 	}
-	if err := decoded.Validate(); err != nil {
+	decoded := IdentificationRecord(wireRecord)
+	if err := decoded.ValidateWithLimits(limits); err != nil {
 		return err
 	}
 	*r = decoded
 	return nil
 }
 
-func identificationFieldLimits() wire.FieldLimits {
+func defaultIdentificationRecordLimits() IdentificationRecordLimits {
+	return IdentificationRecordLimits{
+		MaxBytes:                     DefaultMaxBlameEvidenceBytes,
+		MaxFailureClassBytes:         128,
+		MaxEnvelopeBytes:             DefaultMaxEnvelopeBytes,
+		MaxBroadcastCertificateBytes: DefaultMaxBlameEvidenceBytes,
+		MaxStatementBytes:            DefaultMaxZKProofBytes,
+		MaxProofBytes:                DefaultMaxZKProofBytes,
+		MaxTranscriptHashCount:       DefaultMaxEvidenceFieldCount,
+		MaxTranscriptHashKeyBytes:    DefaultMaxEvidenceFieldKeyBytes,
+		TLV: TLVLimits{
+			MaxFields:     DefaultMaxWireFields,
+			MaxFieldBytes: DefaultMaxWireFieldBytes,
+		},
+	}
+}
+
+// DefaultIdentificationRecordLimits returns a caller-owned copy of the
+// conservative limits used by IdentificationRecord.MarshalBinary and
+// IdentificationRecord.UnmarshalBinary.
+func DefaultIdentificationRecordLimits() IdentificationRecordLimits {
+	return defaultIdentificationRecordLimits()
+}
+
+func identificationFieldLimits(limits IdentificationRecordLimits) wire.FieldLimits {
 	return wire.FieldLimits{
-		"identification_class":     128,
-		"envelope":                 DefaultMaxEnvelopeBytes,
-		"broadcast_certificate":    DefaultMaxBlameEvidenceBytes,
-		"identification_statement": DefaultMaxZKProofBytes,
-		"zk_proof":                 DefaultMaxZKProofBytes,
-		"identification_hashes":    DefaultMaxEvidenceFieldCount,
-		"evidence_field_key":       DefaultMaxEvidenceFieldKeyBytes,
+		"identification_class":     limits.MaxFailureClassBytes,
+		"envelope":                 limits.MaxEnvelopeBytes,
+		"broadcast_certificate":    limits.MaxBroadcastCertificateBytes,
+		"identification_statement": limits.MaxStatementBytes,
+		"zk_proof":                 limits.MaxProofBytes,
+		"identification_hashes":    limits.MaxTranscriptHashCount,
+		"evidence_field_key":       limits.MaxTranscriptHashKeyBytes,
 		"evidence_field_value":     sha256.Size,
 	}
 }
 
 // IdentificationEvidenceField encodes record under the fixed evidence key.
 func IdentificationEvidenceField(record *IdentificationRecord) (EvidenceField, error) {
-	encoded, err := record.MarshalBinary()
+	return IdentificationEvidenceFieldWithLimits(record, defaultIdentificationRecordLimits())
+}
+
+// IdentificationEvidenceFieldWithLimits encodes a record under the fixed
+// evidence key using explicit resource limits.
+func IdentificationEvidenceFieldWithLimits(record *IdentificationRecord, limits IdentificationRecordLimits) (EvidenceField, error) {
+	encoded, err := record.MarshalBinaryWithLimits(limits)
 	if err != nil {
 		return EvidenceField{}, err
 	}

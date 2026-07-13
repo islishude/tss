@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 // RunKind classifies a protocol run lifecycle.
@@ -22,6 +23,8 @@ const (
 	RunPresign RunKind = "presign"
 	// RunSign identifies an online signing run.
 	RunSign RunKind = "sign"
+	// RunChildDerivation identifies creation of a signable child epoch.
+	RunChildDerivation RunKind = "child-derivation"
 	// RunRefresh identifies a same-party key-share refresh run.
 	RunRefresh RunKind = "refresh"
 	// RunReshare identifies a party-set-changing reshare run.
@@ -58,10 +61,16 @@ type RunIntent struct {
 	Signers   tss.PartySet
 	Threshold int
 
-	KeyID         string
-	KeyGeneration KeyGeneration
-	ParentKeyID   string
-	PresignID     string
+	Binding     GenerationBinding
+	ParentKeyID string
+	PresignID   string
+
+	// TargetKeyID and TargetKeyGeneration are the public target descriptor for
+	// refresh, reshare, and child derivation. The target epoch is intentionally
+	// absent because the protocol derives it during the run. The protocol plan
+	// represented by PlanDigest must bind both target fields.
+	TargetKeyID         string
+	TargetKeyGeneration KeyGeneration
 
 	PlanDigest    []byte
 	ContextDigest []byte
@@ -76,12 +85,37 @@ func (r RunIntent) Clone() RunIntent {
 	return r
 }
 
+// AcceptanceDigest returns a caller-owned canonical digest that wraps the
+// protocol PlanDigest together with every immutable RunIntent field. Parties
+// must accept this digest, rather than accepting PlanDigest directly, so a
+// control plane cannot substitute lifecycle or routing metadata while reusing
+// the same protocol plan.
+func (r RunIntent) AcceptanceDigest() []byte {
+	t := transcript.New("tssrun-run-intent-acceptance-v1")
+	t.AppendString("run_id", r.RunID)
+	t.AppendString("protocol", string(r.Protocol))
+	t.AppendString("kind", string(r.Kind))
+	t.AppendBytes("session_id", r.SessionID[:])
+	t.AppendUint32List("parties", r.Parties)
+	t.AppendUint32List("signers", r.Signers)
+	t.AppendUint64("threshold", uint64(r.Threshold))
+	t.AppendString("source_key_id", r.Binding.KeyID)
+	t.AppendString("source_key_generation", string(r.Binding.KeyGeneration))
+	t.AppendBytes("source_epoch_id", r.Binding.EpochID[:])
+	t.AppendString("target_key_id", r.TargetKeyID)
+	t.AppendString("target_key_generation", string(r.TargetKeyGeneration))
+	t.AppendString("parent_key_id", r.ParentKeyID)
+	t.AppendString("presign_id", r.PresignID)
+	t.AppendBytes("protocol_plan_digest", r.PlanDigest)
+	t.AppendBytes("context_digest", r.ContextDigest)
+	return t.Sum()
+}
+
 // LocalRunResult records the local durable output of a completed run.
 type LocalRunResult struct {
-	KeyID         string
-	KeyGeneration KeyGeneration
-	PresignID     string
-	OutputDigest  []byte
+	Binding      GenerationBinding
+	PresignID    string
+	OutputDigest []byte
 }
 
 // Clone returns a caller-owned copy of the local run result.
@@ -158,8 +192,9 @@ func (s *MemoryRunStore) CreateRun(ctx context.Context, run RunIntent) error {
 	return nil
 }
 
-// AcceptPlan records one party's accepted plan digest. Repeating the same digest
-// is idempotent; changing it fails with ErrPlanDigestConflict.
+// AcceptPlan records one party's accepted RunIntent acceptance digest.
+// Repeating the same digest is idempotent; changing it fails with
+// ErrPlanDigestConflict.
 func (s *MemoryRunStore) AcceptPlan(ctx context.Context, runID string, self tss.PartyID, digest []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -176,7 +211,7 @@ func (s *MemoryRunStore) AcceptPlan(ctx context.Context, runID string, self tss.
 	if !rec.intent.participants().Contains(self) {
 		return ErrRunPartyNotParticipant
 	}
-	if !bytes.Equal(digest, rec.intent.PlanDigest) {
+	if !bytes.Equal(digest, rec.intent.AcceptanceDigest()) {
 		return ErrPlanDigestConflict
 	}
 	rec.refreshStatus()
@@ -344,12 +379,16 @@ func (r *runRecord) refreshStatus() {
 	}
 }
 
-// AcceptPlanDigest records local plan acceptance through the RunStore.
+// AcceptPlanDigest records local RunIntent acceptance through the RunStore.
+// digest must be the value returned by run.AcceptanceDigest.
 func AcceptPlanDigest(ctx context.Context, store RunStore, run RunIntent, self tss.PartyID, digest []byte) error {
 	if store == nil {
 		return ErrRunNotFound
 	}
-	if !bytes.Equal(run.PlanDigest, digest) {
+	if err := validateRunIntent(run); err != nil {
+		return err
+	}
+	if !bytes.Equal(run.AcceptanceDigest(), digest) {
 		return ErrPlanDigestConflict
 	}
 	return store.AcceptPlan(ctx, run.RunID, self, digest)
@@ -461,23 +500,23 @@ func validateRunIntent(run RunIntent) error {
 	if !isCanonicalPartySet(run.Parties) {
 		return fmt.Errorf("%w: parties must be sorted, unique, and non-zero", ErrInvalidRunIntent)
 	}
-	if run.KeyID == "" {
-		return fmt.Errorf("%w: key id required", ErrInvalidRunIntent)
+	if err := run.Binding.Validate(); err != nil {
+		return fmt.Errorf("%w: generation binding required: %w", ErrInvalidRunIntent, err)
 	}
 	switch run.Kind {
 	case RunPresign:
 		if run.Protocol != tss.ProtocolCGGMP21Secp256k1 {
 			return fmt.Errorf("%w: presign is only supported by %q", ErrInvalidRunIntent, tss.ProtocolCGGMP21Secp256k1)
 		}
-		if run.KeyGeneration == "" || run.PresignID == "" || len(run.ContextDigest) != sha256.Size {
-			return fmt.Errorf("%w: presign requires key generation, presign id, and %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
+		if run.PresignID == "" || len(run.ContextDigest) != sha256.Size {
+			return fmt.Errorf("%w: presign requires presign id and %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
 		}
 		if err := validateRunSigners(run); err != nil {
 			return err
 		}
 	case RunSign:
-		if run.KeyGeneration == "" || len(run.ContextDigest) != sha256.Size {
-			return fmt.Errorf("%w: sign requires key generation and %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
+		if len(run.ContextDigest) != sha256.Size {
+			return fmt.Errorf("%w: sign requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
 		}
 		switch run.Protocol {
 		case tss.ProtocolCGGMP21Secp256k1:
@@ -494,16 +533,46 @@ func validateRunIntent(run RunIntent) error {
 		if err := validateRunSigners(run); err != nil {
 			return err
 		}
+	case RunChildDerivation:
+		if len(run.ContextDigest) != sha256.Size {
+			return fmt.Errorf("%w: child derivation requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
+		}
+		if err := validateRunTargetDescriptor(run, true); err != nil {
+			return err
+		}
 	case RunRefresh, RunReshare:
-		if run.KeyGeneration == "" {
-			return fmt.Errorf("%w: %s requires key generation", ErrInvalidRunIntent, run.Kind)
+		if err := validateRunTargetDescriptor(run, false); err != nil {
+			return err
 		}
 	case RunKeygen:
 	default:
 		return fmt.Errorf("%w: unknown run kind %q", ErrInvalidRunIntent, run.Kind)
 	}
+	if run.Kind != RunRefresh && run.Kind != RunReshare && run.Kind != RunChildDerivation &&
+		(run.TargetKeyID != "" || run.TargetKeyGeneration != "") {
+		return fmt.Errorf("%w: target descriptor is not valid for %s", ErrInvalidRunIntent, run.Kind)
+	}
 	if slices.Contains(run.Parties, tss.PartyID(0)) {
 		return fmt.Errorf("%w: party id 0 is reserved", ErrInvalidRunIntent)
+	}
+	return nil
+}
+
+func validateRunTargetDescriptor(run RunIntent, distinctKey bool) error {
+	if validateLifecycleIdentifier(run.TargetKeyID) != nil || validateLifecycleIdentifier(string(run.TargetKeyGeneration)) != nil {
+		return fmt.Errorf("%w: %s requires a target key id and generation", ErrInvalidRunIntent, run.Kind)
+	}
+	if distinctKey {
+		if run.TargetKeyID == run.Binding.KeyID {
+			return fmt.Errorf("%w: child target key id must differ from parent", ErrInvalidRunIntent)
+		}
+		return nil
+	}
+	if run.TargetKeyID != run.Binding.KeyID {
+		return fmt.Errorf("%w: %s target key id must match the source", ErrInvalidRunIntent, run.Kind)
+	}
+	if run.TargetKeyGeneration == run.Binding.KeyGeneration {
+		return fmt.Errorf("%w: %s target generation must differ from the source", ErrInvalidRunIntent, run.Kind)
 	}
 	return nil
 }
@@ -536,32 +605,39 @@ func validateLocalRunResult(intent RunIntent, result LocalRunResult) error {
 	if len(result.OutputDigest) != sha256.Size {
 		return fmt.Errorf("%w: output digest must be %d bytes", ErrInvalidRunResult, sha256.Size)
 	}
-	if result.KeyID != intent.KeyID {
-		return fmt.Errorf("%w: key id does not match run intent", ErrInvalidRunResult)
-	}
 	if result.PresignID != intent.PresignID {
 		return fmt.Errorf("%w: presign id does not match run intent", ErrInvalidRunResult)
 	}
+	if err := result.Binding.Validate(); err != nil {
+		return fmt.Errorf("%w: invalid output generation binding", ErrInvalidRunResult)
+	}
 	switch intent.Kind {
 	case RunKeygen:
-		if result.KeyGeneration == "" {
-			return fmt.Errorf("%w: keygen output generation is required", ErrInvalidRunResult)
+		if result.Binding != intent.Binding {
+			return fmt.Errorf("%w: keygen output binding does not match run intent", ErrInvalidRunResult)
 		}
 	case RunRefresh, RunReshare:
-		if result.KeyGeneration == "" || result.KeyGeneration == intent.KeyGeneration {
-			return fmt.Errorf("%w: %s output generation must differ from the input generation", ErrInvalidRunResult, intent.Kind)
+		if result.Binding.KeyID != intent.TargetKeyID ||
+			result.Binding.KeyGeneration != intent.TargetKeyGeneration ||
+			result.Binding.EpochID == intent.Binding.EpochID {
+			return fmt.Errorf("%w: %s output does not match the target generation and a new epoch", ErrInvalidRunResult, intent.Kind)
+		}
+	case RunChildDerivation:
+		if result.Binding.KeyID != intent.TargetKeyID ||
+			result.Binding.KeyGeneration != intent.TargetKeyGeneration ||
+			result.Binding.EpochID == intent.Binding.EpochID {
+			return fmt.Errorf("%w: child output does not match the distinct target generation and a new epoch", ErrInvalidRunResult)
 		}
 	case RunPresign, RunSign:
-		if result.KeyGeneration != intent.KeyGeneration {
-			return fmt.Errorf("%w: key generation does not match run intent", ErrInvalidRunResult)
+		if result.Binding != intent.Binding {
+			return fmt.Errorf("%w: generation binding does not match run intent", ErrInvalidRunResult)
 		}
 	}
 	return nil
 }
 
 func localRunResultsEqual(a, b LocalRunResult) bool {
-	return a.KeyID == b.KeyID &&
-		a.KeyGeneration == b.KeyGeneration &&
+	return a.Binding == b.Binding &&
 		a.PresignID == b.PresignID &&
 		bytes.Equal(a.OutputDigest, b.OutputDigest)
 }

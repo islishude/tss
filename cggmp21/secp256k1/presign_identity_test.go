@@ -4,223 +4,80 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
-func TestFast_PresignSigmaOpeningRecordsRequireEveryPeer(t *testing.T) {
-	t.Parallel()
-
-	multi := minimalCGGMP21Presign(t)
-	defer multi.Destroy()
-	destroyPresignSigmaOpeningRecords(multi.state.SigmaOpeningRecords)
-	multi.state.SigmaOpeningRecords = nil
-	if err := multi.ValidateWithLimits(testLimits()); err == nil {
-		t.Fatal("multi-signer presign accepted an empty sigma opening record set")
-	}
-
-	single := minimalCGGMP21Presign(t)
-	defer single.Destroy()
-	destroyPresignSigmaOpeningRecords(single.state.SigmaOpeningRecords)
-	single.state.SigmaOpeningRecords = nil
-	single.state.Threshold = 1
-	single.state.Signers = tss.NewPartySet(1)
-	single.state.VerifyShares = single.state.VerifyShares[:1]
-	single.state.Verification.Entries = single.state.Verification.Entries[:1]
-	destroyMTAContributions(single.state.IdentificationTranscripts[0].Contributions)
-	single.state.IdentificationTranscripts[1].destroy()
-	single.state.IdentificationTranscripts = single.state.IdentificationTranscripts[:1]
-	single.state.IdentificationTranscripts[0].Contributions = nil
-	if err := single.ValidateWithLimits(testLimits()); err != nil {
-		t.Fatalf("single-signer presign rejected an empty sigma opening record set: %v", err)
-	}
-}
-
-func TestFast_PresignIdentificationTranscriptsRequireCanonicalCompleteSet(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name   string
-		mutate func(*Presign)
-	}{
-		{name: "missing party", mutate: func(p *Presign) {
-			p.state.IdentificationTranscripts[1].destroy()
-			p.state.IdentificationTranscripts = p.state.IdentificationTranscripts[:1]
-		}},
-		{name: "wrong party order", mutate: func(p *Presign) {
-			p.state.IdentificationTranscripts[0].Party = 2
-		}},
-		{name: "missing peer", mutate: func(p *Presign) {
-			destroyMTAContributions(p.state.IdentificationTranscripts[0].Contributions)
-			p.state.IdentificationTranscripts[0].Contributions = nil
-		}},
-		{name: "wrong peer", mutate: func(p *Presign) {
-			p.state.IdentificationTranscripts[0].Contributions[0].Peer = 1
-		}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			presign := minimalCGGMP21Presign(t)
-			defer presign.Destroy()
-			tc.mutate(presign)
-			if err := presign.ValidateWithLimits(testLimits()); err == nil {
-				t.Fatal("invalid identification transcript set was accepted")
-			}
-		})
-	}
-}
-
-func TestFast_PresignContentIDDeterministicAndConsumedIndependent(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	first, err := presign.contentID()
+func TestFastPresignContentIDDeterministicAndLifecycleIndependent(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	defer p.Destroy()
+	first, err := p.contentIDWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := presign.contentID()
+	second, err := p.contentIDWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(first, second) {
 		t.Fatal("presign content ID is not deterministic")
 	}
-	presign.state.Consumed.Store(true)
-	consumed, err := presign.contentID()
+	p.state.Consumed.Store(true)
+	third, err := p.contentIDWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(first, consumed) {
-		t.Fatal("runtime consumed state changed presign content ID")
+	if !bytes.Equal(first, third) {
+		t.Fatal("mutable consumed state changed content ID")
 	}
 }
 
-func TestFast_PresignContentIDBindsPersistedState(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		mutate func(*Presign) error
-	}{
-		{name: "plan hash", mutate: func(p *Presign) error {
-			p.state.PlanHash[0] ^= 1
-			return nil
-		}},
-		{name: "verification gamma", mutate: func(p *Presign) error {
-			point := secp.ScalarBaseMult(secp.ScalarFromUint64(2))
-			encoded, err := secp.PointBytes(point)
-			if err != nil {
-				return err
-			}
-			p.state.Verification.Entries[0].Gamma = encoded
-			return nil
-		}},
-		{name: "k share", mutate: func(p *Presign) error {
-			value, err := secpSecretScalarFromScalar(secp.ScalarFromUint64(2))
-			if err != nil {
-				return err
-			}
-			p.state.KShare.Destroy()
-			p.state.KShare = value
-			return nil
-		}},
-		{name: "chi share", mutate: func(p *Presign) error {
-			value, err := secpSecretScalarFromScalar(secp.ScalarFromUint64(2))
-			if err != nil {
-				return err
-			}
-			p.state.ChiShare.Destroy()
-			p.state.ChiShare = value
-			return nil
-		}},
-		{name: "aggregate delta", mutate: func(p *Presign) error {
-			value, err := secpSecretScalarFromScalar(secp.ScalarFromUint64(2))
-			if err != nil {
-				return err
-			}
-			p.state.DeltaAggregate.Destroy()
-			p.state.DeltaAggregate = value
-			return nil
-		}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			original := minimalCGGMP21Presign(t)
-			want, err := original.contentID()
-			if err != nil {
-				t.Fatal(err)
-			}
-			mutated := clonePresignForTest(original)
-			if err := tc.mutate(mutated); err != nil {
-				t.Fatal(err)
-			}
-			got, err := mutated.contentID()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if bytes.Equal(want, got) {
-				t.Fatal("persisted presign mutation did not change content ID")
-			}
-		})
-	}
-}
-
-func TestFast_PresignContentIDReturnsEncodingErrors(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	presign.state.R = &secp.Point{}
-	if _, err := presign.contentID(); err == nil {
-		t.Fatal("content ID ignored invalid point encoding")
-	}
-}
-
-func TestFast_PresignVerificationContextRejectsSignerSetMismatch(t *testing.T) {
-	t.Parallel()
+func TestFastPresignContentIDBindsNormalizedFigure8State(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*Presign)
 	}{
-		{name: "out of order", mutate: func(p *Presign) {
-			p.state.Verification.Entries[0], p.state.Verification.Entries[1] =
-				p.state.Verification.Entries[1], p.state.Verification.Entries[0]
+		{name: "presign id", mutate: func(p *Presign) { p.state.PresignID[0] ^= 1 }},
+		{name: "epoch id", mutate: func(p *Presign) { p.state.EpochID[0] ^= 1 }},
+		{name: "gamma", mutate: func(p *Presign) { p.state.Gamma = secp.ScalarBaseMult(secp.ScalarFromUint64(2)) }},
+		{name: "k share", mutate: func(p *Presign) {
+			p.state.KShare.Destroy()
+			p.state.KShare = testSecretScalar(t, 2)
 		}},
-		{name: "duplicate", mutate: func(p *Presign) {
-			p.state.Verification.Entries[1].Party = p.state.Verification.Entries[0].Party
+		{name: "chi share", mutate: func(p *Presign) {
+			p.state.ChiShare.Destroy()
+			p.state.ChiShare = testSecretScalar(t, 2)
 		}},
-		{name: "missing", mutate: func(p *Presign) {
-			p.state.Verification.Entries = p.state.Verification.Entries[:1]
-		}},
-		{name: "extra", mutate: func(p *Presign) {
-			p.state.Verification.Entries = append(
-				p.state.Verification.Entries,
-				p.state.Verification.Entries[0].clone(),
-			)
-		}},
+		{name: "commitment", mutate: func(p *Presign) { p.state.Commitments[0].DeltaTilde[1] ^= 1 }},
+		{name: "transcript", mutate: func(p *Presign) { p.state.TranscriptHash[0] ^= 1 }},
+		{name: "plan", mutate: func(p *Presign) { p.state.PlanHash[0] ^= 1 }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			presign := minimalCGGMP21Presign(t)
-			tc.mutate(presign)
-			if err := presign.ValidateWithLimits(testLimits()); err == nil {
-				t.Fatal("invalid verification context was accepted")
+			base := minimalCGGMP21Presign(t)
+			defer base.Destroy()
+			before, err := base.contentIDWithLimits(testLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutated := minimalCGGMP21Presign(t)
+			defer mutated.Destroy()
+			tc.mutate(mutated)
+			after, err := mutated.contentIDWithLimits(testLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Equal(before, after) {
+				t.Fatal("content ID did not bind mutation")
 			}
 		})
 	}
 }
 
-func TestFast_PresignRejectsChildVerificationKeyDetachedFromParent(t *testing.T) {
-	t.Parallel()
-
-	presign := minimalCGGMP21Presign(t)
-	if err := presign.ValidateWithLimits(testLimits()); err != nil {
-		t.Fatalf("valid presign fixture: %v", err)
+func TestFastPresignContentIDRejectsDestroyedTuple(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	p.state.KShare.Destroy()
+	if _, err := p.contentIDWithLimits(testLimits()); err == nil {
+		t.Fatal("destroyed normalized tuple encoded into a content ID")
 	}
-	child, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(2)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	presign.state.Derivation.ChildPublicKey = child
-	if err := presign.ValidateWithLimits(testLimits()); err == nil {
-		t.Fatal("presign accepted child verification key detached from parent and shift")
-	}
+	p.Destroy()
 }

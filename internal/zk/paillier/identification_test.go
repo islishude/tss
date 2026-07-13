@@ -11,7 +11,7 @@ import (
 func TestIdentificationProofsCorrectness(t *testing.T) {
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,74 +126,6 @@ func TestIdentificationProofsCorrectness(t *testing.T) {
 	if VerifyMulStar(params, []byte("wrong-domain"), mulStarStmt, mulStarProof) == nil {
 		t.Fatal("MulStarProof accepted wrong domain")
 	}
-
-	y := testSignedSecret(t, big.NewInt(-19), 64)
-	ciphertext, randomness, err := sk.Encrypt(nil, big.NewInt(-19))
-	if err != nil {
-		t.Fatal(err)
-	}
-	randomnessSecret := testSecretScalarFixed(t, randomness, (sk.N.BitLen()+7)/8)
-	decStmt := DecStatement{PaillierN: sk.PublicKey, C: ciphertext, X: secp.ScalarFromBigInt(big.NewInt(-19)), VerifierAux: aux}
-	decProof, err := ProveDec(params, state, decStmt, DecWitness{Y: y, Rho: randomnessSecret}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := VerifyDec(params, state, decStmt, decProof); err != nil {
-		t.Fatal(err)
-	}
-	decMutations := []func(*DecProof){
-		func(p *DecProof) { p.S.Add(p.S, big.NewInt(1)) },
-		func(p *DecProof) { p.T.Add(p.T, big.NewInt(1)) },
-		func(p *DecProof) { p.A.Add(p.A, big.NewInt(1)) },
-		func(p *DecProof) { p.Gamma[0] ^= 1 },
-		func(p *DecProof) { p.Z1.Add(p.Z1, big.NewInt(1)) },
-		func(p *DecProof) { p.Z2.Add(p.Z2, big.NewInt(1)) },
-		func(p *DecProof) { p.W.Add(p.W, big.NewInt(1)) },
-		func(p *DecProof) { p.TranscriptHash[0] ^= 1 },
-	}
-	for i, mutate := range decMutations {
-		candidate := decProof.Clone()
-		mutate(candidate)
-		if VerifyDec(params, state, decStmt, candidate) == nil {
-			t.Fatalf("DecProof mutation %d verified", i)
-		}
-		candidate.Destroy()
-	}
-	tooLarge := decProof.Clone()
-	tooLarge.Z1 = new(big.Int).Lsh(big.NewInt(1), uint(params.DecRange()+2))
-	if VerifyDec(params, state, decStmt, tooLarge) == nil {
-		t.Fatal("DecProof accepted out-of-range response")
-	}
-	tooLarge.Destroy()
-}
-
-func TestIdentificationProofsRejectMutationAndWrongDomain(t *testing.T) {
-	params := fastProofParams()
-	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lambda.Destroy()
-	y := testSignedSecret(t, big.NewInt(23), 64)
-	ciphertext, randomness, err := sk.Encrypt(nil, big.NewInt(23))
-	if err != nil {
-		t.Fatal(err)
-	}
-	randomnessSecret := testSecretScalarFixed(t, randomness, (sk.N.BitLen()+7)/8)
-	stmt := DecStatement{PaillierN: sk.PublicKey, C: ciphertext, X: secp.ScalarFromBigInt(big.NewInt(23)), VerifierAux: aux}
-	proof, err := ProveDec(params, []byte("right"), stmt, DecWitness{Y: y, Rho: randomnessSecret}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if VerifyDec(params, []byte("wrong"), stmt, proof) == nil {
-		t.Fatal("DecProof accepted wrong domain")
-	}
-	mutated := proof.Clone()
-	mutated.Z1.Add(mutated.Z1, big.NewInt(1))
-	if VerifyDec(params, []byte("right"), stmt, mutated) == nil {
-		t.Fatal("DecProof accepted mutated response")
-	}
 }
 
 func FuzzIdentificationProofDecoders(f *testing.F) {
@@ -206,10 +138,6 @@ func FuzzIdentificationProofDecoders(f *testing.F) {
 	}
 	mulStar := &MulStarProof{A: big.NewInt(1), Bx: point, S: big.NewInt(2), E: big.NewInt(3), Z1: big.NewInt(4), Z2: big.NewInt(5), W: big.NewInt(6), TranscriptHash: transcriptHash}
 	if raw, err := mulStar.MarshalBinary(); err == nil {
-		seeds = append(seeds, raw)
-	}
-	dec := &DecProof{S: big.NewInt(1), T: big.NewInt(2), A: big.NewInt(3), Gamma: make([]byte, secp.ScalarSize), Z1: big.NewInt(4), Z2: big.NewInt(5), W: big.NewInt(6), TranscriptHash: transcriptHash}
-	if raw, err := dec.MarshalBinary(); err == nil {
 		seeds = append(seeds, raw)
 	}
 	for _, seed := range seeds {

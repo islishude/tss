@@ -112,11 +112,10 @@ func (tx *acceptPresignRound2Tx) markCommitted() {
 }
 
 type acceptPresignRound3Tx struct {
-	from        tss.PartyID
-	delta       *secret.Scalar
-	verifyShare signVerifyShare
-	committed   bool
-	prepared    preparedPresignTransitionEffects
+	from      tss.PartyID
+	payload   presignRound3Payload
+	committed bool
+	prepared  preparedPresignTransitionEffects
 }
 
 func (tx *acceptPresignRound3Tx) apply(s *PresignSession) (sessionEffects, error) {
@@ -124,10 +123,13 @@ func (tx *acceptPresignRound3Tx) apply(s *PresignSession) (sessionEffects, error
 	if !ok {
 		return sessionEffects{}, tss.NewProtocolError(tss.ErrCodeInvalidMessage, 3, tx.from, errPresignSignerMissing)
 	}
-	st.round3.delta = tx.delta
-	st.round3.verifyShare = tx.verifyShare
-	st.round3.haveDelta = true
-	st.round3.haveVerifyShare = true
+	st.round3 = presignRound3State{
+		delta:       tx.payload.Delta,
+		deltaPoint:  tx.payload.DeltaPoint,
+		sPoint:      tx.payload.S,
+		proof:       tx.payload.Proof,
+		havePayload: true,
+	}
 	return tx.prepared.commit(s)
 }
 
@@ -136,11 +138,17 @@ func (tx *acceptPresignRound3Tx) cleanupOnReject() {
 		return
 	}
 	tx.prepared.destroy()
-	if tx.committed || tx.delta == nil {
+	if tx.committed || tx.payload.Delta == nil {
 		return
 	}
-	tx.delta.Destroy()
-	tx.delta = nil
+	tx.payload.Delta.Destroy()
+	tx.payload.Delta = nil
+	tx.payload.Proof.Destroy()
+	clear(tx.payload.DeltaPoint)
+	clear(tx.payload.S)
+	clear(tx.payload.PlanHash)
+	clear(tx.payload.EpochID)
+	clear(tx.payload.PresignID)
 }
 
 func (tx *acceptPresignRound3Tx) markCommitted() {
@@ -187,7 +195,13 @@ func (p *preparedPresignTransitionEffects) commit(s *PresignSession) (sessionEff
 		effects.envelopes = append(effects.envelopes, round3Effects.envelopes...)
 	}
 	if p.completion != nil {
-		completionEffects := s.commitPresignCompletionEffects(p.completion)
+		completionEffects, err := s.commitPresignCompletionEffects(p.completion)
+		if err != nil {
+			for i := range effects.envelopes {
+				clearEnvelope(&effects.envelopes[i])
+			}
+			return sessionEffects{}, err
+		}
 		effects.envelopes = append(effects.envelopes, completionEffects.envelopes...)
 	}
 	return effects, nil
@@ -276,10 +290,11 @@ func (tx *acceptPresignRound3Tx) prepare(s *PresignSession) error {
 	}
 	previous := st.round3
 	st.round3 = presignRound3State{
-		delta:           tx.delta,
-		verifyShare:     tx.verifyShare,
-		haveDelta:       true,
-		haveVerifyShare: true,
+		delta:       tx.payload.Delta,
+		deltaPoint:  tx.payload.DeltaPoint,
+		sPoint:      tx.payload.S,
+		proof:       tx.payload.Proof,
+		havePayload: true,
 	}
 	prepared, ready, err := s.preparePresignCompletionEffects()
 	st.round3 = previous

@@ -103,19 +103,7 @@ func (p *EncProof) Desstroy() {
 // k in the range ±2^Ell under the prover's Paillier key, with a Ring-Pedersen
 // commitment under the verifier's auxiliary parameters.
 func ProveEnc(params SecurityParams, state []byte, statement EncStatement, witness EncWitness, rng io.Reader) (*EncProof, error) {
-	var lastErr error
-	for range maxChallengeRetries {
-		proof, err := proveEncOnce(params, state, statement, witness, rng)
-		if errors.Is(err, errZeroChallenge) {
-			lastErr = err
-			continue
-		}
-		return proof, err
-	}
-	if lastErr == nil {
-		lastErr = errZeroChallenge
-	}
-	return nil, lastErr
+	return proveEncOnce(params, state, statement, witness, rng)
 }
 
 func proveEncOnce(params SecurityParams, state []byte, statement EncStatement, witness EncWitness, rng io.Reader) (*EncProof, error) {
@@ -270,6 +258,9 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	if err := validateRPParamsForProof(params, statement.VerifierAux); err != nil {
 		return fmt.Errorf("EncProof: invalid verifier aux: %w", err)
 	}
+	if err := validateAuxModulusDistinct(statement.VerifierAux, statement.ProverPaillierN); err != nil {
+		return fmt.Errorf("EncProof: invalid verifier aux: %w", err)
+	}
 
 	Ni := statement.ProverPaillierN
 	Nj := statement.VerifierAux.N
@@ -393,6 +384,9 @@ func validateEncStatement(params SecurityParams, stmt EncStatement, w EncWitness
 		return fmt.Errorf("invalid ciphertext K: %w", err)
 	}
 	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
+		return fmt.Errorf("invalid verifier aux: %w", err)
+	}
+	if err := validateAuxModulusDistinct(stmt.VerifierAux, stmt.ProverPaillierN); err != nil {
 		return fmt.Errorf("invalid verifier aux: %w", err)
 	}
 	if w.K == nil || w.Rho == nil {

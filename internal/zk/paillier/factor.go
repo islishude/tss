@@ -41,6 +41,9 @@ func ProveFactor(params SecurityParams, state []byte, sk *pai.PrivateKey, verifi
 	if err := validateRPParamsForProof(params, verifierAux); err != nil {
 		return nil, fmt.Errorf("invalid verifier Ring-Pedersen parameters: %w", err)
 	}
+	if err := validateAuxModulusDistinct(verifierAux, sk.PublicKey); err != nil {
+		return nil, fmt.Errorf("invalid verifier Ring-Pedersen parameters: %w", err)
+	}
 	p, q, err := paillierFactors(sk)
 	if err != nil {
 		return nil, err
@@ -50,19 +53,7 @@ func ProveFactor(params SecurityParams, state []byte, sk *pai.PrivateKey, verifi
 	if err := validateFactorWitness(params, sk.N, p, q); err != nil {
 		return nil, err
 	}
-	var lastErr error
-	for range maxChallengeRetries {
-		proof, err := proveFactorOnce(params, state, sk.N, verifierAux, p, q, rng)
-		if errors.Is(err, errZeroChallenge) {
-			lastErr = err
-			continue
-		}
-		return proof, err
-	}
-	if lastErr == nil {
-		lastErr = errZeroChallenge
-	}
-	return nil, lastErr
+	return proveFactorOnce(params, state, sk.N, verifierAux, p, q, rng)
 }
 
 func proveFactorOnce(params SecurityParams, state []byte, ni *big.Int, aux *RingPedersenParams, p, q *big.Int, rng io.Reader) (*FactorProof, error) {
@@ -188,6 +179,9 @@ func VerifyFactor(params SecurityParams, state []byte, statement FactorStatement
 		return err
 	}
 	if err := validateRPParamsForProof(params, statement.VerifierAux); err != nil {
+		return err
+	}
+	if err := validateAuxModulusDistinct(statement.VerifierAux, statement.ProverPaillierN); err != nil {
 		return err
 	}
 	if err := proof.Validate(); err != nil {

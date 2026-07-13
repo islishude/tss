@@ -1,9 +1,9 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -28,19 +28,32 @@ func preparePresignContext(key *KeyShare, ctx tss.SigningContext) (tss.SigningCo
 	if key == nil || key.state == nil {
 		return tss.SigningContext{}, nil, nil, errors.New("nil key share")
 	}
-	derivation, err := key.Derive(
-		ctx.Derivation.Path,
-		tss.WithInvalidChildMode(ctx.Derivation.InvalidChildMode),
-	)
-	if err != nil {
+	if len(ctx.Derivation.Path) != 0 || len(ctx.Derivation.ResolvedPath) != 0 {
+		return tss.SigningContext{}, nil, nil, errors.New("request-time HD derivation is not allowed; use an explicit child generation")
+	}
+	// A presign belongs to one already-authorized lifecycle generation. Bind the
+	// empty derivation result to that generation's exact public key and chain
+	// code without performing request-time child derivation.
+	derivation := &tss.DerivationResult{
+		Scheme:         tss.DerivationSchemeBIP32Secp256k1,
+		ChildPublicKey: bytes.Clone(key.state.PublicKey),
+		ChildChainCode: bytes.Clone(key.state.ChainCode),
+		AdditiveShift:  secp.ScalarZero().Bytes(),
+	}
+	defer derivation.Destroy()
+	if err := validateDerivationResult(derivation); err != nil {
 		return tss.SigningContext{}, nil, nil, err
 	}
-	if len(ctx.Derivation.ResolvedPath) > 0 && !slices.Equal(ctx.Derivation.ResolvedPath, derivation.ResolvedPath) {
-		return tss.SigningContext{}, nil, nil, errors.New("presign context resolved path mismatch")
+	parent, err := secp.PointFromBytes(key.state.PublicKey)
+	if err != nil {
+		return tss.SigningContext{}, nil, nil, fmt.Errorf("invalid current generation public key: %w", err)
+	}
+	if err := validateSecp256k1DerivationBinding(parent, derivation); err != nil {
+		return tss.SigningContext{}, nil, nil, err
 	}
 	ctx = ctx.Clone()
-	ctx.Derivation.Path = derivation.RequestedPath.Clone()
-	ctx.Derivation.ResolvedPath = derivation.ResolvedPath.Clone()
+	ctx.Derivation.Path = nil
+	ctx.Derivation.ResolvedPath = nil
 	return ctx, presignContextHash(ctx), derivation.Clone(), nil
 }
 
@@ -64,7 +77,8 @@ func presignContextHash(ctx tss.SigningContext) []byte {
 	return t.Sum()
 }
 
-func validateDerivationResult(result *tss.DerivationResult, scheme tss.DerivationScheme) error {
+func validateDerivationResult(result *tss.DerivationResult) error {
+	const scheme = tss.DerivationSchemeBIP32Secp256k1
 	if err := result.Validate(); err != nil {
 		return fmt.Errorf("invalid derivation result: %w", err)
 	}

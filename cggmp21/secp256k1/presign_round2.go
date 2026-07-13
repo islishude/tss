@@ -10,7 +10,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/shamir"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 func (s *PresignSession) buildAcceptPresignRound2Tx(env tss.Envelope) (*acceptPresignRound2Tx, error) {
@@ -32,6 +32,9 @@ func (s *PresignSession) buildAcceptPresignRound2Tx(env tss.Envelope) (*acceptPr
 	// ---- 2. POLICY VALIDATE ----
 	// (round and duplicate checks done in dispatcher)
 	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
+	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 
@@ -146,10 +149,42 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 	if err != nil {
 		return nil, false, err
 	}
-	localRP, err := s.key.ringPedersenPublicFor(s.key.state.Party, s.limits)
+	selfState, ok := s.partyState(s.key.state.Party)
+	if !ok || !selfState.round1.havePayload {
+		return nil, false, errors.New("missing local Figure 8 round1 state")
+	}
+	gammaPoint, err := secp.PointFromBytes(s.gammaComm)
 	if err != nil {
 		return nil, false, err
 	}
+	yPoint, err := secp.PointFromBytes(selfState.round1.payload.Y)
+	if err != nil {
+		return nil, false, err
+	}
+	b1Point, err := secp.PointFromBytes(selfState.round1.payload.B1)
+	if err != nil {
+		return nil, false, err
+	}
+	b2Point, err := secp.PointFromBytes(selfState.round1.payload.B2)
+	if err != nil {
+		return nil, false, err
+	}
+	elogDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, s.key.state.Party, tss.BroadcastPartyId, "elog-gamma")
+	if err != nil {
+		return nil, false, err
+	}
+	gammaProof, err := zkpai.ProveElog(elogDomain, zkpai.ElogStatement{
+		Generator:         secp.G,
+		LambdaCommitment:  b1Point,
+		ElGamalCommitment: b2Point,
+		ElGamalBase:       yPoint,
+		ResultCommitment:  gammaPoint,
+		ResultBase:        secp.G,
+	}, zkpai.ElogWitness{Y: s.gamma, Lambda: s.b}, s.config.Reader())
+	if err != nil {
+		return nil, false, err
+	}
+	defer gammaProof.Destroy()
 	for _, peer := range s.signers {
 		if peer == s.key.state.Party {
 			continue
@@ -168,34 +203,24 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		}
 		peerRound1 := peerState.round1.payload
 		start := mta.StartMessage{Ciphertext: peerRound1.EncK}
-		startProofDomain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		deltaDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, s.key.state.Party, peer, "aff-g-delta")
 		if err != nil {
 			return nil, false, err
 		}
-		deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		sigmaDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, s.key.state.Party, peer, "aff-g-chi")
 		if err != nil {
 			return nil, false, err
 		}
-		sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
-		if err != nil {
-			return nil, false, err
-		}
-		startProofPayload := peerState.round1.proof
-		startProof := &startProofPayload.EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
-		deltaResp, betaDelta, deltaOpening, err := mta.RespondWithOpening(
+		deltaResp, betaDelta, deltaOpening, err := mta.RespondFigure8WithOpening(
 			s.securityParams,
-			nil,
-			startProofDomain,
+			s.config.Reader(),
 			deltaDomain,
 			start,
-			startProof,
-			peerRound1.KPoint,
 			s.gamma,
 			s.gammaComm,
 			peerPK,
 			selfPK,
-			localRP,
 			peerRP,
 		)
 		if err != nil {
@@ -203,19 +228,15 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		}
 		// The sigma MtA instance creates additive shares of k_i*x_j, where x_j
 		// is already adjusted by the signer-set Lagrange coefficient.
-		sigmaResp, betaSigma, sigmaOpening, err := mta.RespondWithOpening(
+		sigmaResp, betaSigma, sigmaOpening, err := mta.RespondFigure8WithOpening(
 			s.securityParams,
-			nil,
-			startProofDomain,
+			s.config.Reader(),
 			sigmaDomain,
 			start,
-			startProof,
-			peerRound1.KPoint,
 			s.xBar,
 			s.xBarComm,
 			peerPK,
 			selfPK,
-			localRP,
 			peerRP,
 		)
 		if err != nil {
@@ -233,10 +254,14 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 			sigmaOpening:  sigmaOpening,
 		})
 		payload, err := (presignRound2Payload{
+			Gamma:      bytes.Clone(s.gammaComm),
+			GammaProof: *gammaProof,
 			Delta:      *deltaResp,
 			Sigma:      *sigmaResp,
 			Round1Echo: s.round1Echo(),
 			PlanHash:   s.planHash,
+			EpochID:    s.epochID,
+			PresignID:  s.presignID,
 		}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, false, err
@@ -284,6 +309,9 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 	if !bytes.Equal(p.Round1Echo, s.round1Echo()) {
 		return nil, errors.New("presign round1 echo mismatch")
 	}
+	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
+		return nil, err
+	}
 	selfState, ok := s.partyState(s.key.state.Party)
 	if !ok || !selfState.round1.havePayload {
 		return nil, errors.New("missing local presign round1 state")
@@ -293,7 +321,38 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		return nil, fmt.Errorf("missing presign round1 state for party %d", from)
 	}
 	start := mta.StartMessage{Ciphertext: selfState.round1.payload.EncK}
-	gammaCommit := fromState.round1.payload.Gamma
+	round1 := fromState.round1.payload
+	gammaCommit := p.Gamma
+	gammaPoint, err := secp.PointFromBytes(gammaCommit)
+	if err != nil {
+		return nil, err
+	}
+	yPoint, err := secp.PointFromBytes(round1.Y)
+	if err != nil {
+		return nil, err
+	}
+	b1Point, err := secp.PointFromBytes(round1.B1)
+	if err != nil {
+		return nil, err
+	}
+	b2Point, err := secp.PointFromBytes(round1.B2)
+	if err != nil {
+		return nil, err
+	}
+	elogDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, from, tss.BroadcastPartyId, "elog-gamma")
+	if err != nil {
+		return nil, err
+	}
+	if err := zkpai.VerifyElog(elogDomain, zkpai.ElogStatement{
+		Generator:         secp.G,
+		LambdaCommitment:  b1Point,
+		ElGamalCommitment: b2Point,
+		ElGamalBase:       yPoint,
+		ResultCommitment:  gammaPoint,
+		ResultBase:        secp.G,
+	}, &p.GammaProof); err != nil {
+		return nil, fmt.Errorf("verify Figure 8 Gamma proof: %w", err)
+	}
 
 	// Responder's Paillier public key (for verifying the Y commitment in Πaff-g).
 	responderPK, err := s.key.paillierPublicFor(from, s.limits)
@@ -306,7 +365,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		return nil, err
 	}
 
-	deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	deltaDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, from, s.key.state.Party, "aff-g-delta")
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +374,6 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		deltaDomain,
 		start,
 		p.Delta,
-		selfState.round1.payload.KPoint,
 		gammaCommit,
 		s.paillier,
 		responderPK,
@@ -329,7 +387,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		alphaDelta.Destroy()
 		return nil, err
 	}
-	sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	sigmaDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, from, s.key.state.Party, "aff-g-chi")
 	if err != nil {
 		alphaDelta.Destroy()
 		return nil, err
@@ -339,7 +397,6 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		sigmaDomain,
 		start,
 		p.Sigma,
-		selfState.round1.payload.KPoint,
 		xBarCommit,
 		s.paillier,
 		responderPK,
@@ -364,7 +421,7 @@ func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lambda, err := shamir.LagrangeCoefficient(id, s.signers)
+	lambda, err := epochLagrangeCoefficient(s.key.state.Epoch, id, s.signers)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 	t.Parallel()
 	params := DefaultSecurityParams()
 	sk := testPaillierKey(t, int(params.MinPaillierBits))
+	defer sk.Destroy()
 	domain := []byte("slowcrypto paillier zk")
 
 	modProof, err := ProveModulus(nil, domain, sk, 1)
@@ -27,11 +28,17 @@ func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 		t.Fatal("production modulus proof verified under wrong domain")
 	}
 
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	auxSK := testAuxPaillierKey(t, int(params.MinPaillierBits))
+	defer auxSK.Destroy()
+	if auxSK.N.Cmp(sk.N) == 0 {
+		t.Fatal("Ring-Pedersen modulus reused the Paillier modulus")
+	}
+	aux, lambda, err := GenerateRingPedersenParams(nil, auxSK)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rpProof, err := ProveRingPedersen(nil, domain, sk, aux, lambda, 1)
+	defer lambda.Destroy()
+	rpProof, err := ProveRingPedersen(nil, domain, auxSK, aux, lambda, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +144,6 @@ func slowAffGProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux 
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
 	witness := AffGWitness{

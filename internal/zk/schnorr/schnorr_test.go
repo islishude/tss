@@ -72,6 +72,94 @@ func TestProof(t *testing.T) {
 	}
 }
 
+func TestPreparationCommitAheadAndOneUseFinalize(t *testing.T) {
+	secretValue := testSecretScalar(t, 13)
+	public, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(13)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparation, err := Prepare(testutil.DeterministicReader(1301), public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitment := preparation.Commitment()
+	if _, err := secp.PointFromBytes(commitment); err != nil {
+		t.Fatalf("invalid prepared commitment: %v", err)
+	}
+	proof, err := preparation.Finalize([]byte("final-rid"), secretValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(commitment, proof.Commitment) {
+		t.Fatal("Finalize did not reuse the published first commitment")
+	}
+	if !Verify([]byte("final-rid"), public, proof) {
+		t.Fatal("finalized proof did not verify")
+	}
+	if preparation.Commitment() != nil {
+		t.Fatal("Finalize did not consume preparation")
+	}
+	if _, err := preparation.Finalize([]byte("again"), secretValue); err == nil {
+		t.Fatal("consumed preparation finalized twice")
+	}
+}
+
+func TestPreparationRejectsMismatchedSecretAndDestroys(t *testing.T) {
+	public, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(13)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparation, err := Prepare(testutil.DeterministicReader(1302), public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preparation.Finalize([]byte("final-rid"), testSecretScalar(t, 17)); err == nil {
+		t.Fatal("accepted a secret for another public key")
+	}
+	if preparation.Commitment() != nil {
+		t.Fatal("failed Finalize retained the nonce")
+	}
+}
+
+func TestPreparationTransactionalFinalize(t *testing.T) {
+	secretValue := testSecretScalar(t, 23)
+	public, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(23)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparation, err := Prepare(testutil.DeterministicReader(1303), public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstCommitment := preparation.Commitment()
+	staged, err := preparation.PrepareFinalize([]byte("rid"), secretValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := staged.Proof()
+	if proof == nil || !bytes.Equal(proof.Commitment, firstCommitment) {
+		t.Fatal("staged proof changed first commitment")
+	}
+	staged.Destroy()
+	if !bytes.Equal(preparation.Commitment(), firstCommitment) {
+		t.Fatal("canceling staged proof consumed preparation")
+	}
+	staged, err = preparation.PrepareFinalize([]byte("rid"), secretValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof = staged.Proof()
+	if err := staged.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if preparation.Commitment() != nil {
+		t.Fatal("committing staged proof did not consume preparation")
+	}
+	if !Verify([]byte("rid"), public, proof) {
+		t.Fatal("committed staged proof did not verify")
+	}
+}
+
 func TestProofDecoderRejectsOversizedFieldAtWireBoundary(t *testing.T) {
 	t.Parallel()
 

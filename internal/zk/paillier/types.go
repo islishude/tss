@@ -106,8 +106,27 @@ func (p *ModulusProof) Clone() *ModulusProof {
 	return cp
 }
 
-// RingPedersenParams are CGGMP Ring-Pedersen public parameters. N must match
-// the party Paillier modulus and s,t must be non-degenerate elements of Z*_N.
+// Destroy clears all modulus-proof fields.
+func (p *ModulusProof) Destroy() {
+	if p == nil {
+		return
+	}
+	clear(p.W)
+	clear(p.TranscriptHash)
+	for _, value := range p.X {
+		clear(value)
+	}
+	clear(p.A)
+	clear(p.B)
+	for _, value := range p.Z {
+		clear(value)
+	}
+	*p = ModulusProof{}
+}
+
+// RingPedersenParams are CGGMP Ring-Pedersen public parameters. N must be an
+// independently generated auxiliary modulus distinct from every Paillier
+// modulus in a statement; S and T must be non-degenerate elements of Z*_N.
 type RingPedersenParams struct {
 	N *big.Int `wire:"1,bigpos,max_bits=paillier_modulus_bits"`
 	S *big.Int `wire:"2,bigpos,max_bits=paillier_modulus_bits"`

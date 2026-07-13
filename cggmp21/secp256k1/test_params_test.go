@@ -29,7 +29,6 @@ func testLimits() Limits {
 		MaxMTAResponseBytes:  512 << 10,
 	}
 	limits.ZK.MaxProofBytes = 512 << 10
-	limits.SignPrep.MaxProofBytes = 512 << 10
 	return limits
 }
 
@@ -53,14 +52,6 @@ func testSecretScalar(t testing.TB, v int64) *secret.Scalar {
 		t.Fatal(err)
 	}
 	return s
-}
-
-func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, error) {
-	return tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](in, testLimits())
-}
-
-func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
-	return tss.DecodeBinaryValueWithLimits[keygenSharePayload](in, testLimits())
 }
 
 func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
@@ -105,12 +96,4 @@ func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
 
 func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 	return tss.DecodeBinaryValueWithLimits[reshareSharePayload](in, testLimits())
-}
-
-func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, error) {
-	return tss.DecodeBinaryValueWithLimits[refreshCommitmentsPayload](in, testLimits())
-}
-
-func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
-	return tss.DecodeBinaryValueWithLimits[refreshSharePayload](in, testLimits())
 }

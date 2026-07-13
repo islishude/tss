@@ -3,6 +3,7 @@ package paillier
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/big"
 	"sync"
 	"testing"
@@ -55,6 +56,7 @@ type testPaillierKeyEntry struct {
 }
 
 var testPaillierKeyCache sync.Map // map[int]*testPaillierKeyEntry
+var testAuxPaillierKeyCache sync.Map
 
 func testPaillierKey(tb testing.TB, bits int) *pai.PrivateKey {
 	tb.Helper()
@@ -78,6 +80,34 @@ func testPaillierKey(tb testing.TB, bits int) *pai.PrivateKey {
 
 	// Return a deep clone so callers cannot mutate the cached original.
 	return entry.sk.Clone()
+}
+
+func testAuxPaillierKey(tb testing.TB, bits int) *pai.PrivateKey {
+	tb.Helper()
+	entryAny, _ := testAuxPaillierKeyCache.LoadOrStore(bits, &testPaillierKeyEntry{})
+	entry := entryAny.(*testPaillierKeyEntry)
+	entry.once.Do(func() {
+		sk, err := pai.GenerateKeyForTest(context.Background(), nil, bits)
+		if err != nil {
+			testAuxPaillierKeyCache.Delete(bits)
+			tb.Fatal(err)
+		}
+		entry.sk = sk
+	})
+	if entry.sk == nil {
+		tb.Fatalf("auxiliary Paillier key cache poisoned for bits=%d", bits)
+	}
+	return entry.sk.Clone()
+}
+
+func testIndependentRingPedersenParams(tb testing.TB, reader io.Reader, primary *pai.PrivateKey) (*RingPedersenParams, *secret.Scalar, error) {
+	tb.Helper()
+	if primary == nil || primary.N == nil {
+		return nil, nil, fmt.Errorf("nil primary Paillier key")
+	}
+	auxSK := testAuxPaillierKey(tb, primary.N.BitLen())
+	defer auxSK.Destroy()
+	return GenerateRingPedersenParams(reader, auxSK)
 }
 
 func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {

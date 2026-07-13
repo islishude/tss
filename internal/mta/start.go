@@ -251,3 +251,93 @@ func VerifyStart(params zkpai.SecurityParams, domain []byte, msg StartMessage, a
 	}
 	return nil
 }
+
+// ProveEncElgForVerifier proves the retained start ciphertext and the Figure 8
+// ElGamal relation for one verifier without exposing the ciphertext opening.
+func (o *StartOpening) ProveEncElgForVerifier(
+	params zkpai.SecurityParams,
+	reader io.Reader,
+	domain []byte,
+	elGamalBase, exponentCommitment, combinedCommitment []byte,
+	exponent *secret.Scalar,
+	proverPK *pai.PublicKey,
+	verifierAux *zkpai.RingPedersenParams,
+) (*zkpai.EncElgProof, error) {
+	if o == nil || o.k == nil || o.rho == nil {
+		return nil, errors.New("destroyed MtA start opening")
+	}
+	if err := o.Message.Validate(); err != nil {
+		return nil, err
+	}
+	stmt, err := encElgStartStatement(o.Message, elGamalBase, exponentCommitment, combinedCommitment, proverPK, verifierAux)
+	if err != nil {
+		return nil, err
+	}
+	return zkpai.ProveEncElg(params, domain, stmt, zkpai.EncElgWitness{
+		Plaintext:  o.k,
+		Randomness: o.rho,
+		Exponent:   exponent,
+	}, reader)
+}
+
+// VerifyStartEncElg verifies a Figure 8 Πenc-elg proof for an MtA start
+// ciphertext and the supplied public ElGamal relation.
+func VerifyStartEncElg(
+	params zkpai.SecurityParams,
+	domain []byte,
+	msg StartMessage,
+	elGamalBase, exponentCommitment, combinedCommitment []byte,
+	proverPK *pai.PublicKey,
+	verifierAux *zkpai.RingPedersenParams,
+	proof *zkpai.EncElgProof,
+) error {
+	if proof == nil {
+		return errors.New("missing MtA start enc-elg proof")
+	}
+	if err := msg.Validate(); err != nil {
+		return err
+	}
+	stmt, err := encElgStartStatement(msg, elGamalBase, exponentCommitment, combinedCommitment, proverPK, verifierAux)
+	if err != nil {
+		return err
+	}
+	if err := zkpai.VerifyEncElg(params, domain, stmt, proof); err != nil {
+		return fmt.Errorf("invalid MtA start enc-elg proof: %w", err)
+	}
+	return nil
+}
+
+func encElgStartStatement(
+	msg StartMessage,
+	elGamalBase, exponentCommitment, combinedCommitment []byte,
+	proverPK *pai.PublicKey,
+	verifierAux *zkpai.RingPedersenParams,
+) (zkpai.EncElgStatement, error) {
+	if proverPK == nil {
+		return zkpai.EncElgStatement{}, errors.New("nil prover public key")
+	}
+	if verifierAux == nil {
+		return zkpai.EncElgStatement{}, errors.New("nil RingPedersenParams")
+	}
+	base, err := secp.PointFromBytes(elGamalBase)
+	if err != nil {
+		return zkpai.EncElgStatement{}, fmt.Errorf("invalid ElGamal base: %w", err)
+	}
+	exponentPoint, err := secp.PointFromBytes(exponentCommitment)
+	if err != nil {
+		return zkpai.EncElgStatement{}, fmt.Errorf("invalid exponent commitment: %w", err)
+	}
+	combinedPoint, err := secp.PointFromBytes(combinedCommitment)
+	if err != nil {
+		return zkpai.EncElgStatement{}, fmt.Errorf("invalid combined commitment: %w", err)
+	}
+	return zkpai.EncElgStatement{
+		Generator:          secp.Clone(secp.G),
+		PaillierN:          proverPK,
+		Ciphertext:         new(big.Int).SetBytes(msg.Ciphertext),
+		ElGamalBase:        base,
+		ExponentCommitment: exponentPoint,
+		CombinedCommitment: combinedPoint,
+		VerifierAux:        verifierAux,
+	}, nil
+}

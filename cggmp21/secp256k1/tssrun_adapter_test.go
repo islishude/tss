@@ -30,11 +30,17 @@ func TestLifecycleSessionCompletedUsesTerminalState(t *testing.T) {
 	}
 }
 
-func TestPresignSessionCompletedDoesNotTransferPresign(t *testing.T) {
+func TestPresignSessionCompletedExposesOnlyPersistedDescriptor(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
+	defer p.Destroy()
+	metadata, ok := p.PublicMetadata()
+	if !ok {
+		t.Fatal("missing public presign metadata")
+	}
+	descriptor := newPersistedPresign(metadata.LifecycleSlot, metadata)
 	session := &PresignSession{
-		completed: true,
-		presign:   p,
+		completed:        true,
+		persistedPresign: &descriptor,
 	}
 
 	if !session.Completed() {
@@ -43,12 +49,12 @@ func TestPresignSessionCompletedDoesNotTransferPresign(t *testing.T) {
 	if !session.Completed() {
 		t.Fatal("completed presign session reported incomplete on repeated check")
 	}
-	if session.presign != p || session.presignReturned {
-		t.Fatal("Completed transferred the session-owned presign")
+	if session.persistedPresign == nil {
+		t.Fatal("Completed removed the persisted descriptor")
 	}
 
 	got, ok := session.Presign()
-	if !ok || got != p {
-		t.Fatal("Presign did not transfer the completed record after status checks")
+	if !ok || got.SlotID() != metadata.LifecycleSlot {
+		t.Fatal("Presign did not return the persisted descriptor after status checks")
 	}
 }

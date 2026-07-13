@@ -4,14 +4,17 @@ package secp256k1_test
 
 import (
 	"bytes"
+	"context"
 	stded25519 "crypto/ed25519"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/islishude/tss"
 	cggmp "github.com/islishude/tss/cggmp21/secp256k1"
+	"github.com/islishude/tss/tssrun"
 )
 
 // The helpers in this file run multiple protocol parties in one Go process.
@@ -47,7 +50,7 @@ type examplePresignJob struct {
 type exampleSignJob struct {
 	run     exampleProtocolRun
 	request cggmp.SignRequest
-	store   cggmp.SignAttemptStore
+	stores  map[tss.PartyID]tssrun.LifecycleStore
 }
 
 type exampleCGGMPSecurity struct {
@@ -388,9 +391,12 @@ func newExampleCGGMPPresignJob(signers tss.PartySet, ctx tss.SigningContext) (ex
 	}, nil
 }
 
-func startExampleCGGMPPresignParty(job examplePresignJob, share *cggmp.KeyShare, security *exampleCGGMPSecurity) (*cggmp.PresignSession, []tss.Envelope, error) {
+func startExampleCGGMPPresignParty(job examplePresignJob, share *cggmp.KeyShare, store tssrun.LifecycleStore, security *exampleCGGMPSecurity) (*cggmp.PresignSession, []tss.Envelope, error) {
 	if share == nil {
 		return nil, nil, errors.New("missing example key share")
+	}
+	if store == nil {
+		return nil, nil, errors.New("missing example lifecycle store")
 	}
 	self := share.PartyID()
 	guard, err := security.guard(self, job.run.signers, job.run.sessionID)
@@ -400,6 +406,7 @@ func startExampleCGGMPPresignParty(job examplePresignJob, share *cggmp.KeyShare,
 	plan, err := cggmp.NewPresignPlan(cggmp.PresignPlanOption{
 		Key:       share,
 		SessionID: job.run.sessionID,
+		PresignID: job.run.sessionID[:],
 		Signers:   job.run.signers,
 		Context:   job.context,
 	})
@@ -410,17 +417,25 @@ func startExampleCGGMPPresignParty(job examplePresignJob, share *cggmp.KeyShare,
 	if err != nil {
 		return nil, nil, err
 	}
-	return cggmp.StartPresign(share, plan, tss.LocalConfig{Self: self, EnvelopeSigner: signer}, guard)
+	binding, err := installExampleGeneration(store, share, job.context.KeyID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cggmp.StartPresign(plan, cggmp.PresignRuntime{
+		Local: tss.LocalConfig{Self: self, EnvelopeSigner: signer}, Guard: guard,
+		LifecycleStore: store, Binding: binding,
+	})
 }
 
 // runExampleCGGMPPresign performs the offline phase for the selected signer set.
-// The resulting presigns contain one-use secret material and must remain paired
-// with the corresponding key share and signer identity.
+// Secret presign material is installed atomically in stores; the returned
+// descriptors contain only public metadata and canonical store slots.
 func runExampleCGGMPPresign(
 	shares map[tss.PartyID]*cggmp.KeyShare,
 	signers tss.PartySet,
 	ctx tss.SigningContext,
-) (map[tss.PartyID]*cggmp.Presign, error) {
+	stores map[tss.PartyID]tssrun.LifecycleStore,
+) (map[tss.PartyID]cggmp.PersistedPresign, error) {
 	job, err := newExampleCGGMPPresignJob(signers, ctx)
 	if err != nil {
 		return nil, err
@@ -430,7 +445,7 @@ func runExampleCGGMPPresign(
 	sessions := make(map[tss.PartyID]*cggmp.PresignSession, len(signers))
 	queue := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		session, out, err := startExampleCGGMPPresignParty(job, shares[id], security)
+		session, out, err := startExampleCGGMPPresignParty(job, shares[id], stores[id], security)
 		if err != nil {
 			return nil, err
 		}
@@ -447,29 +462,29 @@ func runExampleCGGMPPresign(
 		return nil, err
 	}
 
-	presigns := make(map[tss.PartyID]*cggmp.Presign, len(signers))
+	presigns := make(map[tss.PartyID]cggmp.PersistedPresign, len(signers))
 	for _, id := range signers {
-		// Presign transfers the completed party-local one-use object out of the
-		// session. Callers must store it as sensitive state and never duplicate
-		// it to create independent signing attempts.
 		presign, ok := sessions[id].Presign()
 		if !ok {
 			return nil, fmt.Errorf("presign not complete for party %d", id)
 		}
 		presigns[id] = presign
+		sessions[id].Destroy()
 	}
 	return presigns, nil
 }
 
-func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest, store cggmp.SignAttemptStore) (exampleSignJob, error) {
+func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest, stores map[tss.PartyID]tssrun.LifecycleStore) (exampleSignJob, error) {
 	// The signing session ID is generated for this online signing attempt.
 	// It is distinct from the earlier presign session ID.
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		return exampleSignJob{}, err
 	}
-	if store == nil {
-		return exampleSignJob{}, errors.New("missing example sign attempt store")
+	for _, signer := range signers {
+		if stores[signer] == nil {
+			return exampleSignJob{}, fmt.Errorf("missing example lifecycle store for party %d", signer)
+		}
 	}
 	return exampleSignJob{
 		run: exampleProtocolRun{
@@ -482,15 +497,15 @@ func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest, sto
 			threshold: len(signers),
 		},
 		request: request.Clone(),
-		store:   store,
+		stores:  stores,
 	}, nil
 }
 
-func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presign *cggmp.Presign, security *exampleCGGMPSecurity) (*cggmp.SignSession, []tss.Envelope, error) {
+func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presign cggmp.PersistedPresign, security *exampleCGGMPSecurity) (*cggmp.SignSession, []tss.Envelope, error) {
 	if share == nil {
 		return nil, nil, errors.New("missing example key share")
 	}
-	if presign == nil {
+	if presign.SlotID() == "" {
 		return nil, nil, errors.New("missing example presign")
 	}
 	self := share.PartyID()
@@ -498,9 +513,10 @@ func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presi
 	if err != nil {
 		return nil, nil, err
 	}
+	metadata := presign.PublicMetadata()
 	plan, err := cggmp.NewSignPlan(cggmp.SignPlanOption{
 		Key:     share,
-		Presign: presign,
+		Presign: metadata,
 		Intent: cggmp.SignIntent{
 			SessionID: job.run.sessionID,
 			Context:   job.request.Context,
@@ -511,12 +527,42 @@ func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presi
 	if err != nil {
 		return nil, nil, err
 	}
-	return cggmp.StartSign(share, plan, cggmp.SignRuntime{
-		Local:        tss.LocalConfig{Self: self},
-		Guard:        guard,
-		Presign:      presign,
-		AttemptStore: job.store,
-	})
+	signer, err := security.envelopeSigner(self)
+	if err != nil {
+		return nil, nil, err
+	}
+	runtime, err := prepareExampleSignRuntime(job, share, presign, signer, guard)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cggmp.StartSign(plan, runtime)
+}
+
+func prepareExampleSignRuntime(job exampleSignJob, share *cggmp.KeyShare, presign cggmp.PersistedPresign, signer tss.EnvelopeSigner, guard *tss.EnvelopeGuard) (cggmp.SignRuntime, error) {
+	self := share.PartyID()
+	store := job.stores[self]
+	binding, err := exampleGenerationBinding(share, job.request.Context.KeyID)
+	if err != nil {
+		return cggmp.SignRuntime{}, err
+	}
+	policy, err := cggmp.CGGMP21Policies().Match(tss.ProtocolCGGMP21Secp256k1, 1, tss.PayloadType("cggmp21.secp256k1.sign.partial"))
+	if err != nil {
+		return cggmp.SignRuntime{}, err
+	}
+	return cggmp.SignRuntime{
+		Local:          tss.LocalConfig{Self: self, EnvelopeSigner: signer},
+		Guard:          guard,
+		LifecycleStore: store,
+		Binding:        binding,
+		PresignID:      presign.SlotID(),
+		AttemptID:      fmt.Sprintf("example-sign-%d-%x", self, job.run.sessionID),
+		DeliveryPolicy: cggmp.SignAttemptDeliveryPolicy{
+			Mode:                 policy.Mode,
+			Confidentiality:      policy.Confidentiality,
+			BroadcastConsistency: policy.BroadcastConsistency,
+			Recipients:           job.run.signers.Clone(),
+		},
+	}, nil
 }
 
 // runExampleCGGMPSign executes the online phase and returns the common group
@@ -525,12 +571,12 @@ func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presi
 // successful or conflicting committed attempt cannot reuse these presigns.
 func runExampleCGGMPSign(
 	shares map[tss.PartyID]*cggmp.KeyShare,
-	presigns map[tss.PartyID]*cggmp.Presign,
+	presigns map[tss.PartyID]cggmp.PersistedPresign,
 	signers tss.PartySet,
 	request cggmp.SignRequest,
-	store cggmp.SignAttemptStore,
+	stores map[tss.PartyID]tssrun.LifecycleStore,
 ) ([]byte, *cggmp.Signature, error) {
-	job, err := newExampleCGGMPSignJob(signers, request, store)
+	job, err := newExampleCGGMPSignJob(signers, request, stores)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -566,22 +612,64 @@ func runExampleCGGMPSign(
 	return exampleKeyShareMetadata(shares[signers[0]]).PublicKey, signature, nil
 }
 
-func newExampleFileSignAttemptStore() (*cggmp.FileSignAttemptStore, func(), error) {
-	directory, err := os.MkdirTemp("", "tss-sign-attempts-")
+func exampleGenerationBinding(share *cggmp.KeyShare, keyID string) (tssrun.GenerationBinding, error) {
+	keyMetadata, ok := share.PublicMetadata()
+	if !ok || keyMetadata.Epoch == nil {
+		return tssrun.GenerationBinding{}, errors.New("invalid public key-share metadata")
+	}
+	epochID, err := tssrun.NewEpochID(keyMetadata.Epoch.EpochID)
+	if err != nil {
+		return tssrun.GenerationBinding{}, err
+	}
+	return tssrun.GenerationBinding{
+		KeyID: keyID, KeyGeneration: tssrun.KeyGeneration(fmt.Sprintf("keygen-%x", keyMetadata.KeygenTranscriptHash)), EpochID: epochID,
+	}, nil
+}
+
+func installExampleGeneration(store tssrun.LifecycleStore, share *cggmp.KeyShare, keyID string) (tssrun.GenerationBinding, error) {
+	binding, err := exampleGenerationBinding(share, keyID)
+	if err != nil {
+		return tssrun.GenerationBinding{}, err
+	}
+	metadata, _ := share.PublicMetadata()
+	blob, err := share.MarshalBinary()
+	if err != nil {
+		return tssrun.GenerationBinding{}, err
+	}
+	defer clear(blob)
+	if _, err := store.InstallInitialGeneration(context.Background(), binding, blob, metadata.PlanHash); err != nil {
+		return tssrun.GenerationBinding{}, err
+	}
+	return binding, nil
+}
+
+func newExampleFileLifecycleStores(parties tss.PartySet) (map[tss.PartyID]tssrun.LifecycleStore, func(), error) {
+	directory, err := os.MkdirTemp("", "tss-lifecycle-")
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := cggmp.NewFileSignAttemptStore(directory, []byte("integration-example-passphrase"), &tss.PassphraseParams{
-		Time:    1,
-		Memory:  1024,
-		Threads: 1,
-	})
-	if err != nil {
-		_ = os.RemoveAll(directory)
-		return nil, nil, err
+	stores := make(map[tss.PartyID]tssrun.LifecycleStore, len(parties))
+	owned := make([]*tssrun.FileLifecycleStore, 0, len(parties))
+	for _, party := range parties {
+		store, openErr := tssrun.NewFileLifecycleStore(filepath.Join(directory, fmt.Sprintf("party-%d", party)), []byte("integration-example-passphrase"), &tss.PassphraseParams{
+			Time:    1,
+			Memory:  1024,
+			Threads: 1,
+		})
+		if openErr != nil {
+			for _, opened := range owned {
+				_ = opened.Close()
+			}
+			_ = os.RemoveAll(directory)
+			return nil, nil, openErr
+		}
+		stores[party] = store
+		owned = append(owned, store)
 	}
-	return store, func() {
-		store.Destroy()
+	return stores, func() {
+		for _, store := range owned {
+			_ = store.Close()
+		}
 		_ = os.RemoveAll(directory)
 	}, nil
 }

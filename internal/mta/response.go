@@ -23,20 +23,23 @@ const (
 	responseOpeningWireVersion = 1
 )
 
-// ResponseMessage carries an MtA ciphertext response and transcript proof.
+// ResponseMessage carries both Figure 25 ciphertexts and their transcript proof.
+// Ciphertext is D under the initiator's key and F is Y under the responder's key.
 type ResponseMessage struct {
 	Ciphertext []byte          `json:"ciphertext" wire:"1,bytes,max_bytes=paillier_ciphertext"`
-	Proof      zkpai.AffGProof `json:"proof" wire:"2,nested,max_bytes=zk_proof"`
+	F          []byte          `json:"f" wire:"2,bytes,max_bytes=paillier_ciphertext"`
+	Proof      zkpai.AffGProof `json:"proof" wire:"3,nested,max_bytes=zk_proof"`
 }
 
 // Clone returns an independent copy of the public MtA response.
 func (m ResponseMessage) Clone() ResponseMessage {
 	proof := m.Proof.Clone()
 	if proof == nil {
-		return ResponseMessage{Ciphertext: append([]byte(nil), m.Ciphertext...)}
+		return ResponseMessage{Ciphertext: append([]byte(nil), m.Ciphertext...), F: append([]byte(nil), m.F...)}
 	}
 	return ResponseMessage{
 		Ciphertext: append([]byte(nil), m.Ciphertext...),
+		F:          append([]byte(nil), m.F...),
 		Proof:      *proof,
 	}
 }
@@ -47,6 +50,7 @@ func (m *ResponseMessage) Destroy() {
 		return
 	}
 	clear(m.Ciphertext)
+	clear(m.F)
 	m.Proof.Destroy()
 	*m = ResponseMessage{}
 }
@@ -81,6 +85,9 @@ func (m *ResponseMessage) UnmarshalBinary(in []byte) error {
 func (m ResponseMessage) Validate() error {
 	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
 		return fmt.Errorf("invalid MtA response ciphertext: %w", err)
+	}
+	if err := validatePositiveIntegerBytes(m.F); err != nil {
+		return fmt.Errorf("invalid MtA response F ciphertext: %w", err)
 	}
 	if err := m.Proof.Validate(); err != nil {
 		return fmt.Errorf("invalid MtA response proof: %w", err)
@@ -229,11 +236,10 @@ func (o *ResponseOpening) Destroy() {
 	*o = ResponseOpening{}
 }
 
-// Verify checks that the private opening is an in-range AffG witness for the
-// exact public MtA response and curve commitments. It reveals no witness
-// material and uses the constant-time Paillier path for the secret multiplier
-// x.
-func (o *ResponseOpening) Verify(params zkpai.SecurityParams, start StartMessage, response ResponseMessage, aCommitment, bCommitment []byte, pkA, pkB *pai.PublicKey) error {
+// Verify checks that the private opening exactly reproduces the public D and F
+// ciphertexts. It reveals no witness material and uses the constant-time
+// Paillier path for the secret multiplier x.
+func (o *ResponseOpening) Verify(params zkpai.SecurityParams, start StartMessage, response ResponseMessage, pkA, pkB *pai.PublicKey) error {
 	if o == nil || o.x == nil || o.y == nil || o.rho == nil || o.rhoY == nil ||
 		o.x.FixedLen() == 0 || o.y.FixedLen() == 0 || o.rho.FixedLen() == 0 || o.rhoY.FixedLen() == 0 {
 		return errors.New("destroyed MtA response opening")
@@ -289,50 +295,15 @@ func (o *ResponseOpening) Verify(params zkpai.SecurityParams, start StartMessage
 	if err := pkA.ValidateCiphertext(responseCiphertext); err != nil {
 		return fmt.Errorf("invalid MtA response ciphertext: %w", err)
 	}
-	if err := pkB.ValidateCiphertext(response.Proof.Y); err != nil {
-		return fmt.Errorf("invalid MtA response Y ciphertext: %w", err)
+	responseF := new(big.Int).SetBytes(response.F)
+	if err := pkB.ValidateCiphertext(responseF); err != nil {
+		return fmt.Errorf("invalid MtA response F ciphertext: %w", err)
 	}
 	if err := validateResponseOpeningRandomness(o.rho, pkA, "rho"); err != nil {
 		return err
 	}
 	if err := validateResponseOpeningRandomness(o.rhoY, pkB, "rhoY"); err != nil {
 		return err
-	}
-
-	aPoint, err := secp.PointFromBytes(aCommitment)
-	if err != nil {
-		return fmt.Errorf("invalid a commitment: %w", err)
-	}
-	bPoint, err := secp.PointFromBytes(bCommitment)
-	if err != nil {
-		return fmt.Errorf("invalid b commitment: %w", err)
-	}
-	xScalar, err := secpScalarFromSecret(o.x)
-	if err != nil {
-		return errors.New("invalid MtA response opening x")
-	}
-	if !secp.Equal(secp.ScalarBaseMult(xScalar), bPoint) {
-		return errors.New("MtA response opening x does not open b commitment")
-	}
-	yScalar, err := signedSecretScalarModOrder(o.y)
-	if err != nil {
-		return errors.New("invalid MtA response opening y")
-	}
-	expectedYPoint := secp.ScalarBaseMult(yScalar)
-	proofYPoint, err := responseOpeningProofPoint(response.Proof.YPoint)
-	if err != nil {
-		return fmt.Errorf("invalid MtA response proof YPoint: %w", err)
-	}
-	if !secp.Equal(expectedYPoint, proofYPoint) {
-		return errors.New("MtA response opening y does not open proof YPoint")
-	}
-	proofAlphaPoint, err := responseOpeningProofPoint(response.Proof.AlphaPoint)
-	if err != nil {
-		return fmt.Errorf("invalid MtA response proof AlphaPoint: %w", err)
-	}
-	expectedAlphaPoint := secp.Add(secp.ScalarMult(aPoint, xScalar), expectedYPoint)
-	if !secp.Equal(expectedAlphaPoint, proofAlphaPoint) {
-		return errors.New("MtA response opening does not open proof AlphaPoint")
 	}
 
 	xBytes := o.x.FixedBytes()
@@ -365,8 +336,8 @@ func (o *ResponseOpening) Verify(params zkpai.SecurityParams, start StartMessage
 		return fmt.Errorf("verify MtA response Y ciphertext: %w", err)
 	}
 	defer secret.ClearBigInt(expectedProofY)
-	if expectedProofY.Cmp(response.Proof.Y) != 0 {
-		return errors.New("MtA response opening does not reproduce proof Y ciphertext")
+	if expectedProofY.Cmp(responseF) != 0 {
+		return errors.New("MtA response opening does not reproduce F ciphertext")
 	}
 	return nil
 }
@@ -405,22 +376,11 @@ func validateResponseOpeningRandomness(randomness *secret.Scalar, pk *pai.Public
 	return nil
 }
 
-func responseOpeningProofPoint(encoded []byte) (*secp.Point, error) {
-	if len(encoded) == 0 {
-		return secp.NewInfinity(), nil
-	}
-	return secp.PointFromBytes(encoded)
-}
-
 // Reprove creates a fresh verifier-specific Πaff-g proof for the exact public
 // response bound to this opening.
-func (o *ResponseOpening) Reprove(params zkpai.SecurityParams, reader io.Reader, domain []byte, start StartMessage, response ResponseMessage, aCommitment, bCommitment []byte, pkA, pkB *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*zkpai.AffGProof, error) {
+func (o *ResponseOpening) Reprove(params zkpai.SecurityParams, reader io.Reader, domain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, pkA, pkB *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*zkpai.AffGProof, error) {
 	if o == nil || o.x == nil || o.y == nil || o.rho == nil || o.rhoY == nil {
 		return nil, errors.New("destroyed MtA response opening")
-	}
-	aPoint, err := secp.PointFromBytes(aCommitment)
-	if err != nil {
-		return nil, err
 	}
 	bPoint, err := secp.PointFromBytes(bCommitment)
 	if err != nil {
@@ -431,12 +391,123 @@ func (o *ResponseOpening) Reprove(params zkpai.SecurityParams, reader io.Reader,
 		ProverPaillierN:   pkB,
 		C:                 new(big.Int).SetBytes(start.Ciphertext),
 		D:                 new(big.Int).SetBytes(response.Ciphertext),
-		Y:                 response.Proof.Y,
+		Y:                 new(big.Int).SetBytes(response.F),
 		X:                 bPoint,
-		K:                 aPoint,
 		VerifierAux:       verifierAux,
 	}
 	return zkpai.ProveAffG(params, domain, stmt, zkpai.AffGWitness{X: o.x, Y: o.y, Rho: o.rho, RhoY: o.rhoY}, reader)
+}
+
+// ProveAffGStar proves the exact setup-less Figure 9 affine statement for an
+// accepted MtA response without exposing the retained response opening.
+func (o *ResponseOpening) ProveAffGStar(
+	params zkpai.SecurityParams,
+	reader io.Reader,
+	domain []byte,
+	start StartMessage,
+	response ResponseMessage,
+	xCommitment []byte,
+	receiverPK, proverPK *pai.PublicKey,
+) (*zkpai.AffGStarProof, error) {
+	if o == nil || o.x == nil || o.y == nil || o.rho == nil || o.rhoY == nil {
+		return nil, errors.New("destroyed MtA response opening")
+	}
+	if err := o.Verify(params, start, response, receiverPK, proverPK); err != nil {
+		return nil, err
+	}
+	stmt, err := BuildFigure9AffGStarStatement(params, start, response, xCommitment, receiverPK, proverPK)
+	if err != nil {
+		return nil, err
+	}
+	return zkpai.ProveAffGStar(params, domain, stmt, zkpai.AffGStarWitness{
+		X:   o.x,
+		Y:   o.y,
+		Rho: o.rho,
+		Mu:  o.rhoY,
+	}, reader)
+}
+
+// BuildFigure9AffGStarStatement constructs the public Figure 9 Πaff-g*
+// statement from the exact stored MtA start and response records.
+func BuildFigure9AffGStarStatement(
+	params zkpai.SecurityParams,
+	start StartMessage,
+	response ResponseMessage,
+	xCommitment []byte,
+	receiverPK, proverPK *pai.PublicKey,
+) (zkpai.AffGStarStatement, error) {
+	if err := params.Validate(); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 security parameters: %w", err)
+	}
+	if receiverPK == nil || proverPK == nil {
+		return zkpai.AffGStarStatement{}, errors.New("nil Figure 9 Paillier public key")
+	}
+	if err := receiverPK.Validate(); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 receiver Paillier key: %w", err)
+	}
+	if err := proverPK.Validate(); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 prover Paillier key: %w", err)
+	}
+	if err := params.CheckPaillierModulus(receiverPK); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 receiver Paillier modulus: %w", err)
+	}
+	if err := params.CheckPaillierModulus(proverPK); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 prover Paillier modulus: %w", err)
+	}
+	if err := start.Validate(); err != nil {
+		return zkpai.AffGStarStatement{}, err
+	}
+	if err := response.Validate(); err != nil {
+		return zkpai.AffGStarStatement{}, err
+	}
+	xPoint, err := secp.PointFromBytes(xCommitment)
+	if err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 multiplier commitment: %w", err)
+	}
+	c := new(big.Int).SetBytes(start.Ciphertext)
+	d := new(big.Int).SetBytes(response.Ciphertext)
+	y := new(big.Int).SetBytes(response.F)
+	if err := receiverPK.ValidateCiphertext(c); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 C ciphertext: %w", err)
+	}
+	if err := receiverPK.ValidateCiphertext(d); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 D ciphertext: %w", err)
+	}
+	if err := proverPK.ValidateCiphertext(y); err != nil {
+		return zkpai.AffGStarStatement{}, fmt.Errorf("invalid Figure 9 Y ciphertext: %w", err)
+	}
+	return zkpai.AffGStarStatement{
+		ReceiverPaillierN: receiverPK,
+		ProverPaillierN:   proverPK,
+		C:                 c,
+		D:                 d,
+		Y:                 y,
+		X:                 xPoint,
+	}, nil
+}
+
+// VerifyFigure9AffGStar verifies a setup-less Figure 9 proof against the exact
+// MtA records from which its public statement is derived.
+func VerifyFigure9AffGStar(
+	params zkpai.SecurityParams,
+	domain []byte,
+	start StartMessage,
+	response ResponseMessage,
+	xCommitment []byte,
+	receiverPK, proverPK *pai.PublicKey,
+	proof *zkpai.AffGStarProof,
+) error {
+	if proof == nil {
+		return errors.New("missing Figure 9 Πaff-g* proof")
+	}
+	stmt, err := BuildFigure9AffGStarStatement(params, start, response, xCommitment, receiverPK, proverPK)
+	if err != nil {
+		return err
+	}
+	if err := zkpai.VerifyAffGStar(params, domain, stmt, proof); err != nil {
+		return fmt.Errorf("invalid Figure 9 Πaff-g* proof: %w", err)
+	}
+	return nil
 }
 
 // Respond creates Enc(a*b+beta) under the initiator's Paillier key and proves
@@ -490,9 +561,84 @@ func RespondWithOpening(
 	if err := VerifyStart(params, startProofDomain, start, aCommitment, pkA, startVerifierAux, startProof); err != nil {
 		return nil, nil, nil, err
 	}
+	return respondFigure8WithOpeningCore(params, reader, responseDomain, start, b, bCommitment, pkA, pkB, affGVerifierAux)
+}
+
+// RespondFigure8 creates and proves a Figure 8 MtA response after the caller
+// has already verified the round-one Πenc-elg proof.
+func RespondFigure8(
+	params zkpai.SecurityParams,
+	reader io.Reader,
+	responseDomain []byte,
+	start StartMessage,
+	b *secret.Scalar,
+	bCommitment []byte,
+	pkA, pkB *pai.PublicKey,
+	affGVerifierAux *zkpai.RingPedersenParams,
+) (*ResponseMessage, *secret.Scalar, error) {
+	response, beta, opening, err := RespondFigure8WithOpening(
+		params, reader, responseDomain, start, b, bCommitment, pkA, pkB, affGVerifierAux,
+	)
+	if opening != nil {
+		opening.Destroy()
+	}
+	return response, beta, err
+}
+
+// RespondFigure8WithOpening is RespondFigure8 plus ownership of the private
+// red-alert witness. Its internal mask is the negation of Figure 8's beta:
+// D encrypts x*k+mask, F encrypts mask, and the returned additive share is
+// -mask. This is algebraically identical to the paper's D=x*K-beta, F=Enc(beta),
+// local +beta convention while matching the plus-form Figure 25 relation.
+func RespondFigure8WithOpening(
+	params zkpai.SecurityParams,
+	reader io.Reader,
+	responseDomain []byte,
+	start StartMessage,
+	b *secret.Scalar,
+	bCommitment []byte,
+	pkA, pkB *pai.PublicKey,
+	affGVerifierAux *zkpai.RingPedersenParams,
+) (*ResponseMessage, *secret.Scalar, *ResponseOpening, error) {
+	return respondFigure8WithOpeningCore(params, reader, responseDomain, start, b, bCommitment, pkA, pkB, affGVerifierAux)
+}
+
+func respondFigure8WithOpeningCore(
+	params zkpai.SecurityParams,
+	reader io.Reader,
+	responseDomain []byte,
+	start StartMessage,
+	b *secret.Scalar,
+	bCommitment []byte,
+	pkA, pkB *pai.PublicKey,
+	affGVerifierAux *zkpai.RingPedersenParams,
+) (*ResponseMessage, *secret.Scalar, *ResponseOpening, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if affGVerifierAux == nil {
+		return nil, nil, nil, errors.New("nil RingPedersenParams")
+	}
+	if err := start.Validate(); err != nil {
+		return nil, nil, nil, err
+	}
+	plaintextBits := max(params.Ell*2, params.EllPrime) + 1
+	if pkA == nil || pkA.N == nil || uint32(pkA.N.BitLen()) <= plaintextBits {
+		return nil, nil, nil, errors.New("initiator Paillier modulus is too small for unwrapped MtA plaintext")
+	}
+	if pkB == nil || pkB.N == nil || uint32(pkB.N.BitLen()) <= params.EllPrime {
+		return nil, nil, nil, errors.New("responder Paillier modulus is too small for affine mask")
+	}
 	bScalar, err := secpScalarFromSecret(b)
 	if err != nil {
 		return nil, nil, nil, errors.New("b out of range")
+	}
+	bPoint, err := secp.PointFromBytes(bCommitment)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("invalid multiplier commitment: %w", err)
+	}
+	if !secp.Equal(bPoint, secp.ScalarBaseMult(bScalar)) {
+		return nil, nil, nil, errors.New("b does not open multiplier commitment")
 	}
 
 	encA := new(big.Int).SetBytes(start.Ciphertext)
@@ -538,21 +684,13 @@ func RespondWithOpening(
 	}
 	defer yRandomness.Destroy()
 
-	// Curve commitment X = b * G.
-	X := secp.ScalarBaseMult(bScalar)
-	K, err := secp.PointFromBytes(aCommitment)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("invalid initiator commitment: %w", err)
-	}
-
 	stmt := zkpai.AffGStatement{
 		ReceiverPaillierN: pkA,
 		ProverPaillierN:   pkB,
 		C:                 encA,
 		D:                 response,
 		Y:                 yCiphertext,
-		X:                 X,
-		K:                 K,
+		X:                 bPoint,
 		VerifierAux:       affGVerifierAux,
 	}
 	witness := zkpai.AffGWitness{
@@ -576,5 +714,5 @@ func RespondWithOpening(
 		return nil, nil, nil, err
 	}
 	opening := &ResponseOpening{x: b.Clone(), y: beta.Clone(), rho: betaRandomness.Clone(), rhoY: yRandomness.Clone()}
-	return &ResponseMessage{Ciphertext: response.Bytes(), Proof: *proof}, betaShare, opening, nil
+	return &ResponseMessage{Ciphertext: response.Bytes(), F: yCiphertext.Bytes(), Proof: *proof}, betaShare, opening, nil
 }

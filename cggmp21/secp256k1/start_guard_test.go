@@ -1,11 +1,13 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/tssrun"
 )
 
 func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
@@ -34,8 +36,28 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	presignPlan := &PresignPlan{state: &presignPlanState{sessionID: sessionID}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
-	signPlan := &SignPlan{state: &signPlanState{sessionID: sessionID}, limits: DefaultLimits()}
+	presignPlan := &PresignPlan{state: &presignPlanState{
+		sessionID: sessionID,
+		presignID: bytes.Repeat([]byte{0x31}, 32),
+		epochID:   bytes.Repeat([]byte{0x32}, 32),
+		context:   tss.SigningContext{KeyID: "guard-test-key"},
+	}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
+	presignEpochID, err := tssrun.NewEpochID(presignPlan.state.epochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presignBinding := tssrun.GenerationBinding{KeyID: "guard-test-key", KeyGeneration: "guard-test-generation", EpochID: presignEpochID}
+	protocolPresignID := bytes.Repeat([]byte{0x34}, 32)
+	signPlan := &SignPlan{state: &signPlanState{sessionID: sessionID, protocolPresignID: protocolPresignID}, limits: DefaultLimits()}
+	presignSlot, err := PresignSlotID(protocolPresignID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epochID, err := tssrun.NewEpochID(bytes.Repeat([]byte{0x35}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signBinding := tssrun.GenerationBinding{KeyID: "guard-test-key", KeyGeneration: "guard-test-generation", EpochID: epochID}
 	refreshPlan := &RefreshPlan{state: &refreshPlanState{
 		sessionID:               sessionID,
 		threshold:               2,
@@ -47,7 +69,13 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		oldKeygenTranscriptHash: key.state.KeygenTranscriptHash,
 		oldPlanHash:             key.state.PlanHash,
 		oldCommitmentsHash:      oldCommitmentsHash,
+		sourceEpochID:           bytes.Repeat([]byte{0x33}, 32),
 	}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
+	refreshEpochID, err := tssrun.NewEpochID(refreshPlan.state.sourceEpochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshBinding := tssrun.GenerationBinding{KeyID: "guard-refresh-key", KeyGeneration: "guard-refresh-source", EpochID: refreshEpochID}
 	plan := &ResharePlan{state: &resharePlanState{
 		SessionID:             sessionID,
 		CurveID:               reshareCurveID,
@@ -63,6 +91,11 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		OldVerificationShares: map[tss.PartyID][]byte{},
 		SecurityParams:        DefaultSecurityParams(),
 	}, limits: DefaultLimits()}
+	reshareEpochID, err := tssrun.NewEpochID(bytes.Repeat([]byte{0x36}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reshareBinding := tssrun.GenerationBinding{KeyID: "guard-reshare-key", KeyGeneration: "guard-reshare-source", EpochID: reshareEpochID}
 
 	type startCase struct {
 		name    string
@@ -86,7 +119,10 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartPresign(key, presignPlan, tss.LocalConfig{Self: 1}, guard)
+				_, out, err := StartPresign(presignPlan, PresignRuntime{
+					Local: tss.LocalConfig{Self: 1}, Guard: guard,
+					LifecycleStore: newTestLifecycleStore(), Binding: presignBinding,
+				})
 				return out, false, err
 			},
 		},
@@ -96,11 +132,13 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				p := minimalPresign()
-				_, out, err := StartSign(key, signPlan, SignRuntime{
-					Local:        tss.LocalConfig{Self: 1},
-					Guard:        guard,
-					Presign:      p,
-					AttemptStore: newTestSignAttemptStore(),
+				_, out, err := StartSign(signPlan, SignRuntime{
+					Local:          tss.LocalConfig{Self: 1},
+					Guard:          guard,
+					LifecycleStore: newTestLifecycleStore(),
+					Binding:        signBinding,
+					PresignID:      presignSlot,
+					AttemptID:      "guard-test-attempt",
 				})
 				return out, IsPresignConsumed(p), err
 			},
@@ -110,7 +148,10 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartRefresh(key, refreshPlan, tss.LocalConfig{Self: 1}, guard)
+				_, out, err := StartRefresh(refreshPlan, RefreshRuntime{
+					Local: tss.LocalConfig{Self: 1}, Guard: guard,
+					LifecycleStore: newTestLifecycleStore(), Binding: refreshBinding, TargetKeyGeneration: "guard-refresh-target",
+				})
 				return out, false, err
 			},
 		},
@@ -119,7 +160,10 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.NewPartySet(1, 2, 3, 4),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartReshareDealer(key, plan, tss.LocalConfig{Self: 1}, guard)
+				_, out, err := StartReshareDealer(plan, ReshareRuntime{
+					Local: tss.LocalConfig{Self: 1}, Guard: guard,
+					LifecycleStore: newTestLifecycleStore(), Binding: reshareBinding, TargetKeyGeneration: "guard-reshare-target",
+				})
 				return out, false, err
 			},
 		},
@@ -128,7 +172,10 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    3,
 			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartReshareReceiver(plan, tss.LocalConfig{Self: 3}, guard)
+				_, out, err := StartReshareReceiver(plan, ReshareRuntime{
+					Local: tss.LocalConfig{Self: 3}, Guard: guard,
+					LifecycleStore: newTestLifecycleStore(), Binding: reshareBinding, TargetKeyGeneration: "guard-reshare-target",
+				})
 				return out, false, err
 			},
 		},
@@ -137,7 +184,10 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartReshareOverlap(key, plan, tss.LocalConfig{Self: 1}, guard)
+				_, out, err := StartReshareOverlap(plan, ReshareRuntime{
+					Local: tss.LocalConfig{Self: 1}, Guard: guard,
+					LifecycleStore: newTestLifecycleStore(), Binding: reshareBinding, TargetKeyGeneration: "guard-reshare-target",
+				})
 				return out, false, err
 			},
 		},

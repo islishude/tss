@@ -55,7 +55,7 @@ func TestMTAProductShares(t *testing.T) {
 	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, aCommit, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpA, rpA); err == nil {
 		t.Fatal("start proof for different verifier accepted")
 	}
-	alphaShare, err := Finish(params, responseDomain, start.Message, *response, aCommit, bCommit, skA, skB.PublicKey, rpA)
+	alphaShare, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, skB.PublicKey, rpA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestMTAProductShares(t *testing.T) {
 		t.Fatal("JSON MtA response decoded")
 	}
 	response.Proof.TranscriptHash[0] ^= 1
-	if _, err := Finish(params, responseDomain, start.Message, *response, aCommit, bCommit, skA, skB.PublicKey, rpA); err == nil {
+	if _, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, skB.PublicKey, rpA); err == nil {
 		t.Fatal("tampered response proof verified")
 	}
 }

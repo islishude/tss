@@ -10,6 +10,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/tssrun"
 )
 
 const reshareCurveID = "secp256k1"
@@ -42,6 +43,8 @@ type ResharePlanSnapshot struct {
 	ChainCode                 []byte
 	PaillierBits              int
 	SecurityParams            SecurityParams
+	SourceEpoch               *EpochContext
+	SourceEpochID             []byte
 }
 
 // Clone returns a deep copy of the reshare plan snapshot.
@@ -62,6 +65,8 @@ func (s ResharePlanSnapshot) Clone() ResharePlanSnapshot {
 		ChainCode:                 bytes.Clone(s.ChainCode),
 		PaillierBits:              s.PaillierBits,
 		SecurityParams:            s.SecurityParams,
+		SourceEpoch:               s.SourceEpoch.Clone(),
+		SourceEpochID:             bytes.Clone(s.SourceEpochID),
 	}
 }
 
@@ -82,6 +87,8 @@ type resharePlanState struct {
 	OldPaillierProofSessionID tss.SessionID          `wire:"14,bytes,len=32"`                                 // Exact lifecycle session that produced the old key generation.
 	OldKeygenTranscriptHash   []byte                 `wire:"15,bytes,len=32"`                                 // Exact transcript of the source key generation.
 	OldPlanHash               []byte                 `wire:"16,bytes,len=32"`                                 // Exact lifecycle plan that produced the source key generation.
+	SourceEpoch               *EpochContext          `wire:"17,record"`                                       // Exact public epoch whose dynamically identified shares are being reshared.
+	SourceEpochID             []byte                 `wire:"18,bytes,len=32"`                                 // Explicit source-epoch identity; must equal SourceEpoch.EpochID.
 }
 
 // SessionID returns the reshare session identifier.
@@ -137,7 +144,30 @@ func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 		ChainCode:                 bytes.Clone(p.state.ChainCode),
 		PaillierBits:              p.state.PaillierBits,
 		SecurityParams:            p.state.SecurityParams,
+		SourceEpoch:               p.state.SourceEpoch.Clone(),
+		SourceEpochID:             bytes.Clone(p.state.SourceEpochID),
 	}, true
+}
+
+// SourceEpoch returns a caller-owned copy of the exact source epoch.
+func (p *ResharePlan) SourceEpoch() (*EpochContext, bool) {
+	if p == nil || p.state == nil || p.state.SourceEpoch == nil {
+		return nil, false
+	}
+	return p.state.SourceEpoch.Clone(), true
+}
+
+// SourceEpochID returns the immutable exact source epoch ID. The all-zero
+// value reports an unavailable or invalid plan.
+func (p *ResharePlan) SourceEpochID() tssrun.EpochID {
+	if p == nil || p.state == nil {
+		return tssrun.EpochID{}
+	}
+	id, err := tssrun.NewEpochID(p.state.SourceEpochID)
+	if err != nil {
+		return tssrun.EpochID{}
+	}
+	return id
 }
 
 // OldVerificationShare returns a caller-owned old verification share for party.
@@ -226,6 +256,7 @@ type ReshareOverlapSession = ReshareSession
 // ResharePlanOption configures CGGMP21 reshare plan construction.
 type ResharePlanOption struct {
 	OldKey         *KeyShare
+	SourceEpoch    *EpochContext
 	SessionID      tss.SessionID
 	DealerParties  tss.PartySet
 	NewParties     tss.PartySet
@@ -248,6 +279,19 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 	}
 	if err := oldKey.ValidateWithLimits(limits); err != nil {
 		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old key share: %w", err))
+	}
+	sourceEpoch := option.SourceEpoch
+	if sourceEpoch == nil {
+		sourceEpoch = oldKey.state.Epoch
+	}
+	if sourceEpoch == nil {
+		return nil, invalidPlanConfig(party, errors.New("reshare source epoch is required"))
+	}
+	if err := sourceEpoch.ValidateWithLimits(limits); err != nil {
+		return nil, invalidPlanConfig(party, fmt.Errorf("invalid reshare source epoch: %w", err))
+	}
+	if oldKey.state.Epoch == nil || !epochContextsEqual(oldKey.state.Epoch, sourceEpoch, limits) {
+		return nil, invalidPlanConfig(party, errors.New("reshare source epoch does not exactly match old key share"))
 	}
 	securityParams := securityParamsForArtifact(oldKey.state.SecurityParams, option.SecurityParams)
 	if option.SecurityParams != nil && validSecurityParams(oldKey.state.SecurityParams) && oldKey.state.SecurityParams != *option.SecurityParams {
@@ -292,6 +336,8 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		OldPaillierProofSessionID: oldKey.state.PaillierProofSessionID,
 		OldKeygenTranscriptHash:   bytes.Clone(oldKey.state.KeygenTranscriptHash),
 		OldPlanHash:               bytes.Clone(oldKey.state.PlanHash),
+		SourceEpoch:               sourceEpoch.Clone(),
+		SourceEpochID:             bytes.Clone(sourceEpoch.EpochID),
 	}, limits: limits}
 	if len(plan.state.DealerParties) == 0 {
 		plan.state.DealerParties = plan.state.OldParties.Clone()
@@ -330,6 +376,15 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	}
 	if !p.state.OldPaillierProofSessionID.Valid() {
 		return errors.New("reshare plan old Paillier proof session id must not be zero")
+	}
+	if p.state.SourceEpoch == nil {
+		return errors.New("reshare source epoch is required")
+	}
+	if err := p.state.SourceEpoch.ValidateWithLimits(limits); err != nil {
+		return fmt.Errorf("invalid reshare source epoch: %w", err)
+	}
+	if len(p.state.SourceEpochID) != sha256.Size || !bytes.Equal(p.state.SourceEpochID, p.state.SourceEpoch.EpochID) {
+		return errors.New("reshare source epoch id does not exactly match source epoch")
 	}
 	if len(p.state.OldKeygenTranscriptHash) != sha256.Size {
 		return errors.New("old keygen transcript hash must be 32 bytes")
@@ -381,6 +436,9 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	if err := wire.ValidateStrictSortedIDs(p.state.OldParties); err != nil {
 		return fmt.Errorf("invalid old participant set: %w", err)
 	}
+	if p.state.SourceEpoch.Threshold != p.state.OldThreshold || len(p.state.SourceEpoch.Identifiers) != len(p.state.OldParties) {
+		return errors.New("reshare source epoch threshold or party count does not match old committee")
+	}
 	if err := wire.ValidateStrictSortedIDs(p.state.DealerParties); err != nil {
 		return fmt.Errorf("invalid dealer set: %w", err)
 	}
@@ -409,7 +467,12 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 		if _, err := secp.PointFromBytes(verificationShare); err != nil {
 			return fmt.Errorf("invalid old verification share for party %d: %w", id, err)
 		}
-		expected, err := secp.EvalCommitments(p.state.OldGroupCommitments, id)
+		identifier, ok := p.state.SourceEpoch.Identifier(id)
+		if !ok {
+			return fmt.Errorf("missing source epoch identifier for party %d", id)
+		}
+		expected, err := evaluateEncodedCommitmentsAtIdentifier(p.state.OldGroupCommitments, identifier)
+		clear(identifier)
 		if err != nil {
 			return fmt.Errorf("evaluate old verification share for party %d: %w", id, err)
 		}
@@ -419,6 +482,10 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 		}
 		if !bytes.Equal(expectedBytes, verificationShare) {
 			return fmt.Errorf("old verification share mismatch for party %d", id)
+		}
+		epochShare, ok := p.state.SourceEpoch.PublicShare(id)
+		if !ok || !bytes.Equal(epochShare.PublicKey, verificationShare) {
+			return fmt.Errorf("source epoch public share mismatch for party %d", id)
 		}
 	}
 	if len(p.state.ChainCode) != 32 {
@@ -459,11 +526,41 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t.AppendBytes("chain_code", p.state.ChainCode)
 	t.AppendUint32("paillier_bits", uint32(p.state.PaillierBits))
 	appendSecurityParamsTranscript(t, p.state.SecurityParams)
+	sourceEpoch, err := p.state.SourceEpoch.MarshalBinaryWithLimits(p.limits)
+	if err != nil {
+		return nil, err
+	}
+	t.AppendBytes("source_epoch", sourceEpoch)
+	t.AppendBytes("source_epoch_id", p.state.SourceEpochID)
 	for _, id := range p.state.OldParties {
 		t.AppendUint32("old_party", id)
 		t.AppendBytes("old_verification_share", p.state.OldVerificationShares[id])
 	}
 	return t.Sum(), nil
+}
+
+func epochContextsEqual(a, b *EpochContext, limits Limits) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	aRaw, err := a.MarshalBinaryWithLimits(limits)
+	if err != nil {
+		return false
+	}
+	bRaw, err := b.MarshalBinaryWithLimits(limits)
+	return err == nil && bytes.Equal(aRaw, bRaw)
+}
+
+func evaluateEncodedCommitmentsAtIdentifier(commitments [][]byte, identifier []byte) (*secp.Point, error) {
+	points := make([]*secp.Point, len(commitments))
+	for i, encoded := range commitments {
+		point, err := secp.PointFromBytes(encoded)
+		if err != nil {
+			return nil, err
+		}
+		points[i] = point
+	}
+	return evaluateCommitmentPointsAtIdentifier(points, identifier)
 }
 
 // IsDealer reports whether party is in the plan's old dealer set.

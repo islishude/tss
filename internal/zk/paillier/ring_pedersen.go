@@ -172,6 +172,21 @@ func validateRPParamsForProof(sp SecurityParams, params *RingPedersenParams) err
 	return sp.CheckRingPedersenModulus(params.N)
 }
 
+// validateAuxModulusDistinct rejects reuse of any statement Paillier modulus
+// as the verifier's Ring-Pedersen modulus. The proof assumptions require an
+// independently generated auxiliary modulus, even when both sizes are valid.
+func validateAuxModulusDistinct(params *RingPedersenParams, keys ...*pai.PublicKey) error {
+	if params == nil || params.N == nil {
+		return errors.New("nil Ring-Pedersen parameters")
+	}
+	for _, key := range keys {
+		if key != nil && key.N != nil && params.N.Cmp(key.N) == 0 {
+			return errors.New("Ring-Pedersen modulus must differ from every Paillier modulus in the statement")
+		}
+	}
+	return nil
+}
+
 // --- Ring-Pedersen parameter generation and Πprm proof ---
 
 // GenerateRingPedersenParams creates Ring-Pedersen public parameters tied to

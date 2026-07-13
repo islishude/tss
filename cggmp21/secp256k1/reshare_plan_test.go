@@ -90,6 +90,11 @@ func TestResharePlanDigestBindsPublicInputs(t *testing.T) {
 		{name: "old Paillier proof session", mutate: func(state *resharePlanState) { state.OldPaillierProofSessionID[0] ^= 1 }},
 		{name: "old transcript", mutate: func(state *resharePlanState) { state.OldKeygenTranscriptHash[0] ^= 1 }},
 		{name: "old plan", mutate: func(state *resharePlanState) { state.OldPlanHash[0] ^= 1 }},
+		{name: "source epoch", mutate: func(state *resharePlanState) {
+			state.SourceEpoch.AuxiliaryDigest[0] ^= 1
+			state.SourceEpoch.EpochID = state.SourceEpoch.computeID()
+			state.SourceEpochID = bytes.Clone(state.SourceEpoch.EpochID)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			changed := cloneResharePlan(plan)
@@ -127,6 +132,8 @@ func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
 	snapshot.ChainCode[0] = 99
 	snapshot.OldKeygenTranscriptHash[0] = 99
 	snapshot.OldPlanHash[0] = 99
+	snapshot.SourceEpoch.EpochID[0] ^= 1
+	snapshot.SourceEpochID[0] ^= 1
 	clonedSnapshot := snapshot.Clone()
 	clonedSnapshot.OldKeygenTranscriptHash[1] = 98
 	clonedSnapshot.OldPlanHash[1] = 98
@@ -144,6 +151,10 @@ func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
 		snapshot.OldKeygenTranscriptHash[1] == 98 ||
 		snapshot.OldPlanHash[1] == 98 {
 		t.Fatal("ResharePlan snapshot aliases internal state")
+	}
+	if bytes.Equal(snapshot.SourceEpoch.EpochID, plan.state.SourceEpoch.EpochID) ||
+		bytes.Equal(snapshot.SourceEpochID, plan.state.SourceEpochID) {
+		t.Fatal("ResharePlan source epoch snapshot aliases internal state")
 	}
 }
 
@@ -214,6 +225,8 @@ func TestResharePlanRejectsDifferentSourceGeneration(t *testing.T) {
 		{name: "Paillier proof session", mutate: func(state *resharePlanState) { state.OldPaillierProofSessionID[0] ^= 1 }},
 		{name: "keygen transcript", mutate: func(state *resharePlanState) { state.OldKeygenTranscriptHash[0] ^= 1 }},
 		{name: "lifecycle plan", mutate: func(state *resharePlanState) { state.OldPlanHash[0] ^= 1 }},
+		{name: "source epoch id", mutate: func(state *resharePlanState) { state.SourceEpochID[0] ^= 1 }},
+		{name: "source epoch rid", mutate: func(state *resharePlanState) { state.SourceEpoch.RID[0] ^= 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mixed := cloneResharePlan(plan)
@@ -373,6 +386,39 @@ func minimalValidResharePlan(t *testing.T) *ResharePlan {
 	oldPaillierProofSession[0] = 2
 	publicKey := mustResharePlanPoint(t, 1)
 	linearCommitment := mustResharePlanPoint(t, 1)
+	oldParties := tss.NewPartySet(1, 2, 3)
+	var rid tss.SessionID
+	rid[0] = 3
+	publicShares := make([]EpochPublicShare, len(oldParties))
+	commitments := [][]byte{publicKey, linearCommitment}
+	verificationShares := make(map[tss.PartyID][]byte, len(oldParties))
+	for i, party := range oldParties {
+		identifier, err := DeriveEpochIdentifier(oldPaillierProofSession, rid, party)
+		if err != nil {
+			t.Fatal(err)
+		}
+		point, err := evaluateEncodedCommitmentsAtIdentifier(commitments, identifier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := secp.PointBytes(point)
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicShares[i] = EpochPublicShare{Party: party, PublicKey: encoded}
+		verificationShares[party] = bytes.Clone(encoded)
+	}
+	epoch, err := NewEpochContext(EpochContextOption{
+		SID:             oldPaillierProofSession,
+		RID:             rid,
+		Threshold:       2,
+		Parties:         oldParties,
+		PublicShares:    publicShares,
+		AuxiliaryDigest: bytes.Repeat([]byte{0x55}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &ResharePlan{state: &resharePlanState{
 		SessionID:                 sessionID,
 		OldPaillierProofSessionID: oldPaillierProofSession,
@@ -380,20 +426,18 @@ func minimalValidResharePlan(t *testing.T) *ResharePlan {
 		OldPlanHash:               bytes.Repeat([]byte{0x33}, 32),
 		CurveID:                   reshareCurveID,
 		OldGroupPublicKey:         publicKey,
-		OldGroupCommitments:       [][]byte{publicKey, linearCommitment},
-		OldVerificationShares: map[tss.PartyID][]byte{
-			1: mustResharePlanPoint(t, 2),
-			2: mustResharePlanPoint(t, 3),
-			3: mustResharePlanPoint(t, 4),
-		},
-		OldParties:     tss.NewPartySet(1, 2, 3),
-		OldThreshold:   2,
-		DealerParties:  tss.NewPartySet(1, 2),
-		NewParties:     tss.NewPartySet(2, 3),
-		NewThreshold:   2,
-		ChainCode:      bytes.Repeat([]byte{0x44}, 32),
-		PaillierBits:   testResharePlanPaillierBits,
-		SecurityParams: DefaultSecurityParams(),
+		OldGroupCommitments:       commitments,
+		OldVerificationShares:     verificationShares,
+		OldParties:                oldParties,
+		OldThreshold:              2,
+		DealerParties:             tss.NewPartySet(1, 2),
+		NewParties:                tss.NewPartySet(2, 3),
+		NewThreshold:              2,
+		ChainCode:                 bytes.Repeat([]byte{0x44}, 32),
+		PaillierBits:              testResharePlanPaillierBits,
+		SecurityParams:            DefaultSecurityParams(),
+		SourceEpoch:               epoch,
+		SourceEpochID:             bytes.Clone(epoch.EpochID),
 	}, limits: DefaultLimits()}
 }
 

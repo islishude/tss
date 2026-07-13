@@ -1,12 +1,40 @@
 package secp256k1
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
+
+func FuzzCGGMPPresignCanonicalDecode(f *testing.F) {
+	presign := minimalCGGMP21Presign(f)
+	seed, err := presign.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		presign.Destroy()
+		f.Fatal(err)
+	}
+	presign.Destroy()
+	f.Add(seed)
+	f.Fuzz(func(t *testing.T, in []byte) {
+		var decoded Presign
+		if err := decoded.UnmarshalBinaryWithLimits(in, testLimits()); err != nil {
+			return
+		}
+		defer decoded.Destroy()
+		canonical, err := decoded.MarshalBinaryWithLimits(testLimits())
+		if err != nil {
+			t.Fatalf("accepted presign failed canonical re-encode: %v", err)
+		}
+		defer clear(canonical)
+		if !bytes.Equal(canonical, in) {
+			t.Fatal("presign decoder accepted a non-canonical wire representation")
+		}
+	})
+}
 
 // TestFast_RejectsWrongWireTypes verifies that UnmarshalKeyShare and
 // UnmarshalPresign reject messages with mismatched wire type identifiers.
@@ -26,13 +54,6 @@ func TestFast_RejectsWrongWireTypes(t *testing.T) {
 	}
 	if _, err := tss.DecodeBinary[Presign](wrongPresign); err == nil {
 		t.Fatal("wrong presign wire type accepted")
-	}
-	wrongAttempt, err := wire.MarshalFields(signAttemptWireVersion, "wrong.secp256k1.sign-attempt", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tss.DecodeBinaryValue[SignAttemptRecord](wrongAttempt); err == nil {
-		t.Fatal("wrong sign attempt wire type accepted")
 	}
 }
 
@@ -89,7 +110,7 @@ func TestFast_PresignStateCodecAppliesCallerLimits(t *testing.T) {
 		t.Fatal("presign state unmarshal ignored caller field limits")
 	}
 	missing := limits.fieldLimits()
-	delete(missing, "signprep_proof")
+	delete(missing, "point")
 	if _, err := wire.Marshal(presign.state, wire.WithFieldLimitsForMarshal(missing)); err == nil {
 		t.Fatal("presign state marshal accepted missing field limit")
 	}
@@ -101,14 +122,24 @@ func TestFast_PresignCodecReceivesCompleteLimits(t *testing.T) {
 	presign := minimalCGGMP21Presign(t)
 	presign.state.Threshold = 1
 	presign.state.Signers = tss.NewPartySet(1)
-	presign.state.VerifyShares = presign.state.VerifyShares[:1]
-	presign.state.Verification.Entries = presign.state.Verification.Entries[:1]
-	destroyMTAContributions(presign.state.IdentificationTranscripts[0].Contributions)
-	presign.state.IdentificationTranscripts[1].destroy()
-	presign.state.IdentificationTranscripts = presign.state.IdentificationTranscripts[:1]
-	presign.state.IdentificationTranscripts[0].Contributions = nil
-	destroyPresignSigmaOpeningRecords(presign.state.SigmaOpeningRecords)
-	presign.state.SigmaOpeningRecords = nil
+	presign.state.Commitments = presign.state.Commitments[:1]
+	presign.state.PartiesHash = tss.PartySetHash(presign.state.Signers, partySetHashLabel)
+	publicKey, err := secp.PointBytes(presign.state.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presign.state.Epoch, err = NewEpochContext(EpochContextOption{
+		SID:             presign.state.Epoch.SID,
+		RID:             presign.state.Epoch.RID,
+		Threshold:       1,
+		Parties:         presign.state.Signers,
+		PublicShares:    []EpochPublicShare{{Party: 1, PublicKey: publicKey}},
+		AuxiliaryDigest: presign.state.Epoch.AuxiliaryDigest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	presign.state.EpochID = append([]byte(nil), presign.state.Epoch.EpochID...)
 
 	raw, err := presign.marshalWireMessageWithLimits(testLimits())
 	if err != nil {
@@ -174,14 +205,5 @@ func TestFast_Presign_RejectsJSONFallback(t *testing.T) {
 	t.Parallel()
 	if _, err := tss.DecodeBinary[Presign]([]byte(`{"version":1}`)); err == nil {
 		t.Fatal("JSON presign encoding accepted")
-	}
-}
-
-// TestFast_SignAttempt_RejectsJSONFallback verifies sign-attempt decoding does
-// not accept JSON.
-func TestFast_SignAttempt_RejectsJSONFallback(t *testing.T) {
-	t.Parallel()
-	if _, err := tss.DecodeBinaryValue[SignAttemptRecord]([]byte(`{"version":1}`)); err == nil {
-		t.Fatal("JSON sign attempt encoding accepted")
 	}
 }

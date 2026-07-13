@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/tssrun"
 )
 
 type cggmpRefreshRunnerTransport struct {
@@ -42,14 +43,30 @@ func TestCGGMP21RefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
 	}
 	limits := testLimits()
 	securityParams := testSecurityParams()
+	epochID, err := tssrun.NewEpochID(current.state.Epoch.EpochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := tssrun.GenerationBinding{
+		KeyID:         "refresh-runner-key",
+		KeyGeneration: "refresh-runner-source",
+		EpochID:       epochID,
+	}
+	lifecycleStore := newTestLifecycleStore()
+	if err := installTestLifecycleGeneration(context.Background(), lifecycleStore, current, binding, limits); err != nil {
+		t.Fatal(err)
+	}
 	transport := &cggmpRefreshRunnerTransport{}
 	var committed *KeyShare
 	scheduler, err := tss.NewRefreshScheduler(tss.RefreshSchedulerOptions[*KeyShare]{
 		Interval:  time.Hour,
 		Transport: transport,
 		Runner: NewRefreshRunner(RefreshRunnerOptions{
-			Limits:         &limits,
-			SecurityParams: &securityParams,
+			Limits:              &limits,
+			SecurityParams:      &securityParams,
+			LifecycleStore:      lifecycleStore,
+			Binding:             binding,
+			TargetKeyGeneration: "refresh-runner-target",
 		}),
 		ReplayCache: tss.NewInMemoryReplayCache(),
 		AckVerifier: tss.NewInMemoryAckVerifier(func(tss.PartyID, [32]byte, []byte) error {
@@ -84,7 +101,17 @@ func TestCGGMP21RefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
 	if !bytes.Equal(mustKeySharePublicKey(t, committed), oldPublicKey) {
 		t.Fatal("refresh changed the group public key")
 	}
-	if transport.sent == 0 {
-		t.Fatal("refresh did not send its initial envelopes")
+	currentGeneration, err := lifecycleStore.LoadCurrentGeneration(context.Background(), binding.KeyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(currentGeneration.Blob)
+	defer clear(currentGeneration.Metadata)
+	committedEpochID, err := tssrun.NewEpochID(committed.state.Epoch.EpochID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentGeneration.Binding.KeyGeneration != "refresh-runner-target" || currentGeneration.Binding.EpochID != committedEpochID {
+		t.Fatalf("refresh did not durably cut over to the committed generation: got %+v", currentGeneration.Binding)
 	}
 }

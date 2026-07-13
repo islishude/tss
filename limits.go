@@ -130,3 +130,18 @@ type EvidenceLimits struct {
 	MaxPayloadTypeBytes int
 	TLV                 TLVLimits
 }
+
+// IdentificationRecordLimits caps one portable identifiable-abort record.
+// The conservative defaults remain suitable for ordinary protocol evidence;
+// protocols with intentionally larger public proofs must opt in explicitly.
+type IdentificationRecordLimits struct {
+	MaxBytes                     int
+	MaxFailureClassBytes         int
+	MaxEnvelopeBytes             int
+	MaxBroadcastCertificateBytes int
+	MaxStatementBytes            int
+	MaxProofBytes                int
+	MaxTranscriptHashCount       int
+	MaxTranscriptHashKeyBytes    int
+	TLV                          TLVLimits
+}

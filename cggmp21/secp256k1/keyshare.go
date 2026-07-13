@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 
 	"github.com/islishude/tss"
@@ -45,6 +44,9 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 	if k == nil || k.state == nil {
 		return KeySharePublicMetadata{}, false
 	}
+	if k.state.Epoch == nil || k.state.Epoch.ValidateWithLimits(DefaultLimits()) != nil {
+		return KeySharePublicMetadata{}, false
+	}
 	groupCommitments, err := secp.CommitmentPointsBytes(k.state.GroupCommitments)
 	if err != nil {
 		return KeySharePublicMetadata{}, false
@@ -53,14 +55,8 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 	if err != nil {
 		return KeySharePublicMetadata{}, false
 	}
-	logCiphertext, err := bigIntWireBytes(k.state.LogCiphertext)
-	if err != nil {
-		return KeySharePublicMetadata{}, false
-	}
-	logProof, err := proofWireBytes(k.state.LogProof)
-	if err != nil {
-		return KeySharePublicMetadata{}, false
-	}
+	epoch := k.state.Epoch.Clone()
+	sourceEpochID, _ := epoch.SourceEpochIDBytes()
 	return KeySharePublicMetadata{
 		SecurityParams:       k.state.SecurityParams,
 		Party:                k.state.Party,
@@ -75,12 +71,32 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 		PlanHash:             bytes.Clone(k.state.PlanHash),
 		ShareProof:           shareProof,
 		KeygenTranscriptHash: bytes.Clone(k.state.KeygenTranscriptHash),
-		LogCiphertext:        logCiphertext,
-		LogProof:             logProof,
+		SID:                  epoch.SID,
+		RID:                  epoch.RID,
+		EpochID:              bytes.Clone(epoch.EpochID),
+		Identifiers:          cloneEpochPartyIdentifierMetadata(epoch.Identifiers),
+		PublicShares:         cloneEpochPublicShareMetadata(epoch.PublicShares),
+		AuxiliaryDigest:      bytes.Clone(epoch.AuxiliaryDigest),
+		SourceEpochID:        sourceEpochID,
+		Epoch:                epoch,
 	}, true
 }
 
-// Derive resolves a non-hardened BIP32 derivation path from this key share.
+// EpochContext returns a caller-owned snapshot of the key share's required
+// epoch identity and dynamic Shamir identifiers.
+func (k *KeyShare) EpochContext() (*EpochContext, bool) {
+	if k == nil || k.state == nil || k.state.Epoch == nil {
+		return nil, false
+	}
+	if err := k.state.Epoch.ValidateWithLimits(DefaultLimits()); err != nil {
+		return nil, false
+	}
+	return k.state.Epoch.Clone(), true
+}
+
+// Derive returns a public-only non-hardened BIP32 preview. It never mutates the
+// parent or creates sign-ready child secret state. Use StartChildDerivation to
+// create and atomically persist a child key generation.
 func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	if k == nil || k.state == nil {
 		return nil, errors.New("nil key share")
@@ -211,7 +227,7 @@ func (k KeyShare) redactedString() string {
 		}
 	}
 	return fmt.Sprintf(
-		"KeyShare{Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d PartyData:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes RingPedersenParams:%d bytes RingPedersenProof:%d bytes PaillierProofSessionID:%s PaillierProofDomain:%q ResharePlanHash:%d bytes PlanHash:%d bytes ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
+		"KeyShare{Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d PartyData:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes RingPedersenParams:%d bytes RingPedersenProof:%d bytes PaillierProofSessionID:%s PaillierProofDomain:%q ResharePlanHash:%d bytes PlanHash:%d bytes ShareProof:%d bytes KeygenTranscriptHash:%x KeygenConfirmations:%d}",
 
 		k.state.Party,
 		k.state.Threshold,
@@ -230,8 +246,6 @@ func (k KeyShare) redactedString() string {
 		len(k.state.PlanHash),
 		proofWireSize(k.state.ShareProof),
 		k.state.KeygenTranscriptHash,
-		bigIntWireSize(k.state.LogCiphertext),
-		proofWireSize(k.state.LogProof),
 		confirmationCount,
 	)
 }
@@ -270,21 +284,6 @@ func proofWireSize(proof wire.ValueMarshaler) int {
 		return 0
 	}
 	return len(raw)
-}
-
-func bigIntWireSize(x *big.Int) int {
-	raw, err := bigIntWireBytes(x)
-	if err != nil {
-		return 0
-	}
-	return len(raw)
-}
-
-func bigIntWireBytes(x *big.Int) ([]byte, error) {
-	if x == nil {
-		return nil, nil
-	}
-	return wire.EncodeBigPos(x)
 }
 
 func cloneCommitmentPoints(in []*secp.Point) []*secp.Point {
@@ -377,6 +376,9 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if !bytes.Equal(groupPublicKey, k.state.PublicKey) {
 		return errors.New("group commitment constant does not match public key")
 	}
+	if err := k.state.validateEpochBinding(limits); err != nil {
+		return fmt.Errorf("invalid epoch binding: %w", err)
+	}
 	if k.state.PaillierPrivateKey == nil {
 		return errors.New("missing paillier private key")
 	}
@@ -402,12 +404,6 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if len(k.state.KeygenTranscriptHash) == 0 {
 		return errors.New("missing keygen transcript hash")
 	}
-	if k.state.LogCiphertext == nil {
-		return errors.New("missing log ciphertext")
-	}
-	if k.state.LogProof == nil {
-		return errors.New("missing log proof")
-	}
 	for _, id := range k.state.Parties {
 		data := k.state.PartyData[id]
 		if len(data.VerificationShare) == 0 {
@@ -415,17 +411,6 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		}
 		if _, err := secp.PointFromBytes(data.VerificationShare); err != nil {
 			return fmt.Errorf("invalid verification share for %d: %w", id, err)
-		}
-		expectedVerificationShare, err := secp.EvalCommitmentPoints(k.state.GroupCommitments, id)
-		if err != nil {
-			return fmt.Errorf("evaluate verification share for party %d: %w", id, err)
-		}
-		expectedVerificationBytes, err := secp.PointBytes(expectedVerificationShare)
-		if err != nil {
-			return fmt.Errorf("encode verification share for party %d: %w", id, err)
-		}
-		if !bytes.Equal(expectedVerificationBytes, data.VerificationShare) {
-			return fmt.Errorf("verification share for party %d does not match group commitments", id)
 		}
 		if data.PaillierPublicKey == nil || data.PaillierProof == nil {
 			return fmt.Errorf("incomplete paillier public key for party %d", id)
@@ -446,9 +431,9 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		}
 		var proofDomain []byte
 		if id == k.state.Party {
-			proofDomain, err = keySharePaillierProofDomain(k, limits)
+			proofDomain, err = keySharePaillierProofDomainWithLimits(k, limits)
 		} else {
-			proofDomain, err = k.paillierPublicProofDomainFor(id, peerPK, limits)
+			proofDomain, err = k.paillierPublicProofDomainFor(id)
 		}
 		if err != nil {
 			return err
@@ -460,14 +445,14 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		if err := peerRPParams.Validate(); err != nil {
 			return fmt.Errorf("invalid Ring-Pedersen parameters for party %d: %w", id, err)
 		}
-		if peerRPParams.N.Cmp(peerPK.N) != 0 {
-			return fmt.Errorf("Ring-Pedersen modulus mismatch for party %d", id)
+		if peerRPParams.N.Cmp(peerPK.N) == 0 {
+			return fmt.Errorf("Ring-Pedersen auxiliary modulus equals Paillier modulus for party %d", id)
 		}
 		peerRPProof := data.RingPedersenProof
 		if err := peerRPProof.Validate(); err != nil {
 			return fmt.Errorf("invalid Ring-Pedersen proof for party %d: %w", id, err)
 		}
-		rpDomain, err := keyShareRingPedersenProofDomain(k, id, peerRPParams, limits)
+		rpDomain, err := keyShareRingPedersenProofDomain(k, id, peerRPParams)
 		if err != nil {
 			return err
 		}
@@ -496,7 +481,7 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		if data.PaillierFactorProof == nil {
 			return fmt.Errorf("missing Paillier factor proof for party %d", id)
 		}
-		factorDomain, err := keyShareFactorProofDomain(k, id, data.PaillierPublicKey, localRP, limits)
+		factorDomain, err := keyShareFactorProofDomain(k, id)
 		if err != nil {
 			return err
 		}
@@ -524,27 +509,6 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	}
 	if !schnorr.Verify(k.state.KeygenTranscriptHash, verificationShare, k.state.ShareProof) {
 		return errors.New("invalid local share proof")
-	}
-	if err := pk.ValidateCiphertext(k.state.LogCiphertext); err != nil {
-		return fmt.Errorf("invalid log ciphertext: %w", err)
-	}
-	rp, err := k.ringPedersenPublicFor(k.state.Party, limits)
-	if err != nil {
-		return fmt.Errorf("missing RP params for log proof: %w", err)
-	}
-	logDomain, err := logProofDomain(k, pk, verificationShare, k.state.KeygenTranscriptHash, limits)
-	if err != nil {
-		return err
-	}
-	logStmt := zkpai.LogStarStatement{
-		PaillierN:   pk,
-		C:           new(big.Int).Set(k.state.LogCiphertext),
-		X:           verificationPoint,
-		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
-		VerifierAux: rp,
-	}
-	if err := zkpai.VerifyLogStar(k.state.SecurityParams, logDomain, logStmt, k.state.LogProof); err != nil {
-		return fmt.Errorf("invalid log proof: %w", err)
 	}
 	return nil
 }
@@ -583,7 +547,9 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 	// individual chain code that XORs to the aggregate. Refresh and reshare
 	// preserve an existing aggregate chain code, so every confirmation must
 	// repeat exactly that preserved value.
-	if k.state.PaillierProofDomain == domainLabelRefreshPaillier || k.state.PaillierProofDomain == domainLabelResharePaillier {
+	if k.state.PaillierProofDomain == domainLabelRefreshPaillier ||
+		k.state.PaillierProofDomain == domainLabelResharePaillier ||
+		k.state.PaillierProofDomain == domainLabelChildPaillier {
 		if err := verifyKeygenConfirmationSetPreservedChainCodeStruct(k, confirmations); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
@@ -700,24 +666,6 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 			return fmt.Errorf("share proof too large: %d > %d", len(shareProofBytes), limits.ZK.MaxProofBytes)
 		}
 	}
-	if k.state.LogCiphertext != nil {
-		logCiphertextBytes, err := wire.EncodeBigPos(k.state.LogCiphertext)
-		if err != nil {
-			return fmt.Errorf("log ciphertext: %w", err)
-		}
-		if len(logCiphertextBytes) > limits.Paillier.MaxCiphertextBytes {
-			return fmt.Errorf("log ciphertext too large: %d > %d", len(logCiphertextBytes), limits.Paillier.MaxCiphertextBytes)
-		}
-	}
-	if k.state.LogProof != nil {
-		logProofBytes, err := proofWireBytes(k.state.LogProof)
-		if err != nil {
-			return fmt.Errorf("log proof: %w", err)
-		}
-		if len(logProofBytes) > limits.ZK.MaxProofBytes {
-			return fmt.Errorf("log proof too large: %d > %d", len(logProofBytes), limits.ZK.MaxProofBytes)
-		}
-	}
 	confirmationCount := 0
 	for _, data := range k.state.PartyData {
 		if data.KeygenConfirmation != nil {
@@ -730,23 +678,11 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 	return nil
 }
 
-func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPublicKey *pai.PublicKey, limits Limits) ([]byte, error) {
-	config := tss.ThresholdConfig{
-		Threshold: k.state.Threshold,
-		Parties:   k.state.Parties,
-		Self:      party,
-		SessionID: k.state.PaillierProofSessionID,
+func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID) ([]byte, error) {
+	if k == nil || k.state == nil || k.state.Epoch == nil {
+		return nil, errors.New("key share Paillier proof domain requires epoch context")
 	}
-	switch k.state.PaillierProofDomain {
-	case domainLabelKeygenModulus:
-		return keygenModulusDomain(config, party, paillierPublicKey, k.state.PlanHash, limits)
-	case domainLabelRefreshPaillier:
-		return refreshPaillierDomain(config, party, paillierPublicKey, k.state.PlanHash, limits)
-	case domainLabelResharePaillier:
-		return resharePaillierDomain(config, party, paillierPublicKey, k.state.PlanHash, limits)
-	default:
-		return nil, fmt.Errorf("unsupported paillier public proof domain %q", k.state.PaillierProofDomain)
-	}
+	return figure7ModulusDomain(k.state.Epoch.SID, k.state.PaillierProofSessionID, k.state.Epoch.RID, k.state.Epoch.EpochID, k.state.Parties, k.state.Threshold, party, k.state.PlanHash)
 }
 
 func checkPaillierModulusBounds(pk *pai.PublicKey, limits Limits, params SecurityParams) error {
@@ -935,7 +871,6 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		PlanHash:               slices.Clone(k.state.PlanHash),
 		ShareProof:             k.state.ShareProof.Clone(),
 		KeygenTranscriptHash:   slices.Clone(k.state.KeygenTranscriptHash),
-		LogCiphertext:          tss.CloneBigInt(k.state.LogCiphertext),
-		LogProof:               k.state.LogProof.Clone(),
+		Epoch:                  k.state.Epoch.Clone(),
 	}}
 }

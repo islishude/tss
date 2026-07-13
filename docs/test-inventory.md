@@ -62,21 +62,20 @@ rg -n '^func Example' -g '*_test.go'
 - `vectorgen` is not a tier. It is only the build tag for generator entry points
   selected by `tvgen`.
 
-## CGGMP21 Presign Pilot
+## CGGMP21 Presign and Lifecycle Coverage
 
-Use `.agents/test-audit-cggmp21-presign.md` as the seed audit for the first
-cleanup pass. The goal is to split by invariant first and delete later only when
-coverage is demonstrably stronger elsewhere.
+The current split follows Figure 8/9/10 invariants and the unified lifecycle
+boundary. Delete or merge a test only after the inventory can point to an equal
+or stronger assertion.
 
-| Invariant bucket                    | Current files                                                                       | Target shape                                                                                                                                 |
-| ----------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Codec and golden/vector contracts   | `encoding_test.go`, `vector_test.go`, golden tests                                  | Keep. Do not change wire bytes or committed vectors during cleanup.                                                                          |
-| Handle lifecycle and one-use claims | `integration_presign_test.go`, `sign_attempt_test.go`                               | Keep at least one strong assertion for original, cloned, shallow-copied, restored, burned, and serialized presigns.                          |
-| SignAttempt store semantics         | `integration_presign_test.go`, `sign_attempt_test.go`                               | Table-drive conflict, corrupt load, outcome-unknown, missing store, delivery, completion, and durable replay cases where setup is identical. |
-| Restart and resume                  | `integration_presign_test.go`                                                       | Keep exact outbox replay, delivery-complete resume, completion durability, and committed-attempt recovery.                                   |
-| Burn and concurrency                | `integration_presign_test.go`                                                       | Keep restored-copy burn, burn-after-commit, same-intent idempotence, and conflicting concurrent starts.                                      |
-| Tamper and blame                    | `integration_presign_test.go`, `integration_adversary_test.go`, `adversary_test.go` | Keep fail-closed errors and blame attribution. Merge only overlapping setup/assertions.                                                      |
-| Round-trip recovery handles         | `integration_presign_test.go`, `vector_test.go`                                     | Keep until one-use serialized-handle behavior is covered by a narrower test plus vector decode/encode contracts.                             |
+| Invariant bucket                        | Current files                                                                                                    | Required shape                                                                                                                                                                |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Normalized Figure 8 artifact and codecs | `paper_presign_artifact_test.go`, `encoding_test.go`, golden/vector tests                                        | Preserve exact tuple validation, canonical decode/re-encode, tamper rejection, and public binding.                                                                            |
+| State transitions and reject paths      | `presign_state_transition_test.go`, `integration_presign_adversary_test.go`, `adversary_test.go`                 | Assert wrong round, duplicate, equivocation, cross-epoch, wrong-plan, malformed proof, and no unsafe mutation/effects.                                                        |
+| Figure 9 attributable abort             | `figure9_limits_test.go`, `figure9_tier1_test.go`                                                                | Cover bounded decode, `Pi_dec`, setup-less `Pi_aff-g*`, authenticated evidence, and terminal failure with no available presign.                                               |
+| Available-presign commit                | `presign_available_persistence_test.go`, `presign_lifecycle_store_test.go`, `presign_runtime_test.go`            | Prove side-effect-free encoding, atomic lease completion, canonical slot identity, burn/conflict behavior, and public-only completion descriptors.                            |
+| Figure 10 attempt claim and recovery    | `crash_recovery_test.go`, `concurrency_test.go`, `state_transition_test.go`, `low_s_test.go`                     | Keep exact outbox recovery, outcome-unknown reconciliation, delivery/completion separation, conflicting concurrent claims, direct partial verification, and low-S completion. |
+| Generation and plan binding             | `lifecycle_plan_integration_test.go`, `lifecycle_test.go`, `presign_context_test.go`, `presign_identity_test.go` | Bind key ID, generation, epoch, signer set, presign ID, empty-path context, plan digest, and security profile.                                                                |
 
 ## Rollout Order
 

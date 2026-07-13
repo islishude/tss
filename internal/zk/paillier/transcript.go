@@ -1,22 +1,23 @@
 package paillier
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	transcriptpkg "github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
+	zkchallenge "github.com/islishude/tss/internal/zk/challenge"
 )
 
-var errZeroChallenge = errors.New("transcript: zero challenge — re-run with fresh nonces")
-
-const maxChallengeRetries = 32
+const (
+	paillierChallengeDerivationLabel = "github.com/islishude/tss/internal/zk/paillier/challenge/v1"
+	challengeCounterLimit            = 256
+)
 
 // Transcript is a Fiat-Shamir transcript that accumulates labeled protocol
-// messages and derives a signed challenge. Every field is length-prefixed
-// and labeled for domain separation.
+// messages and derives a canonical positive challenge. Every field is
+// length-prefixed and labeled for domain separation.
 type Transcript struct {
 	builder *transcriptpkg.Builder
 }
@@ -85,23 +86,46 @@ func (t *Transcript) AppendUint16(label string, v uint16) {
 	t.builder.AppendUint16(label, v)
 }
 
-// ChallengeSigned derives a Fiat-Shamir challenge as a signed integer in
-// [0, 2^bits). The challenge is NOT reduced modulo a curve order — it is used
-// as a full integer for Paillier-range proofs.
+// ChallengeSigned derives a non-zero Fiat-Shamir integer challenge. Production
+// 256-bit profiles rejection-sample a canonical non-zero secp256k1 scalar and
+// return its positive integer representative. Explicit reduced test profiles
+// sample uniformly from [1, 2^bits).
 func (t *Transcript) ChallengeSigned(bits uint32) (*big.Int, error) {
+	_, value, err := t.ChallengeScalar(bits)
+	return value, err
+}
+
+// ChallengeScalar derives the same challenge as ChallengeSigned and also
+// returns its exact secp256k1 scalar representative. Production profiles use
+// canonical non-zero rejection sampling; explicit reduced test profiles retain
+// their smaller challenge space without modular reduction.
+func (t *Transcript) ChallengeScalar(bits uint32) (secp.Scalar, *big.Int, error) {
 	if bits == 0 || bits > 256 {
-		return nil, fmt.Errorf("challenge bits must be in [1, 256], got %d", bits)
+		return secp.Scalar{}, nil, fmt.Errorf("challenge bits must be in [1, 256], got %d", bits)
 	}
-	digest := t.builder.Sum()
-	challenge := new(big.Int).SetBytes(digest)
-	// Reduce to the target bit length.
-	mask := new(big.Int).Lsh(big.NewInt(1), uint(bits))
-	mask.Sub(mask, big.NewInt(1))
-	challenge.And(challenge, mask)
-	if challenge.Sign() == 0 {
-		return nil, errZeroChallenge
+	root := t.builder.Sum()
+	if bits == 256 {
+		challenge, err := zkchallenge.DeriveCanonicalNonZeroSecp256k1(
+			paillierChallengeDerivationLabel,
+			root,
+			challengeCounterLimit,
+		)
+		if err != nil {
+			return secp.Scalar{}, nil, err
+		}
+		encoded := challenge.Bytes()
+		return challenge, new(big.Int).SetBytes(encoded), nil
 	}
-	return challenge, nil
+	value, err := zkchallenge.DeriveNonZeroBits(
+		paillierChallengeDerivationLabel,
+		root,
+		bits,
+		challengeCounterLimit,
+	)
+	if err != nil {
+		return secp.Scalar{}, nil, err
+	}
+	return secp.ScalarFromBigInt(value), value, nil
 }
 
 // Sum returns the current transcript hash without modifying state.

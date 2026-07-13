@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/tssrun"
 )
 
 type signPartial struct {
@@ -32,7 +33,7 @@ func (tx *acceptSignPartialTx) apply(s *SignSession) (sessionEffects, error) {
 	}
 	s.partials[tx.from] = tx.partial.scalar
 	if s.partialEnvelopes == nil {
-		s.partialEnvelopes = make(map[tss.PartyID]tss.Envelope, len(s.presign.state.Signers))
+		s.partialEnvelopes = make(map[tss.PartyID]tss.Envelope, len(s.verification.Signers))
 	}
 	s.partialEnvelopes[tx.from] = tx.partial.envelope.Clone()
 	return sessionEffects{}, nil
@@ -54,7 +55,7 @@ func (s *SignSession) buildAcceptSignPartialTx(env tss.InboundEnvelope) (*accept
 		}
 		return nil, err
 	}
-	if !tss.ContainsParty(s.presign.state.Signers, base.From) {
+	if !tss.ContainsParty(s.verification.Signers, base.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
 	if base.Round != signStartRound || base.PayloadType != payloadSignPartial {
@@ -116,11 +117,11 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 	if s == nil {
 		return nil, false, errors.New("nil sign session")
 	}
-	if s.completed || len(s.partials) != len(s.presign.state.Signers) {
+	if s.completed || len(s.partials) != len(s.verification.Signers) {
 		return nil, false, nil
 	}
 	sigS := secp.ScalarZero()
-	for _, id := range s.presign.state.Signers {
+	for _, id := range s.verification.Signers {
 		partial, ok := s.partials[id]
 		if !ok {
 			return nil, false, nil
@@ -131,7 +132,7 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 		return nil, false, errors.New("zero ECDSA s")
 	}
 	normalizedS, sWasNegated := secp.NormalizeLowS(sigS)
-	rPointBytes, err := secp.PointBytes(s.presign.state.R)
+	rPointBytes, err := secp.PointBytes(s.verification.Gamma)
 	if err != nil {
 		return nil, false, err
 	}
@@ -139,13 +140,13 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 	if err != nil {
 		return nil, false, err
 	}
-	r := s.presign.state.LittleR
+	r := s.verification.LittleR
 	public, err := secp.PointFromBytes(s.publicKey)
 	if err != nil {
 		return nil, false, err
 	}
 	if !secp.VerifyECDSA(public, s.digest, r, normalizedS) {
-		return nil, false, &aggregateSignAlertError{err: errors.New("all partials individually verified but aggregate ECDSA signature verification failed")}
+		return nil, false, errors.New("all Figure 10 partials verified but aggregate ECDSA signature verification failed")
 	}
 	return &preparedFinalSignature{
 		signature: Signature{
@@ -156,29 +157,34 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 	}, true, nil
 }
 
-func (s *SignSession) commitFinalSignature(ctx context.Context, prepared *preparedFinalSignature, completed SignAttemptRecord) {
+func (s *SignSession) commitFinalSignature(ctx context.Context, prepared *preparedFinalSignature, completed tssrun.SignAttemptRecord) {
 	s.attempt = completed.Clone()
+	clear(s.attempt.PresignMetadata)
+	clear(s.attempt.ExactOutbox)
+	s.attempt.PresignMetadata = nil
+	s.attempt.ExactOutbox = nil
 	s.signature = &Signature{
 		R:          slices.Clone(prepared.signature.R),
 		S:          slices.Clone(prepared.signature.S),
 		RecoveryID: prepared.signature.RecoveryID,
 	}
 	s.completed = true
-	s.destroyOnlineIdentificationOpenings()
 	prepared.committed = true
 	s.log.Info(ctx, "signing complete",
 		"party_id", s.key.state.Party,
 		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
 	)
+	if s.ownsKey && s.key != nil {
+		s.key.Destroy()
+		s.key = nil
+		s.ownsKey = false
+	}
 }
 
+//nolint:unparam // the envelope result is retained for the session transition contract; completion currently emits no wire effect.
 func (s *SignSession) tryCompleteSign(ctx context.Context) ([]tss.Envelope, error) {
 	prepared, ready, err := s.prepareFinalSignature()
 	if err != nil {
-		var alert *aggregateSignAlertError
-		if errors.As(err, &alert) {
-			return s.startSignIdentification(alert.err)
-		}
 		return nil, err
 	}
 	if !ready {
@@ -192,10 +198,15 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) ([]tss.Envelope, erro
 	if err != nil {
 		return nil, err
 	}
-	if !s.attempt.SameAttempt(completed) ||
-		!bytes.Equal(completed.SignatureR, prepared.signature.R) ||
-		!bytes.Equal(completed.SignatureS, prepared.signature.S) ||
-		completed.SignatureRecoveryID != prepared.signature.RecoveryID {
+	completion, err := unmarshalSignAttemptCompletion(completed.Completion, s.limits)
+	if err != nil {
+		return nil, err
+	}
+	if !sameLifecycleAttemptQuery(s.attempt.Query(), completed.Query()) ||
+		!bytes.Equal(completion.IntentDigest, completed.Intent.IntentDigest) ||
+		!bytes.Equal(completion.SignatureR, prepared.signature.R) ||
+		!bytes.Equal(completion.SignatureS, prepared.signature.S) ||
+		completion.RecoveryID != prepared.signature.RecoveryID {
 		return nil, fmt.Errorf("%w: completion record mismatch", ErrSignAttemptCorrupt)
 	}
 	s.commitFinalSignature(ctx, prepared, completed)

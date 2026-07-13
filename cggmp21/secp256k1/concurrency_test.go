@@ -141,9 +141,9 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 
 		presigns := make(map[tss.PartyID]*Presign, len(signers))
 		for _, id := range signers {
-			p, ok := sess[id].Presign()
-			if !ok {
-				t.Fatalf("presign not complete for %d under shuffled delivery", id)
+			p, err := loadPersistedPresignForTest(sess[id])
+			if err != nil {
+				t.Fatalf("load persisted presign for %d under shuffled delivery: %v", id, err)
 			}
 			presigns[id] = p
 		}

@@ -31,11 +31,11 @@ func TestGoldenProofPayloads(t *testing.T) {
 			name: "ModulusProof",
 			marshal: func(t *testing.T) []byte {
 				t.Helper()
-				return mustMarshalProof(t, seedModulusProof())
+				return mustMarshalBinary(t, seedModulusProof())
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertProofWireRoundTrip(t, raw, tss.DecodeBinary[ModulusProof], Marshal)
+				assertBinaryProofWireRoundTrip(t, raw, tss.DecodeBinary[ModulusProof])
 			},
 		},
 		{
@@ -78,11 +78,11 @@ func TestGoldenProofPayloads(t *testing.T) {
 			name: "RingPedersenProof",
 			marshal: func(t *testing.T) []byte {
 				t.Helper()
-				return mustMarshalProof(t, seedRingPedersenProof())
+				return mustMarshalBinary(t, seedRingPedersenProof())
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertProofWireRoundTrip(t, raw, tss.DecodeBinary[RingPedersenProof], Marshal)
+				assertBinaryProofWireRoundTrip(t, raw, tss.DecodeBinary[RingPedersenProof])
 			},
 		},
 		{
@@ -140,24 +140,6 @@ func seedRingPedersenParams() *RingPedersenParams {
 		N: big.NewInt(15),
 		S: big.NewInt(2),
 		T: big.NewInt(4),
-	}
-}
-
-func assertProofWireRoundTrip[P any](t *testing.T, raw []byte, unmarshal func([]byte) (P, error), marshal func(any) ([]byte, error)) {
-	t.Helper()
-	decoded, err := unmarshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("proof did not remarshal deterministically")
-	}
-	if _, err := unmarshal(append(append([]byte(nil), raw...), 0)); err == nil {
-		t.Fatal("proof accepted trailing byte")
 	}
 }
 

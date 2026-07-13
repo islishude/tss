@@ -14,6 +14,7 @@ import (
 // Harness constructs integration components for conformance testing.
 type Harness struct {
 	NewRunStore        func(testing.TB) tssrun.RunStore
+	NewLifecycleStore  func(testing.TB) tssrun.LifecycleStore
 	NewSessionRegistry func(testing.TB) tssrun.SessionRegistry
 	NewUnknownStore    func(testing.TB) tssrun.UnknownEnvelopeStore
 }
@@ -23,6 +24,9 @@ func RunConformance(t *testing.T, h Harness) {
 	t.Helper()
 	if h.NewRunStore != nil {
 		t.Run("RunStore", func(t *testing.T) { runRunStore(t, h.NewRunStore) })
+	}
+	if h.NewLifecycleStore != nil {
+		t.Run("LifecycleStore", func(t *testing.T) { runLifecycleStore(t, h.NewLifecycleStore) })
 	}
 	if h.NewSessionRegistry != nil {
 		t.Run("SessionRegistry", func(t *testing.T) { runSessionRegistry(t, h.NewSessionRegistry) })
@@ -57,7 +61,10 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, tssrun.ErrRunNotAccepted) {
 		t.Fatalf("unaccepted lookup: got %v, want ErrRunNotAccepted", err)
 	}
-	digest := run.PlanDigest
+	digest := run.AcceptanceDigest()
+	if err := store.AcceptPlan(ctx, run.RunID, 1, run.PlanDigest); !errors.Is(err, tssrun.ErrPlanDigestConflict) {
+		t.Fatalf("raw protocol plan digest: got %v, want ErrPlanDigestConflict", err)
+	}
 	if err := store.AcceptPlan(ctx, run.RunID, 1, runDigest("other-digest")); !errors.Is(err, tssrun.ErrPlanDigestConflict) {
 		t.Fatalf("unbound initial digest: got %v, want ErrPlanDigestConflict", err)
 	}
@@ -97,10 +104,10 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if err := store.MarkStarted(ctx, run.RunID, 2); err != nil {
 		t.Fatalf("MarkStarted second party: %v", err)
 	}
-	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{KeyID: run.KeyID}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
+	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{Binding: run.Binding}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
 		t.Fatalf("empty completion digest: got %v, want ErrInvalidRunResult", err)
 	}
-	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{KeyID: "other-key", OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
+	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{Binding: generationBinding("other-key", "gen-1", "other-epoch"), OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
 		t.Fatalf("mismatched completion metadata: got %v, want ErrInvalidRunResult", err)
 	}
 	result1 := keygenRunResult(run, "out")
@@ -136,7 +143,8 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if err := store.CreateRun(ctx, aborted); err != nil {
 		t.Fatalf("CreateRun aborted: %v", err)
 	}
-	if err := store.AcceptPlan(ctx, aborted.RunID, 1, digest); err != nil {
+	abortedDigest := aborted.AcceptanceDigest()
+	if err := store.AcceptPlan(ctx, aborted.RunID, 1, abortedDigest); err != nil {
 		t.Fatalf("AcceptPlan aborted: %v", err)
 	}
 	if err := store.AbortRun(ctx, aborted.RunID, 1, "operator abort"); err != nil {
@@ -145,11 +153,30 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
 		t.Fatalf("aborted lookup: got %v, want ErrRunAborted", err)
 	}
-	if err := store.AcceptPlan(ctx, aborted.RunID, 2, digest); !errors.Is(err, tssrun.ErrRunAborted) {
+	if err := store.AcceptPlan(ctx, aborted.RunID, 2, abortedDigest); !errors.Is(err, tssrun.ErrRunAborted) {
 		t.Fatalf("late aborted-run accept: got %v, want ErrRunAborted", err)
 	}
 	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
 		t.Fatalf("late aborted-run lookup: got %v, want ErrRunAborted", err)
+	}
+
+	refresh := testRunIntent(t, "run-refresh-target-binding")
+	refresh.Kind = tssrun.RunRefresh
+	refresh.TargetKeyID = refresh.Binding.KeyID
+	refresh.TargetKeyGeneration = "gen-2"
+	if err := store.CreateRun(ctx, refresh); err != nil {
+		t.Fatalf("CreateRun refresh: %v", err)
+	}
+	substituted := refresh.Clone()
+	substituted.TargetKeyGeneration = "gen-3"
+	if err := store.AcceptPlan(ctx, refresh.RunID, 1, substituted.AcceptanceDigest()); !errors.Is(err, tssrun.ErrPlanDigestConflict) {
+		t.Fatalf("substituted target descriptor: got %v, want ErrPlanDigestConflict", err)
+	}
+	if err := store.AcceptPlan(ctx, refresh.RunID, 1, refresh.AcceptanceDigest()); err != nil {
+		t.Fatalf("AcceptPlan refresh: %v", err)
+	}
+	if err := store.AbortRun(ctx, refresh.RunID, 1, "conformance cleanup"); err != nil {
+		t.Fatalf("AbortRun refresh: %v", err)
 	}
 }
 
@@ -231,7 +258,7 @@ func testRunIntent(t *testing.T, runID string) tssrun.RunIntent {
 		SessionID:  sessionID,
 		Parties:    tss.NewPartySet(1, 2, 3),
 		Threshold:  2,
-		KeyID:      "key-1",
+		Binding:    generationBinding("key-1", "gen-1", "epoch-1"),
 		PlanDigest: runDigest("plan-digest"),
 	}
 }
@@ -243,10 +270,16 @@ func runDigest(label string) []byte {
 
 func keygenRunResult(run tssrun.RunIntent, label string) tssrun.LocalRunResult {
 	return tssrun.LocalRunResult{
-		KeyID:         run.KeyID,
-		KeyGeneration: "gen-1",
-		OutputDigest:  runDigest(label),
+		Binding:      run.Binding,
+		OutputDigest: runDigest(label),
 	}
+}
+
+func generationBinding(keyID string, generation tssrun.KeyGeneration, epochLabel string) tssrun.GenerationBinding {
+	digest := sha256.Sum256([]byte(epochLabel))
+	var epoch tssrun.EpochID
+	copy(epoch[:], digest[:])
+	return tssrun.GenerationBinding{KeyID: keyID, KeyGeneration: generation, EpochID: epoch}
 }
 
 func testSessionKey(t *testing.T) tssrun.SessionKey {

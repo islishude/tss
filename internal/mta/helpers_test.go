@@ -69,14 +69,24 @@ func setupTestEnv(tb testing.TB) (skA, skB *pai.PrivateKey, rpA, rpB *zkpai.Ring
 	if err != nil {
 		tb.Fatal(err)
 	}
+	auxSKA, err := pai.GenerateKeyForTest(context.Background(), nil, 1024)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer auxSKA.Destroy()
+	auxSKB, err := pai.GenerateKeyForTest(context.Background(), nil, 1024)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer auxSKB.Destroy()
 	var lambdaA *secret.Scalar
-	rpA, lambdaA, err = zkpai.GenerateRingPedersenParams(nil, skA)
+	rpA, lambdaA, err = zkpai.GenerateRingPedersenParams(nil, auxSKA)
 	if err != nil {
 		tb.Fatal(err)
 	}
 	lambdaA.Destroy()
 	var lambdaB *secret.Scalar
-	rpB, lambdaB, err = zkpai.GenerateRingPedersenParams(nil, skB)
+	rpB, lambdaB, err = zkpai.GenerateRingPedersenParams(nil, auxSKB)
 	if err != nil {
 		tb.Fatal(err)
 	}

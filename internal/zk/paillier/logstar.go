@@ -107,19 +107,7 @@ func (p *LogStarProof) Destroy() {
 
 // ProveLogStar creates a Πlog* proof.
 func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w LogStarWitness, rng io.Reader) (*LogStarProof, error) {
-	var lastErr error
-	for range maxChallengeRetries {
-		proof, err := proveLogStarOnce(params, state, stmt, w, rng)
-		if errors.Is(err, errZeroChallenge) {
-			lastErr = err
-			continue
-		}
-		return proof, err
-	}
-	if lastErr == nil {
-		lastErr = errZeroChallenge
-	}
-	return nil, lastErr
+	return proveLogStarOnce(params, state, stmt, w, rng)
 }
 
 func proveLogStarOnce(params SecurityParams, state []byte, stmt LogStarStatement, w LogStarWitness, rng io.Reader) (*LogStarProof, error) {
@@ -274,6 +262,9 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
 		return fmt.Errorf("LogStarProof: invalid verifier aux: %w", err)
 	}
+	if err := validateAuxModulusDistinct(stmt.VerifierAux, stmt.PaillierN); err != nil {
+		return fmt.Errorf("LogStarProof: invalid verifier aux: %w", err)
+	}
 
 	N := stmt.PaillierN
 	Nj := stmt.VerifierAux.N
@@ -423,6 +414,9 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 		return fmt.Errorf("invalid C: %w", err)
 	}
 	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
+		return fmt.Errorf("invalid verifier aux: %w", err)
+	}
+	if err := validateAuxModulusDistinct(stmt.VerifierAux, stmt.PaillierN); err != nil {
 		return fmt.Errorf("invalid verifier aux: %w", err)
 	}
 	if w.X == nil || w.Rho == nil {

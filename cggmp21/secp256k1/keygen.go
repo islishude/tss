@@ -2,19 +2,12 @@ package secp256k1
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/islishude/tss"
-	pai "github.com/islishude/tss/internal/paillier"
-	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
-const (
-	keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
-	keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
-	cggmpChainCodeCommitLabel  = "cggmp21-secp256k1-chain-code-commit-v1"
-)
+const keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
 
 type keygenState uint8
 
@@ -25,70 +18,39 @@ const (
 	keygenAborted
 )
 
-// KeygenSession tracks CGGMP21-style DKG state for one local party.
+// KeygenSession owns the public Figure 6 then Figure 7/F.1 state machine and
+// exposes a KeyShare only after the final transcript/chain-code confirmation.
 type KeygenSession struct {
 	mu sync.Mutex
 
-	cfg                  tss.ThresholdConfig                 // Local threshold runtime view fixed by the keygen plan.
-	limits               Limits                              // Local fail-closed resource policy.
-	securityParams       SecurityParams                      // Cryptographic profile for Paillier and proof material.
-	planHash             []byte                              // Digest every keygen payload must echo.
-	importPlan           *TrustedDealerImportPlan            // Optional public constraints for trusted-dealer import.
-	local                *keygenLocalMaterial                // Locally generated material before pending-share commit.
-	round1               *keygenRound1Inbox                  // Accepted round-1 material keyed by dealer.
-	confirmations        *keygenConfirmationInbox            // Accepted confirmation material keyed by sender.
-	pendingConfirmations map[tss.PartyID]*KeygenConfirmation // Confirmations awaiting sender round-1 commitments.
-	sharesSent           bool                                // Encrypted share messages were emitted after all public material arrived.
-	completed            bool                                // Terminal success flag after the key share is confirmed.
-	aborted              bool                                // Terminal failure/destruction flag.
-	state                keygenState                         // Phase marker for collection, confirmation, success, or abort.
-	pending              *KeyShare                           // Completed but not yet confirmed key share.
-	keyShare             *KeyShare                           // Confirmed key share retained by the session.
-	guard                *tss.EnvelopeGuard                  // Transport replay, identity, and policy guard.
+	cfg                tss.ThresholdConfig
+	limits             Limits
+	securityParams     SecurityParams
+	planHash           []byte
+	importPlan         *TrustedDealerImportPlan
+	completed          bool
+	aborted            bool
+	state              keygenState
+	pending            *KeyShare
+	keyShare           *KeyShare
+	guard              *tss.EnvelopeGuard
+	figure6            *figure6State
+	auxInfo            *auxInfoState
+	figure7Failure     *Figure7Failure
+	paperConfirmations map[tss.PartyID]*KeygenConfirmation
+	paperAccepted      map[paperKeygenMessageKey]struct{}
 }
 
-type keygenCommitmentsPayload struct {
-	Commitments        [][]byte                  `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	PaillierPublicKey  *pai.PublicKey            `json:"paillier_public_key" wire:"2,nested,max_bytes=paillier_public_key"`
-	PaillierProof      *zkpai.ModulusProof       `json:"paillier_proof" wire:"3,nested,max_bytes=zk_proof"`
-	ChainCodeCommit    []byte                    `json:"chain_code_commit,omitempty" wire:"4,bytes,len=32"`
-	RingPedersenParams *zkpai.RingPedersenParams `json:"ring_pedersen_params" wire:"5,nested,max_bytes=ring_pedersen_params"`
-	RingPedersenProof  *zkpai.RingPedersenProof  `json:"ring_pedersen_proof" wire:"6,nested,max_bytes=paillier_proof"`
-	PlanHash           []byte                    `json:"plan_hash" wire:"7,bytes,len=32"`
-}
-
-// WireType returns the canonical wire type identifier for keygenCommitmentsPayload.
-func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayloadWireType }
-
-// WireVersion returns the wire format version for keygenCommitmentsPayload.
-func (keygenCommitmentsPayload) WireVersion() uint16 {
-	return keygenCommitmentsPayloadWireVersion
-}
-
-type keygenSharePayload struct {
-	Ciphertext  []byte             `wire:"1,bytes,max_bytes=paillier_ciphertext"`
-	Proof       zkpai.LogStarProof `wire:"2,nested,max_bytes=zk_proof"`
-	PlanHash    []byte             `wire:"3,bytes,len=32"`
-	FactorProof zkpai.FactorProof  `wire:"4,nested,max_bytes=zk_proof"`
-}
-
-// WireType returns the canonical wire type identifier for keygenSharePayload.
-func (keygenSharePayload) WireType() string { return keygenSharePayloadWireType }
-
-// WireVersion returns the wire format version for keygenSharePayload.
-func (keygenSharePayload) WireVersion() uint16 { return keygenSharePayloadWireVersion }
-
-// validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
-// Handle validates and applies one keygen envelope.
+// Handle validates and applies one Figure 6, Figure 7, or confirmation envelope.
 func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
-	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
+	base := env.Envelope()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.completed {
@@ -106,95 +68,66 @@ func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err
 	if err := tss.ValidateInboundWithoutReplay(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self); err != nil {
 		return nil, err
 	}
-	if base.PayloadType == payloadKeygenShare && base.Round == keygenShareRound {
-		slot, slotErr := s.round1.slot(base.From)
-		if slotErr == nil && slot.commitments == nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("encrypted keygen share arrived before dealer commitments"))
-		}
-	}
-	if s.hasAcceptedInbound(base) {
-		if err := s.validateInbound(env); err != nil {
-			if errors.Is(err, tss.ErrDuplicateMessage) {
-				return nil, tss.ErrDuplicateMessage
-			}
-			return nil, err
-		}
-		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("keygen message slot is already accepted"))
-	}
-
-	var tx sessionTransition[KeygenSession]
-	if base.PayloadType == payloadKeygenConfirmation {
-		if base.Round != keygenConfirmationRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen confirmation in wrong round"))
-		}
-		tx, err = s.buildAcceptCGGMPKeygenConfirmationTx(base)
-	} else {
-		switch base.PayloadType {
-		case payloadKeygenCommitments:
-			if base.Round != keygenStartRound {
-				return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen commitments in wrong round"))
-			}
-			tx, err = s.buildAcceptCGGMPKeygenCommitmentsTx(base)
-		case payloadKeygenShare:
-			if base.Round != keygenShareRound {
-				return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen encrypted share in wrong round"))
-			}
-			tx, err = s.buildAcceptCGGMPKeygenShareTx(base)
-		default:
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer tx.cleanupOnReject()
-	staged := s.cloneForInboundTransition()
-	liveLog := staged.cfg.Log
-	stagedLog := new(stagedLifecycleLogger)
-	staged.cfg.Log = stagedLog
-	defer stagedLog.discard()
-	stagedOwned := true
-	defer func() {
-		if stagedOwned {
-			staged.abort()
-		}
-	}()
-	effects, err := tx.apply(staged)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.validateInbound(env); err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
-		}
-		return nil, err
-	}
-	staged.cfg.Log = liveLog
-	s.commitInboundTransition(staged)
-	stagedOwned = false
-	tx.markCommitted()
-	stagedLog.flush(s.cfg.Logger())
-	return effects.envelopes, nil
+	return s.handlePaperKeygenLocked(env)
 }
 
-func (s *KeygenSession) hasAcceptedInbound(env tss.Envelope) bool {
+// Complete returns a defensive copy of the confirmed local key share.
+func (s *KeygenSession) Complete() (*KeyShare, bool) {
 	if s == nil {
-		return false
+		return nil, false
 	}
-	switch env.PayloadType {
-	case payloadKeygenCommitments:
-		slot, err := s.round1.slot(env.From)
-		return err == nil && slot.commitments != nil
-	case payloadKeygenShare:
-		slot, err := s.round1.slot(env.From)
-		return err == nil && slot.share != nil
-	case payloadKeygenConfirmation:
-		if s.pendingConfirmations[env.From] != nil {
-			return true
-		}
-		_, ok, err := s.confirmations.confirmation(env.From)
-		return err == nil && ok
-	default:
-		return false
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != keygenConfirmed || !s.completed || s.keyShare == nil {
+		return nil, false
+	}
+	return cloneKeyShareValue(s.keyShare), true
+}
+
+// KeyShare returns a defensive copy of the confirmed local key share.
+func (s *KeygenSession) KeyShare() (*KeyShare, bool) { return s.Complete() }
+
+// Figure7Failure returns a public-only terminal Figure 7 accusation result.
+func (s *KeygenSession) Figure7Failure() (Figure7Failure, bool) {
+	if s == nil {
+		return Figure7Failure{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.figure7Failure == nil {
+		return Figure7Failure{}, false
+	}
+	return s.figure7Failure.Clone(), true
+}
+
+func (s *KeygenSession) terminalFigure7Failure(failure *Figure7Failure) {
+	s.abort()
+	s.figure7Failure = cloneFigure7Failure(failure)
+	// tssrun.Completed is a terminal-disposition signal. Complete/KeyShare still
+	// reject this aborted outcome because state is keygenAborted.
+	s.completed = true
+}
+
+func (s *KeygenSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
+	s.completed = false
+	s.state = keygenAborted
+	if s.figure6 != nil {
+		s.figure6.destroy()
+		s.figure6 = nil
+	}
+	if s.auxInfo != nil {
+		s.auxInfo.destroy()
+		s.auxInfo = nil
+	}
+	destroyPaperConfirmationMap(s.paperConfirmations)
+	s.paperConfirmations = nil
+	s.paperAccepted = nil
+	if s.pending != nil {
+		s.pending.Destroy()
+		s.pending = nil
 	}
 }

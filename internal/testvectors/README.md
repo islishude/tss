@@ -10,7 +10,7 @@ These categories have different meanings:
 - Fixtures are committed test-only caches used to avoid expensive setup during
   tests.
 
-Current inventory: 34 binary wire golden files, 2 protocol JSON files, and 1
+Current inventory: 37 binary wire golden files, 2 protocol JSON files, and 1
 fixture JSON file.
 
 ## Categories
@@ -30,16 +30,18 @@ wire/v1/
   envelope/   1 file   Envelope.golden
   tss/        5 files  BlameEvidence, IdentificationRecord, SigningContext,
                        BroadcastAck, BroadcastCertificate
-  frost/      6 files  KeyShare, VerificationShare, KeygenCommitmentsPayload,
+  frost/      8 files  KeyShare, VerificationShare, KeygenCommitmentsPayload,
                        KeygenSharePayload, NonceCommitmentPayload,
-                       SignPartialPayload
-  cggmp21/    13 files KeyShare, VerificationShare, PaillierPublicShare,
+                       SignPartialPayload, TrustedDealerImportPlan,
+                       TrustedDealerContribution
+  cggmp21/    14 files KeyShare, VerificationShare, PaillierPublicShare,
                        RingPedersenPublicShare,
-                       KeygenSharePayload, RefreshSharePayload,
-                       ReshareSharePayload, Presign, Presign.fast,
-                       PresignRound3Payload, ResharePlan,
-                       SignAttemptRecord, SignPartialPayload
-  zk/         8 files  SecurityParams, ModulusProof, RingPedersenParams,
+                       Figure6CommitmentPayload, AuxInfoCommitmentPayload,
+                       KeygenConfirmation, Presign, Presign.fast,
+                       PresignRound3Payload, ResharePlan, SignPartialPayload,
+                       TrustedDealerImportPlan, TrustedDealerContribution
+  zk/         9 files  SecurityParams, ModulusProof, FactorProof,
+                       RingPedersenParams,
                        RingPedersenProof, EncProof, AffGProof,
                        LogStarProof, SchnorrProof
 ```

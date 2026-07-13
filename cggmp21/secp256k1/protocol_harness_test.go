@@ -251,9 +251,9 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 	}
 	out := make(map[tss.PartyID]*Presign, len(signers))
 	for _, id := range signers {
-		presign, ok := presignSessions[id].Presign()
-		if !ok {
-			t.Fatalf("presign not complete for %d", id)
+		presign, err := loadPersistedPresignForTest(presignSessions[id])
+		if err != nil {
+			t.Fatalf("load persisted presign for %d: %v", id, err)
 		}
 		out[id] = presign
 	}

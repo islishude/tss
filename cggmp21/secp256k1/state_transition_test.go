@@ -72,7 +72,7 @@ func TestKeygenSessionRejectsNil(t *testing.T) {
 		Round:       1,
 		From:        2,
 		To:          0,
-		PayloadType: payloadKeygenCommitments,
+		PayloadType: payloadFigure6Commitment,
 		Payload:     []byte{},
 	}
 	_, err = s.Handle(testutil.DeliverEnvelope(env))
@@ -279,25 +279,28 @@ func TestPresignMissingAttemptBindingFailsClosed(t *testing.T) {
 	}
 }
 
-func TestPresignSessionPresignTransfersOwnership(t *testing.T) {
+func TestPresignSessionPresignReturnsRepeatablePublicDescriptor(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
+	defer p.Destroy()
+	metadata, ok := p.PublicMetadata()
+	if !ok {
+		t.Fatal("missing public presign metadata")
+	}
+	descriptor := newPersistedPresign(metadata.LifecycleSlot, metadata)
 	session := &PresignSession{
-		completed: true,
-		presign:   p,
+		completed:        true,
+		persistedPresign: &descriptor,
 	}
 	got, ok := session.Presign()
 	if !ok {
 		t.Fatal("first Presign call failed")
 	}
-	if got != p {
-		t.Fatal("Presign did not transfer the session-owned presign")
-	}
-	if session.presign != nil {
-		t.Fatal("session retained presign after transfer")
+	if got.SlotID() != metadata.LifecycleSlot || !bytes.Equal(got.PublicMetadata().PresignID, metadata.PresignID) {
+		t.Fatal("Presign returned the wrong persisted descriptor")
 	}
 	got, ok = session.Presign()
-	if ok || got != nil {
-		t.Fatal("second Presign call returned a presign")
+	if !ok || got.SlotID() != metadata.LifecycleSlot {
+		t.Fatal("second Presign call did not return the public descriptor")
 	}
 }
 

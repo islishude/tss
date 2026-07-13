@@ -1,11 +1,9 @@
 package secp256k1
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/islishude/tss"
@@ -44,6 +42,7 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 		plan, err := NewPresignPlan(PresignPlanOption{
 			Key:       shares[id],
 			SessionID: presignSessionID,
+			PresignID: presignSessionID[:],
 			Signers:   ids,
 			Context:   ctx,
 			Limits:    &limits,
@@ -51,7 +50,11 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 		if err != nil {
 			return nil, nil, err
 		}
-		session, out, err := StartPresign(shares[id], plan, tss.LocalConfig{Self: id, Context: context.Background()}, guard)
+		runtime, err := prepareTestPresignRuntime(context.Background(), shares[id], plan, tss.LocalConfig{Self: id, Context: context.Background()}, guard)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, out, err := StartPresign(plan, runtime)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -82,9 +85,8 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 	}
 	signSessions := make(map[tss.PartyID]*SignSession, len(ids))
 	signMessages := make([]tss.Envelope, 0, len(ids))
-	attemptStore := newSimulationSignAttemptStore()
 	for _, id := range ids {
-		presign, ok := presignSessions[id].Presign()
+		descriptor, ok := presignSessions[id].Presign()
 		if !ok {
 			return nil, nil, fmt.Errorf("presign not completed for %d", id)
 		}
@@ -95,28 +97,32 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 			return nil, nil, err
 		}
 		if rawDigest {
-			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.ContextHash, attemptStore, guard, limits)
+			presign, loadErr := loadPersistedPresignForTest(presignSessions[id])
+			if loadErr != nil {
+				return nil, nil, loadErr
+			}
+			session, out, err = StartSignDigestWithStore(shares[id], presign, signID, input, newTestLifecycleStore(), guard)
 		} else {
+			metadata := descriptor.PublicMetadata()
 			plan, planErr := NewSignPlan(SignPlanOption{
 				Key:     shares[id],
-				Presign: presign,
+				Presign: metadata,
 				Intent: SignIntent{
 					SessionID: signID,
 					Context:   ctx,
 					Message:   input,
-					Signers:   presign.state.Signers,
+					Signers:   metadata.Signers,
 				},
 				Limits: &limits,
 			})
 			if planErr != nil {
 				return nil, nil, planErr
 			}
-			session, out, err = StartSign(shares[id], plan, SignRuntime{
-				Local:        tss.LocalConfig{Self: id, Context: context.Background()},
-				Guard:        guard,
-				Presign:      presign,
-				AttemptStore: attemptStore,
-			})
+			runtime, runtimeErr := prepareTestSignRuntimeFromPersisted(context.Background(), presignSessions[id], descriptor, signID, guard)
+			if runtimeErr != nil {
+				return nil, nil, runtimeErr
+			}
+			session, out, err = StartSign(plan, runtime)
 		}
 		if err != nil {
 			return nil, nil, err
@@ -154,157 +160,6 @@ func openSimulationInbound(env tss.Envelope) (tss.InboundEnvelope, error) {
 		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
 		ReceivedAt: time.Now(),
 	}, nil)
-}
-
-type simulationSignAttemptStore struct {
-	mu       sync.Mutex
-	attempts map[string]SignAttemptRecord
-	burns    map[string]struct{}
-}
-
-func newSimulationSignAttemptStore() *simulationSignAttemptStore {
-	return &simulationSignAttemptStore{
-		attempts: make(map[string]SignAttemptRecord),
-		burns:    make(map[string]struct{}),
-	}
-}
-
-// LoadSignAttempt loads an in-memory simulation attempt.
-func (s *simulationSignAttemptStore) LoadSignAttempt(ctx context.Context, presignContentID []byte) (SignAttemptRecord, error) {
-	if s == nil {
-		return SignAttemptRecord{}, errors.New("nil simulation sign attempt store")
-	}
-	if ctx == nil {
-		return SignAttemptRecord{}, errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[string(presignContentID)]; ok {
-		return SignAttemptRecord{}, ErrSignAttemptBurned
-	}
-	record, ok := s.attempts[string(presignContentID)]
-	if !ok {
-		return SignAttemptRecord{}, ErrSignAttemptNotFound
-	}
-	return record.Clone(), nil
-}
-
-// CommitSignAttempt commits an in-memory simulation attempt.
-func (s *simulationSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
-	if ctx == nil {
-		return SignAttemptCommit{}, errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptCommit{}, err
-	}
-	if err := validateSignAttemptCandidate(candidate); err != nil {
-		return SignAttemptCommit{}, err
-	}
-	key := string(candidate.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[key]; ok {
-		return SignAttemptCommit{}, ErrSignAttemptBurned
-	}
-	if existing, ok := s.attempts[key]; ok {
-		if candidate.SameBaseAttempt(existing) {
-			return SignAttemptCommit{Status: SignAttemptExistingSame, Record: existing.Clone()}, nil
-		}
-		if bytes.Equal(existing.IntentHash, candidate.IntentHash) {
-			return SignAttemptCommit{}, ErrSignAttemptNonDeterminism
-		}
-		return SignAttemptCommit{}, ErrSignAttemptConflict
-	}
-	s.attempts[key] = candidate.Clone()
-	return SignAttemptCommit{Status: SignAttemptCreated, Record: candidate.Clone()}, nil
-}
-
-// UpdateSignAttemptDelivery records in-memory delivery progress.
-func (s *simulationSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
-	if ctx == nil {
-		return SignAttemptRecord{}, errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	key := string(update.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[key]; ok {
-		return SignAttemptRecord{}, ErrSignAttemptBurned
-	}
-	record, ok := s.attempts[key]
-	if !ok {
-		return SignAttemptRecord{}, ErrSignAttemptNotFound
-	}
-	updated, err := applySignAttemptDeliveryUpdate(record, update)
-	if err != nil {
-		return SignAttemptRecord{}, err
-	}
-	s.attempts[key] = updated.Clone()
-	return updated.Clone(), nil
-}
-
-// CompleteSignAttempt completes an in-memory simulation attempt.
-func (s *simulationSignAttemptStore) CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error) {
-	if ctx == nil {
-		return SignAttemptRecord{}, errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	key := string(result.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[key]; ok {
-		return SignAttemptRecord{}, ErrSignAttemptBurned
-	}
-	record, ok := s.attempts[key]
-	if !ok {
-		return SignAttemptRecord{}, ErrSignAttemptNotFound
-	}
-	if !bytes.Equal(record.AttemptHash, result.AttemptHash) {
-		return SignAttemptRecord{}, ErrSignAttemptConflict
-	}
-	if record.Completed {
-		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) && record.SignatureRecoveryID == result.Signature.RecoveryID {
-			return record.Clone(), nil
-		}
-		return SignAttemptRecord{}, ErrSignAttemptConflict
-	}
-	record.Completed = true
-	record.SignatureR = append([]byte(nil), result.Signature.R...)
-	record.SignatureS = append([]byte(nil), result.Signature.S...)
-	record.SignatureRecoveryID = result.Signature.RecoveryID
-	s.attempts[key] = record
-	return record.Clone(), nil
-}
-
-// BurnPresign burns an in-memory simulation presign.
-func (s *simulationSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
-	if s == nil {
-		return errors.New("nil simulation sign attempt store")
-	}
-	if ctx == nil {
-		return errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	key := string(burn.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.attempts[key]; ok {
-		return ErrSignAttemptConflict
-	}
-	if s.burns == nil {
-		s.burns = make(map[string]struct{})
-	}
-	s.burns[key] = struct{}{}
-	return nil
 }
 
 // simulationCGGMP21Policies returns the production CGGMP21 policy set with

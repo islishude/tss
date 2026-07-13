@@ -22,8 +22,8 @@ The library is responsible for:
 - Replay, equivocation, and wrong-session rejection.
 - Protocol state-machine transitions.
 - Proof and transcript verification.
-- Key share and presign record serialization.
-- Sign-attempt durable interface semantics.
+- Key share, epoch, and private presign record validation and serialization.
+- Unified generation, lease, available-presign, attempt, and cutover semantics.
 
 The application is responsible for:
 
@@ -35,9 +35,9 @@ The application is responsible for:
 - Storing the active session registry.
 - Routing envelopes.
 - Durably buffering or rejecting unknown-session messages.
-- Encrypting and persisting key shares and presigns.
-- Atomically installing refresh and reshare outputs.
-- Retiring old key generations.
+- Encrypting and durably implementing `LifecycleStore` secret records.
+- Reconciling unknown transaction outcomes.
+- Authorizing retirement and cross-party cutover policy.
 - Operating monitoring, retries, backoff, and recovery.
 
 ## Control Plane vs Data Plane
@@ -73,10 +73,12 @@ type RunIntent struct {
     Signers   tss.PartySet
     Threshold int
 
-    KeyID         string
-    KeyGeneration tssrun.KeyGeneration
-    ParentKeyID   string
-    PresignID     string
+    Binding     tssrun.GenerationBinding
+    ParentKeyID string
+    PresignID   string
+
+    TargetKeyID         string
+    TargetKeyGeneration tssrun.KeyGeneration
 
     PlanDigest    []byte
     ContextDigest []byte
@@ -85,13 +87,21 @@ type RunIntent struct {
 
 `RunID` is an application identifier. `SessionID` is the protocol-level nonce
 bound into envelopes, plans, transcripts, proofs, and replay protection.
-`PlanDigest` is derived from the library plan and can be exchanged or recorded by
-the control plane before data-plane messages are released.
+`PlanDigest` is derived from the library plan. Before data-plane messages are
+released, parties exchange and accept `RunIntent.AcceptanceDigest()`. That
+canonical repository transcript wraps `PlanDigest` with every immutable intent
+field, including the complete source binding and target descriptor. The
+protocol plan must also bind those fields, providing two independent checks
+against control-plane substitution.
 
-Run admission requires a non-empty key ID for every kind. Refresh and reshare
-bind the current key generation. Presign and sign bind the signer set, key
-generation, and a 32-byte normalized signing-context digest; CGGMP21 presign
-and sign also bind the one-use presign ID.
+Run admission requires an exact source `GenerationBinding`. Refresh and reshare
+name that same source key ID and a distinct target generation. Child derivation
+names a distinct child key ID and target generation. These target descriptors
+omit an epoch because the protocol produces the new authorization epoch during
+the run; the local result must contain the exact target key ID and generation
+plus a valid new epoch. Presign and sign bind the signer set, complete source
+binding, and a 32-byte normalized signing-context digest; CGGMP21 presign and
+sign also bind the one-use presign ID.
 
 The actual fields should match the deployment's storage and policy model. The
 important invariant is that all public intent needed to reconstruct the same
@@ -102,9 +112,9 @@ processed.
 
 Each protocol run has exactly one session ID.
 
-For keygen, refresh, reshare, presign, and sign, the session ID belongs to the
-run or job, not to an individual party. Every participant in the same run must
-use the same session ID.
+For keygen, refresh, reshare, child derivation, presign, and sign, the session
+ID belongs to the run or job, not to an individual party. Every participant in
+the same run must use the same session ID.
 
 A party must reject a run if the session ID was previously used locally for the
 same protocol namespace. A party must reject envelopes with unknown, stale,
@@ -135,8 +145,11 @@ planHash, err := plan.Digest()
 if err != nil {
     return err
 }
+if !bytes.Equal(planHash, run.PlanDigest) {
+    return tssrun.ErrPlanDigestConflict
+}
 
-if err := tssrun.AcceptPlanDigest(ctx, runStore, run, self, planHash); err != nil {
+if err := tssrun.AcceptPlanDigest(ctx, runStore, run, self, run.AcceptanceDigest()); err != nil {
     return err
 }
 ```
@@ -146,9 +159,10 @@ A typical control-plane flow is:
 1. A proposer creates `tssrun.RunIntent` metadata.
 2. Each party validates metadata against local policy.
 3. Each party reconstructs the plan.
-4. Each party records `planHash` acceptance.
-5. After enough or all required parties accept the same `planHash`, data-plane
-   delivery begins.
+4. Each party checks `planHash` against `RunIntent.PlanDigest` and records the
+   canonical `RunIntent.AcceptanceDigest()`.
+5. After enough or all required parties accept the same acceptance digest,
+   data-plane delivery begins.
 
 ## Local Session Startup
 
@@ -217,20 +231,20 @@ acknowledgment or certificate policy.
 
 ## Completion and Durable Commit Boundaries
 
-Completion accessors return local output. The application decides when that
-output becomes durable and externally visible.
+Completion accessors expose only output permitted by the protocol's durable
+boundary. For CGGMP21 presign, sign, refresh, reshare, and child generation,
+store commit is part of completion rather than a caller-performed follow-up.
 
-| Flow            | Completion accessor         | Durable boundary                                                                                              |
-| --------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| FROST Keygen    | `KeygenSession.KeyShare()`  | Encrypted local `KeyShare` write.                                                                             |
-| FROST Sign      | `SignSession.Signature()`   | Signature result visibility or request completion.                                                            |
-| FROST Refresh   | `ReshareSession.KeyShare()` | Compare-and-swap install over current key share.                                                              |
-| FROST Reshare   | `ReshareSession.KeyShare()` | New recipient key share install; old generation retirement by control plane.                                  |
-| CGGMP21 Keygen  | `KeygenSession.KeyShare()`  | Encrypted local `KeyShare` write.                                                                             |
-| CGGMP21 Presign | `PresignSession.Presign()`  | Encrypted local `Presign` write before inventory visibility.                                                  |
-| CGGMP21 Sign    | `SignSession.Signature()`   | `SignAttemptStore.CommitSignAttempt` before outbound release; completion persistence before final visibility. |
-| CGGMP21 Refresh | `RefreshSession.KeyShare()` | Compare-and-swap install over current key share.                                                              |
-| CGGMP21 Reshare | `ReshareSession.Result()`   | New recipient key share install; old generation retirement by control plane.                                  |
+| Flow                     | Completion accessor/result  | Durable boundary                                                                                  |
+| ------------------------ | --------------------------- | ------------------------------------------------------------------------------------------------- |
+| FROST Keygen             | `KeygenSession.KeyShare()`  | Encrypted local key-share write.                                                                  |
+| FROST Sign               | `SignSession.Signature()`   | Signature result visibility or request completion.                                                |
+| FROST Refresh/Reshare    | `ReshareSession.KeyShare()` | Application compare-and-swap and retirement policy.                                               |
+| CGGMP21 Keygen           | confirmed `KeyShare`        | Install one exact initial `GenerationBinding` only after Figure 6 and Figure 7/F.1 complete.      |
+| CGGMP21 Presign          | public `PersistedPresign`   | `CommitAvailablePresignFromLease` stores the normalized tuple and completes the lease atomically. |
+| CGGMP21 Sign             | `SignSession.Signature()`   | `CommitSignAttempt` before outbound release; `CompleteAttempt` before signature visibility.       |
+| CGGMP21 Refresh/Reshare  | confirmed target epoch      | Generation fence followed by atomic cutover, source retirement, and source-presign burn.          |
+| CGGMP21 Child Derivation | installed child binding     | `CommitInitialGenerationFromLease` creates the distinct child lineage atomically.                 |
 
 ## Restart and Recovery
 
@@ -319,39 +333,61 @@ explicit security parameters. Each party reconstructs
 `tss.ProtocolCGGMP21Secp256k1`, calls `secp256k1.StartKeygen`, and routes
 inbound envelopes through the session's `Handle` method.
 
-`KeygenSession.KeyShare()` becomes available only after confirmation. Persist
-the encrypted local key share before marking it usable.
+The session runs paper Figure 6 and then a complete Figure 7/F.1
+auxiliary-information protocol. The final share contains the common RID,
+dynamic Shamir identifiers, independent Paillier and Ring-Pedersen material,
+`EpochID`, and the target confirmation set. Install that canonical encrypted
+share as one exact initial `GenerationBinding` before marking it usable.
 
 ### CGGMP21 secp256k1 Presign
 
-Public metadata includes a fresh presign session ID, key ID or key generation
-ID, signer set, and `secp256k1.PresignContext`. Each signer loads its local key
-share, validates membership and threshold policy, reconstructs
-`secp256k1.NewPresignPlan`, calls `secp256k1.StartPresign`, and routes
-inbound envelopes through the session's `Handle` method.
+Public metadata includes a fresh presign session ID, the exact source
+`GenerationBinding`, signer set, non-zero 32-byte protocol `PresignID`, and a
+signing context with an empty path. Each signer constructs the same public
+`PresignPlan` and calls:
 
-A completed presign is a per-party local one-use record. Persist the encrypted
-`Presign` before exposing it to inventory. There is no shared presign object
-across machines.
+```go
+session, out, err := secp256k1.StartPresign(plan, secp256k1.PresignRuntime{
+    Local:          local,
+    Guard:          guard,
+    LifecycleStore: lifecycle,
+    Binding:        binding,
+})
+```
+
+The start reloads and revalidates the authoritative current generation and
+acquires a durable presign lease before returning `out`. Figure 8 completion
+atomically stores the local normalized tuple and completes the lease.
+`session.Presign()` then returns only a repeatable public persisted descriptor;
+there is no cross-machine or caller-owned secret presign object.
 
 ### CGGMP21 secp256k1 Sign
 
-Public metadata includes a fresh signing session ID, key ID, local inventory ID
-for the encrypted presign record, signer set exactly matching the presign
-binding, and `secp256k1.SignRequest` intent. The inventory ID must not be the
-internal secret-derived presign content commitment. The sign session ID belongs
-to the online signing attempt, not to the earlier presign run.
+Public metadata includes a fresh signing session ID, exact generation binding,
+canonical public presign slot, unique attempt ID, signer set exactly matching
+the Figure 8 artifact, delivery policy, and `SignIntent`. The session ID belongs
+to this online attempt, not to the earlier presign run.
 
-Each signer loads the local key share and local presign, verifies the presign is
-not consumed locally, calls `VerifyCryptographicMaterialWithLimits` after
-decoding, reconstructs `secp256k1.NewSignPlan`, calls `secp256k1.StartSign`, and
-routes inbound envelopes through the session's `Handle` method. `StartSign` and
-`ResumeSign` repeat the strong verification before durable attempt operations.
+Each signer constructs `NewSignPlan` from its public persisted metadata and
+calls:
 
-`StartSign` must commit through `SignAttemptStore` before releasing outbound
-envelopes. An unknown commit outcome consumes the presign operationally. Recover
-with the same request and `ResumeSign`; do not retry with a new session ID or a
-different digest.
+```go
+session, out, err := secp256k1.StartSign(plan, secp256k1.SignRuntime{
+    Local:          local,
+    Guard:          guard,
+    LifecycleStore: lifecycle,
+    Binding:        binding,
+    PresignID:      persisted.SlotID(),
+    AttemptID:      attemptID,
+    DeliveryPolicy: deliveryPolicy,
+})
+```
+
+`StartSign` reloads and revalidates the key and available candidate, constructs
+the exact Figure 10 partial and canonical outbox, then calls
+`CommitSignAttempt`. That transaction is the only online linearization point.
+An unknown outcome makes every new intent forbidden. Reconcile with the exact
+`AttemptQuery` and `ResumeSign`; do not choose a new session, attempt, or digest.
 
 ### CGGMP21 secp256k1 Refresh
 
@@ -360,8 +396,12 @@ ID. Each party loads the current key share, reconstructs
 `secp256k1.NewRefreshPlan`, calls `secp256k1.StartRefresh`, and routes
 inbound envelopes through the session's `Handle` method.
 
-The refreshed key share is staged output. Install it only with compare-and-swap
-against the expected current key generation.
+Refresh runs a fresh Figure 7/F.1 epoch with independent moduli, new RID, and
+new dynamic identifiers while preserving the group public key and chain code.
+Fence the source through the lifecycle lease, then atomically install the
+target generation, retire the source secret blob, and burn source-epoch
+available presigns. A protocol-level failure durably disables later refresh for
+the lineage; a local pre-start or storage failure does not.
 
 ### CGGMP21 secp256k1 Reshare
 
@@ -372,24 +412,41 @@ new-only parties call `secp256k1.StartReshareReceiver`; overlap parties call
 `secp256k1.StartReshareOverlap` when applicable.
 
 New receiver parties persist the new key share. Old-only parties do not install
-a new share. The control plane retires the old generation only after the
-required new-generation commit condition is satisfied.
+a new share. The temporary Lagrange-weighted handoff is not sign-ready state.
+Every target runs Figure 7/F.1 and receives a fresh RID, dynamic identifiers,
+and independent auxiliary material before confirmation. Use lifecycle cutover
+for overlap/source holders and the new-lineage reshare transaction for new-only
+receivers. Retire the source authorization epoch in application policy after
+the required target commit condition is satisfied.
+
+### CGGMP21 secp256k1 Child Derivation
+
+Public metadata includes the exact parent generation, a non-empty
+non-hardened BIP32 path, a fresh child-derivation session, and a distinct target
+key ID and generation. Construct `NewChildDerivationPlan` from the parent public
+state, then call `StartChildDerivation` with the guard and `LifecycleStore`.
+
+The session reloads the parent, acquires an exclusive lease, applies the public
+tweak, runs a complete Figure 7/F.1 protocol under a child SID, and atomically
+installs the first child generation. The parent remains current. Presign and
+sign plans accept only an already installed generation and an empty path.
 
 ## Failure Handling Matrix
 
-| Failure                                          | Required behavior                                                                                         |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| Party receives unknown-session envelope          | Reject or durably buffer and revalidate later.                                                            |
-| Party receives wrong-protocol envelope           | Reject.                                                                                                   |
-| Party receives wrong sender or recipient         | Reject.                                                                                                   |
-| Plan hash mismatch before start                  | Do not start data-plane delivery.                                                                         |
-| Plan hash mismatch during protocol               | Abort run and report invalid peer or run metadata.                                                        |
-| `StartXxx` succeeds but outbound delivery fails  | Application-specific retry; for CGGMP21 sign use attempt-store recovery.                                  |
-| Keygen completed but key-share persistence fails | Do not mark key usable.                                                                                   |
-| Presign completed but persistence fails          | Do not add presign to inventory.                                                                          |
-| Sign attempt commit outcome unknown              | Do not reuse presign; retry same intent or `ResumeSign`.                                                  |
-| Refresh completed but CAS install fails          | Do not overwrite newer key share; mark run stale or conflicting.                                          |
-| Reshare partially installed                      | Control plane must not retire old generation until required new-generation commit condition is satisfied. |
+| Failure                                                 | Required behavior                                                                               |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Party receives unknown-session envelope                 | Reject or durably buffer and revalidate later.                                                  |
+| Party receives wrong-protocol envelope                  | Reject.                                                                                         |
+| Party receives wrong sender or recipient                | Reject.                                                                                         |
+| Plan hash mismatch before start                         | Do not start data-plane delivery.                                                               |
+| Plan hash mismatch during protocol                      | Abort run and report invalid peer or run metadata.                                              |
+| `StartXxx` succeeds but outbound delivery fails         | Application-specific retry; for CGGMP21 sign replay only the exact durable attempt outbox.      |
+| Keygen completed but key-share persistence fails        | Do not mark key usable.                                                                         |
+| Figure 8 protocol succeeds but atomic persistence fails | No descriptor or available presign; abort/reconcile the exact lease.                            |
+| Sign attempt commit outcome unknown                     | Do not reuse presign; retry same intent or `ResumeSign`.                                        |
+| Cutover outcome unknown                                 | Keep the source fenced and reconcile the exact fence; do not admit new source work.             |
+| Reshare partially installed                             | Do not retire source policy until the required target-generation commit condition is satisfied. |
+| Child install fails                                     | Parent remains current; child lineage must remain absent or reconcile the exact transaction.    |
 
 ## Operational Checklist
 
@@ -400,6 +457,8 @@ required new-generation commit condition is satisfied.
 - Unknown-session handling is durable or fail-closed.
 - Direct secret-bearing payloads are delivered over confidential channels.
 - Broadcast certificates are persisted according to policy.
-- Keygen and presign outputs are encrypted before they become visible.
-- Refresh and reshare outputs are installed with compare-and-swap semantics.
+- CGGMP21 key generations and available presigns become visible only through
+  their lifecycle transactions.
+- Refresh and reshare use lease fencing and atomic cutover.
+- Non-hardened children are distinct lineages with fresh auxiliary epochs.
 - CGGMP21 sign attempts recover by exact attempt, not by presign reuse.

@@ -3,250 +3,15 @@
 package secp256k1
 
 import (
-	"errors"
-	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/testutil"
-	"github.com/islishude/tss/internal/wire"
 )
 
-// TestKeygenRejectsMissingModulusProof verifies that a keygen commitments
-// message with a zeroed PaillierProof is rejected. Omitting Πmod would
-// allow a party to register a Paillier key without proving knowledge of
-// its factorization — a CVE-class vulnerability.
-func TestKeygenRejectsMissingModulusProof(t *testing.T) {
-	t.Parallel()
-
-	parties := tss.NewPartySet(1, 2)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Replace the modulus proof with invalid bytes (not a valid TLV proof).
-	// We must bypass marshalKeygenCommitmentsPayload because it validates
-	// the proof during marshaling. Instead, we construct the wire encoding
-	// directly with corrupted proof bytes.
-	payload, err := unmarshalKeygenCommitmentsPayload(out2[0].Payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proofBytes, err := canonicalWireMessageBytes(payload.PaillierProof, testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	corruptedProof := make([]byte, len(proofBytes))
-	for i := range corruptedProof {
-		corruptedProof[i] = proofBytes[i] ^ 0xFF
-	}
-	mutated, err := marshalKeygenCommitmentsPayloadBypass(payload, keygenCommitmentsOverrides{PaillierProof: corruptedProof})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out2[0].Payload = mutated
-	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
-		t.Fatal("keygen accepted commitments message with corrupted modulus proof")
-	}
-}
-
-// TestKeygenRejectsMissingRingPedersenProof verifies that a keygen
-// commitments message with a zeroed RingPedersenProof is rejected.
-// Omitting Πprm allows a party to use Ring-Pedersen parameters without
-// proving knowledge of the discrete log relation with its Paillier key.
-func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
-	t.Parallel()
-
-	parties := tss.NewPartySet(1, 2)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	payload, err := unmarshalKeygenCommitmentsPayload(out2[0].Payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proofBytes, err := canonicalWireMessageBytes(payload.RingPedersenProof, testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	corruptedRP := make([]byte, len(proofBytes))
-	for i := range corruptedRP {
-		corruptedRP[i] = proofBytes[i] ^ 0xFF
-	}
-	mutated, err := marshalKeygenCommitmentsPayloadBypass(payload, keygenCommitmentsOverrides{RingPedersenProof: corruptedRP})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out2[0].Payload = mutated
-	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
-		t.Fatal("keygen accepted commitments message with corrupted Ring-Pedersen proof")
-	}
-}
-
-// keygenCommitmentsOverrides allows selective field substitution when
-// constructing a keygen commitments payload for adversarial tests.
-// Nil fields keep the original payload value.
-type keygenCommitmentsOverrides struct {
-	PaillierPublicKey []byte
-	PaillierProof     []byte
-	RingPedersenProof []byte
-}
-
-// marshalKeygenCommitmentsPayloadBypass constructs a wire-encoded keygen
-// commitments payload, applying the given overrides. Fields not overridden
-// (nil in overrides struct) use the original payload value unchanged.
-// This bypasses the proof/key validation in marshalKeygenCommitmentsPayload;
-// it is used ONLY for tests that verify rejection of corrupted messages.
-func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenCommitmentsOverrides) ([]byte, error) {
-	if err := validateCommitmentPoints(p.Commitments); err != nil {
-		return nil, err
-	}
-	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
-		return nil, errors.New("chain code must be 32 bytes")
-	}
-	// Apply overrides: use original value when override is nil.
-	pkBytes, err := canonicalWireMessageBytes(p.PaillierPublicKey, testLimits())
-	if err != nil {
-		return nil, err
-	}
-	if o.PaillierPublicKey != nil {
-		pkBytes = o.PaillierPublicKey
-	}
-	modProof, err := canonicalWireMessageBytes(p.PaillierProof, testLimits())
-	if err != nil {
-		return nil, err
-	}
-	if o.PaillierProof != nil {
-		modProof = o.PaillierProof
-	}
-	ringPedersenParams, err := canonicalWireMessageBytes(p.RingPedersenParams, testLimits())
-	if err != nil {
-		return nil, err
-	}
-	rpProof, err := canonicalWireMessageBytes(p.RingPedersenProof, testLimits())
-	if err != nil {
-		return nil, err
-	}
-	if o.RingPedersenProof != nil {
-		rpProof = o.RingPedersenProof
-	}
-	return testutil.MarshalFieldsByName(keygenCommitmentsPayloadWireVersion, keygenCommitmentsPayloadWireType, keygenCommitmentsPayload{}, map[string][]byte{
-		"Commitments":        wire.EncodeBytesList(p.Commitments),
-		"PaillierPublicKey":  wire.NonNilBytes(pkBytes),
-		"PaillierProof":      wire.NonNilBytes(modProof),
-		"ChainCodeCommit":    wire.NonNilBytes(p.ChainCodeCommit),
-		"RingPedersenParams": wire.NonNilBytes(ringPedersenParams),
-		"RingPedersenProof":  wire.NonNilBytes(rpProof),
-	})
-}
-
-// TestKeygenRejectsInvalidModulusProof verifies that a keygen commitments
-// message with a structurally valid but cryptographically wrong modulus proof
-// is rejected.
-func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
-	t.Parallel()
-
-	parties := tss.NewPartySet(1, 2)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Tamper with the proof bytes: flip a bit in the transcript hash.
-	payload, err := unmarshalKeygenCommitmentsPayload(out2[0].Payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload.PaillierProof.TranscriptHash[0] ^= 1
-	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	out2[0].Payload = mutated
-	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
-		t.Fatal("keygen accepted commitments message with invalid modulus proof")
-	}
-}
-
-// TestKeygenRejectsInvalidRingPedersenProof verifies that a keygen
-// commitments message with an invalid Ring-Pedersen proof is rejected.
-func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
-	t.Parallel()
-
-	parties := tss.NewPartySet(1, 2)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	payload, err := unmarshalKeygenCommitmentsPayload(out2[0].Payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload.RingPedersenProof.TranscriptHash[0] ^= 1
-	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	out2[0].Payload = mutated
-	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
-		t.Fatal("keygen accepted commitments message with invalid Ring-Pedersen proof")
-	}
-}
-
-// TestKeyShareValidateRejectsMissingLogStarProof verifies that a KeyShare
-// with an empty LogProof is rejected by Validate(). The LogStarProof is
-// critical: it proves that the Paillier-encrypted share matches the
-// public verification share. Without it, a malicious party could submit
-// an unrelated ciphertext that decrypts to a different scalar, recovering
-// the full private key share-by-share.
-func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
-	t.Parallel()
-
+func decodedKeyShareForProofMutation(t *testing.T) *KeyShare {
+	t.Helper()
 	shares := CachedKeygenShares(t, 2, 2)
-	share := shares[1]
-
-	// Marshal/unmarshal to get a clean copy.
-	raw, err := share.MarshalBinary()
+	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,170 +19,43 @@ func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Remove the log proof.
-	decoded.state.LogProof = nil
-	_, err = decoded.MarshalBinary()
-	if err == nil {
-		t.Fatal("KeyShare with missing LogProof marshaled successfully")
-	}
+	return decoded
 }
 
-// TestKeyShareValidateRejectsInvalidLogStarProof verifies that a KeyShare
-// with a tampered LogProof is rejected.
-func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
-	t.Parallel()
-
-	shares := CachedKeygenShares(t, 2, 2)
-	share := shares[1]
-
-	raw, err := share.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := tss.DecodeBinary[KeyShare](raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if decoded.state.LogProof != nil && decoded.state.LogProof.Z1 != nil {
-		decoded.state.LogProof.Z1 = new(big.Int).Add(decoded.state.LogProof.Z1, big.NewInt(1))
-	}
-	_, err = decoded.MarshalBinary()
-	if err == nil {
-		t.Fatal("KeyShare with invalid LogProof marshaled successfully")
-	}
-}
-
-// TestKeyShareValidateRejectsMissingSchnorrProof verifies that a KeyShare
-// with an empty Schnorr share proof is rejected. Without the Schnorr proof,
-// the verification share cannot be authenticated.
+// TestKeyShareValidateRejectsMissingSchnorrProof ensures a persisted epoch
+// cannot omit the proof that its local secret opens the advertised public
+// share.
 func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 	t.Parallel()
-
-	shares := CachedKeygenShares(t, 2, 2)
-	share := shares[1]
-
-	raw, err := share.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := tss.DecodeBinary[KeyShare](raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	decoded := decodedKeyShareForProofMutation(t)
 	decoded.state.ShareProof = nil
-	_, err = decoded.MarshalBinary()
-	if err == nil {
+	if _, err := decoded.MarshalBinary(); err == nil {
 		t.Fatal("KeyShare with missing ShareProof marshaled successfully")
 	}
 }
 
-// TestKeyShareValidateRejectsMissingPaillierProof verifies that a KeyShare
-// without a PaillierProof cannot be marshaled (and thus cannot be persisted).
-// The PaillierProof (Πmod) proves knowledge of the Paillier key factorization.
+// TestKeyShareValidateRejectsMissingPaillierProof ensures every persisted
+// Figure 7 auxiliary key retains its public Pi-mod proof.
 func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 	t.Parallel()
-
-	shares := CachedKeygenShares(t, 2, 2)
-	share := shares[1]
-
-	raw, err := share.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := tss.DecodeBinary[KeyShare](raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	decoded := decodedKeyShareForProofMutation(t)
 	data := decoded.state.PartyData[decoded.state.Party]
 	data.PaillierProof = nil
 	decoded.state.PartyData[decoded.state.Party] = data
-	_, err = decoded.MarshalBinary()
-	if err == nil {
+	if _, err := decoded.MarshalBinary(); err == nil {
 		t.Fatal("KeyShare with missing PaillierProof marshaled successfully")
 	}
 }
 
-// TestKeyShareValidateRejectsMissingRingPedersenProof verifies that
-// a KeyShare without a RingPedersenProof is rejected.
+// TestKeyShareValidateRejectsMissingRingPedersenProof ensures every persisted
+// Figure 7 verifier setup retains its public Pi-prm proof.
 func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 	t.Parallel()
-
-	shares := CachedKeygenShares(t, 2, 2)
-	share := shares[1]
-
-	raw, err := share.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := tss.DecodeBinary[KeyShare](raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	decoded := decodedKeyShareForProofMutation(t)
 	data := decoded.state.PartyData[decoded.state.Party]
 	data.RingPedersenProof = nil
 	decoded.state.PartyData[decoded.state.Party] = data
-	_, err = decoded.MarshalBinary()
-	if err == nil {
+	if _, err := decoded.MarshalBinary(); err == nil {
 		t.Fatal("KeyShare with missing RingPedersenProof marshaled successfully")
 	}
 }
-
-// TestKeygenRejectsCorruptedPaillierPublicKey verifies that a keygen
-// commitments message with a structurally invalid Paillier public key
-// is rejected. The pai.UnmarshalPublicKey call inside marshalKeygenCommitmentsPayload
-// catches this before the message is even sent, and Handle
-// also validates it on receipt.
-func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
-	t.Parallel()
-
-	parties := tss.NewPartySet(1, 2)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The Paillier public key is validated at multiple levels:
-	// 1. marshalKeygenCommitmentsPayload calls pai.UnmarshalPublicKey
-	// 2. Handle calls pai.UnmarshalPublicKey again
-	// A structurally invalid key (not valid TLV) is caught at level 1 (send-side)
-	// or level 2 (receive-side). We verify the receive-side here.
-	payload, err := unmarshalKeygenCommitmentsPayload(out2[0].Payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Use a bypass that skips key validation but still produces valid wire format.
-	keyBytes, err := canonicalWireMessageBytes(payload.PaillierPublicKey, testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	corruptedKey := make([]byte, len(keyBytes))
-	for i := range corruptedKey {
-		corruptedKey[i] = keyBytes[i] ^ 0xFF
-	}
-	mutated, err := marshalKeygenCommitmentsPayloadBypass(payload, keygenCommitmentsOverrides{PaillierPublicKey: corruptedKey})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out2[0].Payload = mutated
-	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
-		t.Fatal("keygen accepted commitments message with corrupted Paillier public key")
-	}
-}
-
-// marshalKeygenWithCorruptedKey constructs a wire-encoded keygen commitments
-// payload with the given Paillier public key bytes substituted, bypassing
-// key validation. Test-only.

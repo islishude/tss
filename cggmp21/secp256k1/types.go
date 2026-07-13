@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"math/big"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -18,37 +17,54 @@ import (
 const (
 	invalidRound = 0
 
-	keygenStartRound        = 1
-	keygenShareRound        = 2
-	keygenConfirmationRound = 3
+	keygenFigure6CommitmentRound = 1
+	keygenFigure6RevealRound     = 2
+	keygenFigure6ProofRound      = 3
+	keygenAuxInfoCommitmentRound = 4
+	keygenAuxInfoRevealRound     = 5
+	keygenAuxInfoProofRound      = 6
+	keygenPaperConfirmationRound = 7
 
-	presignStartRound          = 1
-	presignRound2              = 2
-	presignRound3              = 3
-	presignIdentificationRound = 4
+	presignStartRound    = 1
+	presignRound2        = 2
+	presignRound3        = 3
+	presignRedAlertRound = 4
 
-	refreshStartRound = 1
-	refreshShareRound = 2
-	reshareStartRound = 1
-	reshareShareRound = 2
+	refreshAuxInfoCommitmentRound = 1
+	refreshAuxInfoRevealRound     = 2
+	refreshAuxInfoProofRound      = 3
+	refreshConfirmationRound      = 4
+	childAuxInfoCommitmentRound   = 1
+	childAuxInfoRevealRound       = 2
+	childAuxInfoProofRound        = 3
+	childConfirmationRound        = 4
+	reshareStartRound             = 1
+	reshareShareRound             = 2
+	reshareAuxInfoCommitmentRound = 3
+	reshareAuxInfoRevealRound     = 4
+	reshareAuxInfoProofRound      = 5
+	reshareConfirmationRound      = 6
 
-	signStartRound          = 1
-	signIdentificationRound = 2
+	signStartRound = 1
 )
 
 const (
-	payloadKeygenCommitments     tss.PayloadType = "cggmp21.secp256k1.keygen.commitments"
-	payloadKeygenShare           tss.PayloadType = "cggmp21.secp256k1.keygen.share"
-	payloadKeygenConfirmation    tss.PayloadType = "cggmp21.secp256k1.keygen.confirmation"
-	payloadPresignRound1         tss.PayloadType = "cggmp21.secp256k1.presign.round1"
-	payloadPresignRound1Proof    tss.PayloadType = "cggmp21.secp256k1.presign.round1-proof"
-	payloadPresignRound2         tss.PayloadType = "cggmp21.secp256k1.presign.round2"
-	payloadPresignRound3         tss.PayloadType = "cggmp21.secp256k1.presign.round3"
-	payloadPresignIdentification tss.PayloadType = "cggmp21.secp256k1.presign.identification"
-	payloadSignPartial           tss.PayloadType = "cggmp21.secp256k1.sign.partial"
-	payloadSignIdentification    tss.PayloadType = "cggmp21.secp256k1.sign.identification"
-	payloadRefreshCommitments    tss.PayloadType = "cggmp21.secp256k1.refresh.commitments"
-	payloadRefreshShare          tss.PayloadType = "cggmp21.secp256k1.refresh.share"
+	payloadKeygenConfirmation     tss.PayloadType = "cggmp21.secp256k1.keygen.confirmation"
+	payloadPresignRound1          tss.PayloadType = "cggmp21.secp256k1.presign.round1"
+	payloadPresignRound1Proof     tss.PayloadType = "cggmp21.secp256k1.presign.round1-proof"
+	payloadPresignRound2          tss.PayloadType = "cggmp21.secp256k1.presign.round2"
+	payloadPresignRound3          tss.PayloadType = "cggmp21.secp256k1.presign.round3"
+	payloadPresignRedAlert        tss.PayloadType = "cggmp21.secp256k1.presign.red-alert"
+	payloadSignPartial            tss.PayloadType = "cggmp21.secp256k1.sign.partial"
+	payloadAuxInfoCommitment      tss.PayloadType = "cggmp21.secp256k1.auxinfo.commitment"
+	payloadAuxInfoReveal          tss.PayloadType = "cggmp21.secp256k1.auxinfo.reveal"
+	payloadAuxInfoProofs          tss.PayloadType = "cggmp21.secp256k1.auxinfo.proofs"
+	payloadAuxInfoDirect          tss.PayloadType = "cggmp21.secp256k1.auxinfo.direct"
+	payloadAuxInfoDecryptionError tss.PayloadType = "cggmp21.secp256k1.auxinfo.decryption-error"
+	payloadChildConfirmation      tss.PayloadType = "cggmp21.secp256k1.child-derivation.confirmation"
+	payloadFigure6Commitment      tss.PayloadType = "cggmp21.secp256k1.keygen.figure6-commitment"
+	payloadFigure6Reveal          tss.PayloadType = "cggmp21.secp256k1.keygen.figure6-reveal"
+	payloadFigure6Proof           tss.PayloadType = "cggmp21.secp256k1.keygen.figure6-proof"
 )
 
 // generatePaillierKey creates a Paillier key using the production GenerateKey
@@ -126,8 +142,14 @@ type KeySharePublicMetadata struct {
 	PlanHash             []byte
 	ShareProof           []byte
 	KeygenTranscriptHash []byte
-	LogCiphertext        []byte
-	LogProof             []byte
+	SID                  tss.SessionID
+	RID                  tss.SessionID
+	EpochID              []byte
+	Identifiers          []EpochPartyIdentifier
+	PublicShares         []EpochPublicShare
+	AuxiliaryDigest      []byte
+	SourceEpochID        []byte
+	Epoch                *EpochContext
 }
 
 // Clone returns a deep copy of the key-share metadata snapshot.
@@ -146,8 +168,14 @@ func (m KeySharePublicMetadata) Clone() KeySharePublicMetadata {
 		PlanHash:             bytes.Clone(m.PlanHash),
 		ShareProof:           bytes.Clone(m.ShareProof),
 		KeygenTranscriptHash: bytes.Clone(m.KeygenTranscriptHash),
-		LogCiphertext:        bytes.Clone(m.LogCiphertext),
-		LogProof:             bytes.Clone(m.LogProof),
+		SID:                  m.SID,
+		RID:                  m.RID,
+		EpochID:              bytes.Clone(m.EpochID),
+		Identifiers:          cloneEpochPartyIdentifierMetadata(m.Identifiers),
+		PublicShares:         cloneEpochPublicShareMetadata(m.PublicShares),
+		AuxiliaryDigest:      bytes.Clone(m.AuxiliaryDigest),
+		SourceEpochID:        bytes.Clone(m.SourceEpochID),
+		Epoch:                m.Epoch.Clone(),
 	}
 }
 
@@ -158,6 +186,15 @@ type PresignPublicMetadata struct {
 	Party                tss.PartyID
 	Threshold            int
 	Signers              tss.PartySet
+	PresignID            []byte
+	SID                  tss.SessionID
+	RID                  tss.SessionID
+	EpochID              []byte
+	Identifiers          []EpochPartyIdentifier
+	SourceEpochID        []byte
+	Epoch                *EpochContext
+	LifecycleSlot        string
+	Gamma                []byte
 	R                    []byte
 	LittleR              []byte
 	TranscriptHash       []byte
@@ -178,6 +215,15 @@ func (m PresignPublicMetadata) Clone() PresignPublicMetadata {
 		Party:                m.Party,
 		Threshold:            m.Threshold,
 		Signers:              m.Signers.Clone(),
+		PresignID:            bytes.Clone(m.PresignID),
+		SID:                  m.SID,
+		RID:                  m.RID,
+		EpochID:              bytes.Clone(m.EpochID),
+		Identifiers:          cloneEpochPartyIdentifierMetadata(m.Identifiers),
+		SourceEpochID:        bytes.Clone(m.SourceEpochID),
+		Epoch:                m.Epoch.Clone(),
+		LifecycleSlot:        m.LifecycleSlot,
+		Gamma:                bytes.Clone(m.Gamma),
 		R:                    bytes.Clone(m.R),
 		LittleR:              bytes.Clone(m.LittleR),
 		TranscriptHash:       bytes.Clone(m.TranscriptHash),
@@ -190,6 +236,28 @@ func (m PresignPublicMetadata) Clone() PresignPublicMetadata {
 		KeygenTranscriptHash: bytes.Clone(m.KeygenTranscriptHash),
 		PartiesHash:          bytes.Clone(m.PartiesHash),
 	}
+}
+
+func cloneEpochPartyIdentifierMetadata(in []EpochPartyIdentifier) []EpochPartyIdentifier {
+	if in == nil {
+		return nil
+	}
+	out := make([]EpochPartyIdentifier, len(in))
+	for i := range in {
+		out[i] = in[i].Clone()
+	}
+	return out
+}
+
+func cloneEpochPublicShareMetadata(in []EpochPublicShare) []EpochPublicShare {
+	if in == nil {
+		return nil
+	}
+	out := make([]EpochPublicShare, len(in))
+	for i := range in {
+		out[i] = in[i].Clone()
+	}
+	return out
 }
 
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
@@ -244,11 +312,10 @@ type keyShareState struct {
 	KeygenTranscriptHash   []byte                            `wire:"11,bytes,len=32"`                         // Transcript hash of the completed keygen or reshare confirmation.
 	PaillierProofSessionID tss.SessionID                     `wire:"12,bytes,len=32"`                         // Session ID bound into local Paillier proof transcripts.
 	PaillierProofDomain    string                            `wire:"13,string"`                               // Domain label bound into local Paillier proof transcripts.
-	LogCiphertext          *big.Int                          `wire:"14,bigpos,max_bytes=paillier_ciphertext"` // Public ciphertext used by auxiliary logarithm proofs.
-	LogProof               *zkpai.LogStarProof               `wire:"15,custom,max_bytes=zk_proof"`            // Public proof for the auxiliary logarithm statement.
-	ResharePlanHash        []byte                            `wire:"16,bytes"`                                // Reshare plan digest when this share came from reshare.
-	PlanHash               []byte                            `wire:"17,bytes,len=32"`                         // Lifecycle plan digest that authorized this key share.
-	SecurityParams         SecurityParams                    `wire:"18,record"`                               // Cryptographic profile used to create this share.
+	ResharePlanHash        []byte                            `wire:"14,bytes"`                                // Reshare plan digest when this share came from reshare.
+	PlanHash               []byte                            `wire:"15,bytes,len=32"`                         // Lifecycle plan digest that authorized this key share.
+	SecurityParams         SecurityParams                    `wire:"16,record"`                               // Cryptographic profile used to create this share.
+	Epoch                  *EpochContext                     `wire:"17,record"`                               // Required epoch identity, dynamic Shamir identifiers, and public auxiliary binding.
 }
 
 // Signature is a canonical low-S secp256k1 ECDSA signature encoded as r and s

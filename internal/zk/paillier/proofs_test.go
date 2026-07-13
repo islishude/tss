@@ -17,7 +17,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	params := SecurityParams{
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
 	}
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,6 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 		D:                 responseD,
 		Y:                 encYProver,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
 	affGProof, err := ProveAffG(params, []byte("affg canonical"), affGStmt, AffGWitness{
@@ -113,7 +112,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	}
 	for _, name := range []string{
 		"A", "By", "E", "S",
-		"F", "T", "Y", "W", "WY",
+		"F", "T", "W", "WY",
 	} {
 		t.Run(fmt.Sprintf("affg field %s", name), func(t *testing.T) {
 			mutated, err := prependZeroToWireField(affGRaw, affGProofType, AffGProof{}, name)

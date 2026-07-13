@@ -1,210 +1,224 @@
-# Paillier ZK Proof Notes
+# Paillier and Zero-Knowledge Proof Notes
 
-The Paillier proof package supports the CGGMP21-style secp256k1 path. These
-records are deterministic, transcript-bound proof shells used by the local MtA
-implementation.
+This document inventories the proof systems used by
+`cggmp21/secp256k1`. Relations and figure numbers refer to the bundled 2024
+revision of [`cggmp21.pdf`](cggmp21.pdf). The repository implementation has not
+received an independent cryptographic review.
 
-## Status
+## Production Profile
 
-- Active proof types: <code>ModulusProof</code> (CGGMP24 Πmod),
-  <code>FactorProof</code> (CGGMP21 Πfac),
-  <code>RingPedersenProof</code> (CGGMP24 Πprm),
-  <code>EncProof</code> (Πenc), <code>AffGProof</code> (Πaff-g), and
-  <code>LogStarProof</code> (Πlog\*).
-- Retired `EncryptionProof`, `MTAResponseProof`, and `LogProof` types, wire
-  decoders, golden vectors, and compatibility tests have been removed.
-- All proofs receive explicit <code>SecurityParams</code> (Ell, EllPrime,
-  Epsilon, ChallengeBits, MinPaillierBits) from the CGGMP21 plan/session.
-- <code>MinPaillierBits</code> is enforced for both Paillier public moduli and
-  Ring-Pedersen auxiliary moduli. These are independent public parameters even
-  when protocol material currently generates them together.
-- Integer responses use canonical signed-magnitude encoding; verifier range
-  checks precede all algebraic equation checks.
-- MtA decryption decodes the Paillier plaintext with the centered representative
-  (`m` for `m <= N/2`, otherwise `m-N`) before reduction modulo the secp256k1
-  order. This preserves negative affine masks proved by Πaff-g; unsigned
-  reduction modulo `N` is not equivalent.
-- All proofs use Ring-Pedersen commitments to hide integer witnesses.
-  Commitment nonces are sampled from the configured <code>SecurityParams</code> ranges.
-- Witness scalars and Paillier randomness use fixed-width `secret.Scalar`;
-  signed masks use `secret.SignedInt`. Public proof responses remain `big.Int`.
-- Proof payloads are canonical TLV records through <code>internal/wire</code> at
-  version 1.
-- The package has not yet received independent cryptographic review. The audit
-  guide ([docs/audit-guide.md](audit-guide.md)) maps the active proof surface to
-  facilitate such a review.
+`DefaultSecurityParams()` returns:
+
+```text
+Ell             = 256
+EllPrime        = 1280
+Epsilon         = 512
+ChallengeBits   = 256
+MinPaillierBits = 3072
+```
+
+This follows Appendix C.1 for secp256k1:
+`(Ell,Epsilon,EllPrime)=(kappa,2*kappa,5*kappa)` with `kappa=256`.
+The paper identifies 3072-bit Paillier and Pedersen moduli with 128-round
+`Πmod`/`Πprm` amplification as the 128-bit profile. The curve itself also has an
+approximately 128-bit classical security level.
+
+Each participant generates two independent moduli:
+
+- Paillier `N=pq`, used for encryption and MtA; and
+- auxiliary `Nhat`, used with Ring-Pedersen bases `(s,t)`.
+
+Both must meet `MinPaillierBits`, but they must not be equal and must not share
+one factorization. Verifiers reject reuse of a statement Paillier modulus as
+the auxiliary modulus.
+
+Reduced profiles are explicit test inputs. Security parameters are bound into
+plans, persisted records, and every applicable proof transcript.
 
 ## Proof Inventory
 
-| Proof                                 | Statement                                                                                                                                                                                     | Witness                                                                                                         | Transcript inputs                                                                                                               | Verifier checks                                                                                                                                                                                                      | Wire type                                    | Status                                                |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------- |
-| Πmod (<code>ModulusProof</code>)      | CGGMP24 proof for a Paillier-Blum modulus. Contains <code>w</code> and exactly 128 verifier-derived rounds <code>(x_i,a_i,b_i,z_i)</code>; it never carries prover-supplied <code>y_i</code>. | Paillier prime factors <code>p</code>, <code>q</code> where <code>p ≡ q ≡ 3 (mod 4)</code>.                     | Typed proof transcript: proof tag, curve, proof version, outer domain, party id, Paillier public key, <code>w</code>.           | Structural validation, odd composite N, <code>w,x_i,z_i ∈ Z\*\_N</code>, <code>Jacobi(w,N)=-1</code>, bit checks, <code>z_i^N=y_i</code>, and <code>x_i^4=(-1)^a w^b y_i</code>.                                     | <code>zk.paillier.modulus-proof</code>       | Active (keygen, reshare, refresh)                     |
-| Πfac (<code>FactorProof</code>)       | Prover Paillier modulus `N_i` relative to receiver auxiliary parameters `(N_j,S_j,T_j)`; proves bounded factors and their product.                                                            | Paillier factors `p,q` with `2^Ell < p,q < 2^Ell sqrt(N_i)` plus signed masks.                                  | Security parameters, lifecycle domain, prover/verifier identities, both moduli, receiver bases, and `P,Q,A,B,T`.                | Canonical/unit/range checks and all three Ring-Pedersen equations for the two factors and `pq=N_i`; zero Fiat-Shamir challenges are retried/rejected.                                                                | <code>zk.paillier.factor-proof</code>        | Active (receiver-specific keygen, refresh, reshare)   |
-| Πprm (<code>RingPedersenProof</code>) | CGGMP24 proof of Ring-Pedersen parameters <code>(N,s,t)</code>, proving knowledge of λ such that <code>s=t^λ mod N</code>.                                                                    | Ring-Pedersen secret λ.                                                                                         | Typed proof transcript: proof tag, curve, proof version, outer domain, party id, canonical parameter bytes, commitments.        | Validates <code>(N,s,t)</code>, <code>N</code> against <code>SecurityParams.MinPaillierBits</code>, exact 128 rounds, verifier-derived challenge bits, response bounds, and <code>t^z = commitment·s^e mod N</code>. | <code>zk.paillier.ring-pedersen-proof</code> | Active (keygen, reshare, refresh)                     |
-| Πenc (<code>EncProof</code>)          | Paillier encryption of a plaintext in ±2^Ell, with Ring-Pedersen commitment under the verifier's auxiliary parameters.                                                                        | Scalar <code>k</code>, Paillier randomness <code>ρ</code>.                                                      | Typed transcript: curve, proof tag, version, SecurityParams, state, prover N, verifier N/S/T, K, S, A, C.                       | Ciphertext/point/RP membership, z1/z3 range, challenge recomputation, Paillier equation, RP equation.                                                                                                                | <code>zk.paillier.enc-proof</code>           | Primitive retained and tested; no active protocol use |
-| Πaff-g (<code>AffGProof</code>)       | MtA response: D = x⊙C ⊕ Enc(y;ρ), X=x·G, Y=Enc(y), YPoint=y·G, and AlphaPoint=x·K+YPoint.                                                                                                     | Scalar <code>x</code>, fixed-width signed integer <code>y</code> in ±2^EllPrime, randomness <code>ρ, ρY</code>. | Typed transcript binds both Paillier keys, verifier parameters, ciphertexts, K/X, YPoint/AlphaPoint, and all proof commitments. | Membership/range checks, two Paillier equations, two Ring-Pedersen equations, and three curve equations sharing the integer responses.                                                                               | <code>zk.paillier.aff-g-proof</code>         | Active (presign round 2 via <code>mta.Respond</code>) |
-| Πlog\* (<code>LogStarProof</code>)    | Paillier ciphertext and curve point share discrete log in range, with Ring-Pedersen commitment under verifier parameters.                                                                     | Scalar <code>x</code>, Paillier randomness <code>ρ</code>.                                                      | Typed transcript: curve, proof tag, version, SecurityParams, state, Paillier N, verifier N/S/T, C, X, B, S, A, Y, D.            | Ciphertext/point/RP membership, z1/z3 range, challenge recomputation, Paillier equation, curve equation, RP equation.                                                                                                | <code>zk.paillier.logstar-proof</code>       | Active (presign round 1, keygen, reshare, refresh)    |
+### Active paper-path proofs
 
-## Usage by Protocol Phase
+| Proof      | Paper relation and active use                                                       | Main verifier checks                                                                                                 | Canonical wire type               |
+| ---------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| Schnorr    | Figure 6 key contribution and Figure 7/F.1 polynomial coefficients                  | Canonical points/scalars, committed first message, common RID/coin domain, party and coefficient                     | `internal/zk/schnorr.Proof`       |
+| `Πprm`     | Figure 7 auxiliary `(Nhat,s,t)`, using the repository CGGMP24-style parameter proof | Independent auxiliary modulus, unit/Jacobi checks, exactly 128 verifier-derived bits, response bounds, `t^z = A*s^e` | `zk.paillier.ring-pedersen-proof` |
+| `Πmod`     | Figure 7 Paillier-Blum modulus                                                      | Odd composite modulus, exactly 128 verifier-derived rounds, unit/Jacobi checks, all root equations                   | `zk.paillier.modulus-proof`       |
+| `Πfac`     | Figure 7 receiver-specific bounded-factor statement                                 | Prover `N`, recipient `(Nhat,s,t)`, factor ranges, unit/range checks, three Ring-Pedersen equations                  | `zk.paillier.factor-proof`        |
+| `Πenc-elg` | Figure 8 round 1 for both encrypted `k_i` and `gamma_i`                             | Ciphertext membership, plaintext range, ElGamal commitment equations, recipient auxiliary setup, shared challenge    | `zk.paillier.enc-elg-proof`       |
+| `Πelog`    | Figure 8 round 2 for `Gamma_i` and round 3 for `Delta_i`                            | Canonical non-identity points, shared scalar responses, both ElGamal/discrete-log equations                          | `zk.paillier.elog-proof`          |
+| `Πaff-g`   | Figure 8 round 2 pairwise affine responses                                          | Both Paillier moduli, recipient auxiliary setup, ciphertext membership, signed ranges, Paillier and curve equations  | `zk.paillier.aff-g-proof`         |
+| `Πaff-g*`  | Figure 9 setup-less peer relation                                                   | Exact public MtA response pair, both moduli, bit-amplified equations, bounded responses                              | `zk.paillier.aff-g-star-proof`    |
+| `Πdec`     | Figure 9 aggregate decryption relation                                              | Aggregate ciphertext, public curve relation, bit-amplified equations, bounded responses                              | `zk.paillier.dec-proof`           |
 
-| Phase           | Proofs used                                          | Code location                                                                                                      |
-| --------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Keygen          | Πmod, Πfac, Πprm (Ring-Pedersen), Πlog\*             | <code>keygen.go</code>, <code>internal/zk/paillier/factor.go</code>, <code>internal/zk/paillier/logstar.go</code>  |
-| Presign round 1 | Πlog\* (LogStarProof, per verifier)                  | <code>presign_round1.go</code>, <code>internal/mta/start.go</code>, <code>internal/zk/paillier/logstar.go</code>   |
-| Presign round 2 | Πaff-g (AffGProof , pairwise, delta and sigma kinds) | <code>sign.go</code>, <code>internal/mta/mta.go</code>, <code>internal/zk/paillier/affg.go</code>                  |
-| Reshare         | Πmod, Πfac, Πprm, Πlog\*                             | <code>reshare.go</code>, <code>internal/zk/paillier/factor.go</code>, <code>internal/zk/paillier/logstar.go</code> |
-| Refresh         | Πmod, Πfac, Πprm, Πlog\*                             | <code>refresh.go</code>, <code>internal/zk/paillier/factor.go</code>, <code>internal/zk/paillier/logstar.go</code> |
+Figure 10 needs no additional zero-knowledge proof. It verifies each partial
+directly using the normalized Figure 8 commitments.
 
-## Decoder Boundary
+### Retained primitives
 
-Production proof decoders only accept TLV. They reject JSON payloads, wrong
-proof type identifiers, duplicate or unsorted fields, trailing bytes,
-non-canonical integers, malformed proof records, oversized MtA response
-scalars, and malformed curve points. Public-key-aware MtA verification also
-caps ciphertext commitments and randomness to the Paillier modulus size before
-converting them to big integers. There is no proof conversion
-helper in the production package; callers must regenerate unsupported proof
-bytes through the current keygen and presign flows.
+The following canonical primitives remain in `internal/zk/paillier` but do not
+replace the active Figure 6-10 relations above:
 
-## Constant-Time Operations
+| Primitive                | Current role                                                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Πenc` (`EncProof`)      | Standalone range-proof primitive and tests; not emitted by the active Figure 8 path.                                                                  |
+| `Πlog*` (`LogStarProof`) | Used by the temporary reshare handoff and retained MtA helpers; it is not the Figure 8 round-1 relation and is not part of the final refreshed epoch. |
+| `Πmul`, `Πmul*`          | Retained internal primitives and tests; the active Figure 9 payload uses `Πaff-g*` and `Πdec`.                                                        |
 
-All Paillier private-key operations use <code>filippo.io/bigmod</code> via
-<code>internal/paillier/paillierct</code>:
+Unsupported historical proof shapes have no compatibility decoder. Protocol
+state must be regenerated through the current flows.
 
-| Operation                             | Implementation                                                                 | Location                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| <code>c^λ mod n²</code> (Decrypt)     | <code>paillierct.ExpSecretBlinded</code> with ciphertext blinding              | <code>internal/paillier/paillier.go</code> |
-| <code>c^b mod n²</code> (MtA Respond) | <code>paillierct.ExpCT</code> (no blinding — ZK proof verifies exact relation) | <code>internal/mta/mta.go</code>           |
+## Figure 7 Proof Schedule
 
-This table covers secret-exponent operations only. The package does not claim
-that all Paillier arithmetic is constant-time.
+Figure 7 commits before its final proof domains are known:
 
-## Blockers Before Production Use
+1. Each party prepares independent Paillier and auxiliary factorization state,
+   the `Πmod` first-message commitment, `Πprm`, polynomial commitments, Schnorr
+   first messages, DH keys, RID contribution, and decommitment.
+2. The party broadcasts only a hash commitment.
+3. After all openings verify, every party derives the common RID, dynamic
+   identifiers, and target epoch.
+4. Schnorr proofs and `Πmod` are finalized under that common context.
+5. Each recipient receives a distinct `Πfac` whose statement uses that
+   recipient's `(Nhat,s,t)`.
 
-- Review the outer proof-domain fields against the final CGGMP21 message schedule.
-- Complete an independent cryptographic review of the Paillier/ZK layer and
-  identifiable-abort behavior.
+Proof objects are prepared before the state transition that makes their
+envelopes visible. A marshal, envelope, replay, or commit failure destroys
+uncommitted proof state and retained factors.
 
-## Security Audit Coverage
+## Figure 8 Proof Schedule
 
-The proof system has been systematically audited through a multi-phase test
-campaign (see `internal/zk/paillier/*_test.go` and
-`cggmp21/secp256k1/proof_omission_test.go`). Each phase targets a specific
-security property required for production CGGMP TSS.
+Round 1 uses `Πenc-elg`, not a ciphertext-to-fixed-base discrete-log proof. For
+the encrypted nonce `K_i`, the statement binds:
 
-### Phase 1: Special Soundness (Σ-Protocol Extractor)
+```text
+K_i = Enc_i(k_i)
+A_i,1 = [a_i]G
+A_i,2 = [a_i]Y_i + [k_i]G
+```
 
-**Covered by**: `extractor_test.go` (Tier 1)
+The encrypted `gamma_i` statement uses the corresponding `B_i` pair. Each
+proof is recipient-specific because it uses that recipient's independent
+auxiliary parameters.
 
-Every Σ-protocol proof type has a corresponding test demonstrating that two
-accepting transcripts with identical commitments but different challenges allow
-witness extraction:
+Round 2 uses `Πelog` to bind `Gamma_i=[gamma_i]G` to the round-1 `B_i` pair.
+Each delta and chi MtA response carries `Πaff-g`, binding the responder scalar,
+wide signed affine mask, response ciphertexts, curve commitment, both Paillier
+keys, and recipient auxiliary setup.
 
-- `TestEncProofSpecialSoundness` — extracts `k`
-- `TestAffGProofSpecialSoundness` — extracts `x` and `y`
-- `TestLogStarProofSpecialSoundness` — extracts `x`
+Round 3 uses `Πelog` to bind `Delta_i=[k_i]Gamma` to the round-1 `A_i` pair.
+The aggregate equations are then checked directly; no repository-specific
+replacement proof is inserted.
 
-These tests use a deterministic RNG (`replayReader`) to produce identical
-commitments with different challenges via distinct domain labels.
+## Figure 9 Proof Schedule
 
-### Phase 2: Challenge Distribution (Fiat-Shamir Soundness)
+On an aggregate delta or chi failure, each signer creates one public record for
+the selected relation:
 
-**Covered by**: `challenge_distribution_test.go` (Tier 3, `slowcrypto`)
+- the canonical inbound and outbound MtA response for every peer;
+- one setup-less `Πaff-g*` per peer; and
+- one `Πdec` over the aggregated ciphertext and claimed curve result.
 
-- Πmod challenge (y_i) bit distribution via chi-squared test (10000 samples)
-- Πprm single-bit challenge binomial test (100 proofs × 128 rounds = 12800 bits)
-- Πprm bit independence (lag-1 autocorrelation test)
-- New proof ChallengeSigned distribution (5000 challenges, 128-bit chi-squared)
-- Modular bias test for ChallengeSigned (MSB uniformity)
+These proofs use independent bit challenges. The canonical payload is bounded
+before decode and before replay state is committed. Evidence contains only
+public proof material and authenticated envelopes; witnesses, factors, masks,
+nonce shares, and Paillier randomness are forbidden.
 
-### Phase 3: Range Bound Boundary Precision
+## Challenge Derivation
 
-**Covered by**: `range_boundary_test.go` (Tier 0/1)
+Repository-defined transcript entries use typed, labeled encodings. Every
+proof domain binds its proof tag and version, the security profile, protocol
+context, prover, recipient when applicable, and the complete public statement
+and commitment set.
 
-- `InSignedPowerOfTwo` accepts at ±2^bits, rejects at ±(2^bits+1)
-- `InUnsignedPowerOfTwo` accepts [0, 2^bits), rejects at 2^bits
-- `inMultRange` accepts at ±N·2^bits, rejects at ±(N·2^bits+1)
-- Every new proof type: out-of-range responses rejected at exact boundary
+Field-scalar Fiat-Shamir challenges are produced by labeled SHA-256 expansion
+and rejection sampling. The accepted representative is canonical and non-zero:
 
-### Phase 4: Parameter Consistency
+```text
+1 <= e < q
+```
 
-**Covered by**: `params_consistency_test.go` (Tier 0/1)
+Modulus challenges sample uniformly below the modulus with the standard
+multiple-of-`N` cutoff and then reject non-units. The field and modulus samplers
+are bounded and fail closed after 256 attempts. `Πmod` and `Πprm` retain their
+fixed 128-round amplification required by the profile.
 
-- DefaultSecurityParams values match documentation (Ell=256, EllPrime=848, Epsilon=230, ChallengeBits=128, MinPaillierBits=3072)
-- EncRange() = Ell + max(ChallengeBits, Epsilon) = 486
-- AffGRange() = EllPrime + max(ChallengeBits, Epsilon) = 1078
-- Statistical hiding analysis: ~358 bits with production params
-- ChallengeBits ≤ 256 (SHA-256 output limit)
-- Every new proof transcript binds all SecurityParams fields, including
-  EllPrime and MinPaillierBits even when a specific proof does not otherwise
-  consume that field in its range equation
-- Package-local test security parameters are strictly weaker than production
+Proof decoders never accept a prover-supplied challenge in place of transcript
+derivation.
 
-### Phase 5: Witness-Statement Relation Completeness
+## Integer and Ciphertext Boundaries
 
-**Covered by**: `relation_audit_test.go` (Tier 1)
+- Paillier ciphertexts are checked for membership in `Z*_(N^2)` before
+  algebraic verification.
+- Ring-Pedersen parameters and commitments are checked in `Z*_(Nhat)` with the
+  required public Jacobi conditions.
+- Signed responses use canonical signed-magnitude TLV encoding. Verifier range
+  checks precede proof equations.
+- MtA affine masks are fixed-width signed integers in the `EllPrime` range, not
+  curve scalars.
+- Paillier decryption converts a plaintext to the centered representative
+  before reduction modulo the secp256k1 order. Treating a negative mask as its
+  unsigned residue modulo `N` changes the protocol relation.
+- The configured modulus size must cover the largest paper plaintext range and
+  aggregation slack; validation fails before proof work when it cannot.
 
-- Every EncProof/AffGProof/LogStarProof statement field is transcript-bound
-- Every algebraic verification equation tested independently
-- Statement Y == proof Y check in AffGProof
-- Wrong public key / wrong ciphertext / wrong verifier aux all rejected
-- Paillier key domain separation (all proof tags verified distinct)
+## Constant-Time Boundary
 
-### Phase 6: Adversarial Proof Construction
+Secret-exponent modular exponentiation goes through
+`internal/paillier/paillierct` using fixed-width encodings and
+`filippo.io/bigmod`:
 
-**Covered by**: `adversarial_test.go` (Tier 1)
+| Secret operation                      | Required path                 |
+| ------------------------------------- | ----------------------------- |
+| Paillier private decryption exponent  | `paillierct.ExpSecretBlinded` |
+| MtA responder scalar exponentiation   | `paillierct.ExpCT`            |
+| Secret signed Ring-Pedersen exponents | constant-time signed helpers  |
 
-- EncProof rejects S=N (non-unit) and S=1 (trivial commitment)
-- Cross-proof field substitution (z1 from proof A in proof B) rejected
-- Proof replay across different statements (C, D, ciphertext) rejected
-- Proof replay across different domains rejected
-- Zero-witness edge cases handled correctly (k=0, y=0)
-- Ring-Pedersen commitment collision resistance verified
-- Non-unit commitments (0, N, N²) rejected for all proof types
-- Degenerate Ring-Pedersen parameters (S=1) rejected
-- Parameter downgrade attack: 512-bit proof rejected under 3072-bit params
+This is a limited boundary, not a claim that the complete implementation,
+proof generation, Go runtime, or key generation is constant time. Public
+verification arithmetic may use variable-time `math/big` operations.
 
-### Phase 7: Protocol-Level Proof Omission
+## Canonical Decoder Boundary
 
-**Covered by**: `proof_omission_test.go` (Tier 2, `integration`)
+Every proof uses `internal/wire` version-1 typed TLV. Decoders reject:
 
-- Corrupted Πmod → keygen Handle returns error
-- Corrupted Πprm → keygen Handle returns error
-- Corrupted PaillierPublicKey → keygen Handle returns error
-- bit-flipped Πmod/Πprm → rejected at protocol level
-- Missing LogStarProof → KeyShare.MarshalBinary returns error
-- Tampered LogStarProof → KeyShare.MarshalBinary returns error
-- Missing ShareProof (Schnorr) → KeyShare.MarshalBinary returns error
-- Missing PaillierProof → KeyShare.MarshalBinary returns error
-- Missing RingPedersenProof → KeyShare.MarshalBinary returns error
+- wrong proof type or schema version;
+- missing, extra, duplicate, or unsorted fields;
+- trailing bytes;
+- non-canonical or oversized integers;
+- invalid curve points, ciphertexts, or group elements;
+- response-count mismatches; and
+- nested records exceeding the enclosing protocol limits.
 
-### Phase 8: Challenge Zero Guard
+There is no JSON fallback or proof-conversion path in production code.
 
-**Covered by**: `challenge_zero_test.go` (Tier 0)
+## Verification Evidence
 
-- New `Transcript.ChallengeSigned()` (transcript.go) REJECTS zero with error
-- 1-bit challenge zero-guard tested: ~50% rejection rate confirmed
+Tests cover, at the appropriate tier:
 
-### Known Limitations
+- canonical encode/decode and exact field sets;
+- statement, domain, party, recipient, epoch, and security-profile mutation;
+- exact range boundaries and non-members;
+- proof omission and bit-flip rejection at the protocol layer;
+- special-soundness extraction for retained single-challenge range proofs;
+- fixed-round challenge derivation and zero-challenge guards;
+- independent `N`/`Nhat` generation and equality rejection;
+- Figure 8 equations and Figure 9 all-valid/invariant behavior; and
+- production-parameter smoke tests behind `slowcrypto`.
 
-1. **Πmod proof** verifier-derived y_i values use `expandHash` which may have
-   subtle biases when deriving values in Z\*\_N for small N. With production
-   (3072-bit) moduli, the rejection sampling rate is negligible.
+These tests are evidence about the implementation. They are not a formal proof
+or independent cryptographic audit.
 
-2. **Statistical hiding** with production params provides ~358 bits of hiding
-   (EncRange − ChallengeBits = 486 − 128). This exceeds the 128-bit target
-   but is less than the 128-bit statistical security parameter (ε=230) might
-   suggest when considered as an additive bound.
+## Known Limitations and Review Requirements
 
-### Files
-
-| File                                       | Tier | Contents                              |
-| ------------------------------------------ | ---- | ------------------------------------- |
-| `extractor_test.go`                        | 1    | Special soundness extractor tests     |
-| `challenge_distribution_test.go`           | 3    | Challenge distribution (slowcrypto)   |
-| `range_boundary_test.go`                   | 0/1  | Range bound boundary precision        |
-| `params_consistency_test.go`               | 0/1  | Parameter consistency verification    |
-| `relation_audit_test.go`                   | 1    | Witness-statement relation audit      |
-| `adversarial_test.go`                      | 1    | Adversarial proof construction        |
-| `challenge_zero_test.go`                   | 0    | Challenge zero guard audit            |
-| `cggmp21/secp256k1/proof_omission_test.go` | 2    | Protocol-level omission (integration) |
+1. The Paillier/ZK code, Fiat-Shamir composition, and concrete range analysis
+   need independent review against the bundled paper.
+2. The repository uses CGGMP24-style `Πmod` and `Πprm` constructions within the
+   2024 CGGMP21 protocol schedule; that composition needs explicit review.
+3. The Appendix F.1 threshold adaptation, repository epoch bindings, and
+   lifecycle transaction model extend beyond the paper's exact implementation
+   description.
+4. Secret cleanup is best effort in Go and is not a memory-forensic guarantee.
+5. Production use also requires independently reviewed randomness, transport,
+   storage encryption, database transactions, key management, and operational
+   recovery.

@@ -9,7 +9,6 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/shamir"
 )
 
 // SecretKey is an explicitly exportable canonical secp256k1 private key.
@@ -132,9 +131,9 @@ func ReconstructSecretKeyWithLimits(limits Limits, shares ...*KeyShare) (*Secret
 	ids = tss.SortParties(ids)
 	acc := secp.ScalarZero()
 	for _, id := range ids {
-		lambda, err := shamir.LagrangeCoefficient(id, ids)
+		lambda, err := epochLagrangeCoefficient(reference.state.Epoch, id, ids)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("derive reconstruction coefficient for party %d: %w", id, err)
 		}
 		local, err := secpScalarFromSecret(byID[id].state.Secret)
 		if err != nil {
@@ -167,6 +166,17 @@ func validateCGGMPReconstructionShare(reference, candidate *KeyShare, limits Lim
 	if err != nil {
 		return err
 	}
+	if reference.state.Epoch == nil || candidate.state.Epoch == nil {
+		return errors.New("key share is missing its lifecycle epoch")
+	}
+	referenceEpoch, err := reference.state.Epoch.MarshalBinaryWithLimits(limits)
+	if err != nil {
+		return fmt.Errorf("encode reference epoch: %w", err)
+	}
+	candidateEpoch, err := candidate.state.Epoch.MarshalBinaryWithLimits(limits)
+	if err != nil {
+		return fmt.Errorf("encode candidate epoch: %w", err)
+	}
 	if candidate.state.Threshold != reference.state.Threshold ||
 		!slices.Equal(candidate.state.Parties, reference.state.Parties) ||
 		!bytes.Equal(candidate.state.PublicKey, reference.state.PublicKey) ||
@@ -177,6 +187,7 @@ func validateCGGMPReconstructionShare(reference, candidate *KeyShare, limits Lim
 		!bytes.Equal(candidate.state.ResharePlanHash, reference.state.ResharePlanHash) ||
 		!bytes.Equal(candidate.state.KeygenTranscriptHash, reference.state.KeygenTranscriptHash) ||
 		!bytes.Equal(candidate.state.PlanHash, reference.state.PlanHash) ||
+		!bytes.Equal(candidateEpoch, referenceEpoch) ||
 		candidate.state.SecurityParams != reference.state.SecurityParams {
 		return errors.New("key shares are not from the same lifecycle generation")
 	}

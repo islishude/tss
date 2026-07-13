@@ -157,28 +157,30 @@ func (*presignState) WireType() string { return presignWireType }
 // WireVersion returns the wire format version for presignState.
 func (*presignState) WireVersion() uint16 { return presignWireVersion }
 
-// BeforeMarshalWire prepares presignState for reflection-backed encoding.
+// BeforeMarshalWire rejects every state except an unclaimed available record.
+// It is deliberately side-effect free: persistence must not consume a
+// presign before the lifecycle store atomically claims it with an attempt.
 func (state *presignState) BeforeMarshalWire() error {
 	if state == nil {
 		return errors.New("nil presign state")
 	}
-	if state.Consumed.Bool == nil {
-		state.Consumed = NewAtomicBoolWire(true)
+	if state.Consumed.Bool == nil || state.attempt == nil {
+		return errors.New("presign lifecycle state unavailable")
 	}
-	state.Consumed.Store(true)
+	if state.Consumed.Load() || !state.attempt.available() {
+		return errors.New("only available presigns can be serialized")
+	}
 	return nil
 }
 
-// AfterUnmarshalWire rebuilds runtime-only presign attempt state.
+// AfterUnmarshalWire restores a persisted record to the available state. The
+// consumed marker is runtime-only and is intentionally absent from the wire.
 func (state *presignState) AfterUnmarshalWire() error {
 	if state == nil {
 		return errors.New("nil presign state")
 	}
-	if state.Consumed.Bool == nil {
-		return errors.New("presign consumed state unavailable")
-	}
-	state.Consumed.Store(true)
-	state.attempt = newPresignAttemptBinding(true)
+	state.Consumed = NewAtomicBoolWire(false)
+	state.attempt = newPresignAttemptBinding(false)
 	return nil
 }
 
@@ -200,10 +202,6 @@ func presignCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
 		{name: "point", dst: &limits.Curve.MaxPointBytes},
 		{name: "signers", dst: &limits.Threshold.MaxSigners},
 		{name: "threshold", dst: &limits.Threshold.MaxThreshold},
-		{name: "paillier_modulus_bits", dst: &limits.Paillier.MaxModulusBits},
-		{name: "paillier_public_key", dst: &limits.Paillier.MaxPublicKeyBytes},
-		{name: "paillier_ciphertext", dst: &limits.Paillier.MaxCiphertextBytes},
-		{name: "signprep_proof", dst: &limits.SignPrep.MaxProofBytes},
 	}
 	for _, item := range required {
 		value, ok := fieldLimits[item.name]
@@ -215,12 +213,6 @@ func presignCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
 		}
 		*item.dst = value
 	}
-	limits.SignPrep.MaxVerificationEntryBytes =
-		limits.Curve.MaxPointBytes*2 +
-			limits.Paillier.MaxCiphertextBytes*2 +
-			limits.Paillier.MaxPublicKeyBytes + 64
-	limits.SignPrep.MaxVerificationContextBytes =
-		4 + limits.Threshold.MaxSigners*(4+limits.SignPrep.MaxVerificationEntryBytes)
 	return limits, nil
 }
 
@@ -274,7 +266,10 @@ func (p *Presign) unmarshalWireMessageWithLimits(in []byte, limits Limits, opts 
 		return err
 	}
 	decoded := &Presign{state: &state}
-	if err := decoded.ValidateWithLimits(limits); err != nil {
+	// A persisted available record is accepted only after replaying every
+	// normalized Figure 8 opening and aggregate commitment equation. Structural
+	// canonicality alone is not sufficient at this secret-state boundary.
+	if err := decoded.VerifyCryptographicMaterialWithLimits(limits); err != nil {
 		decoded.Destroy()
 		return err
 	}

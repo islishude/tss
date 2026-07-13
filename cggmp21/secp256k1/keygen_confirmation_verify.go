@@ -10,6 +10,8 @@ import (
 	"github.com/islishude/tss/internal/bip32util"
 )
 
+const cggmpChainCodeCommitLabel = "cggmp21-secp256k1-chain-code-commit-v1"
+
 func compareKeygenConfirmationBindingFields(local, confirmation *KeygenConfirmation) error {
 	if confirmation.SessionID != local.SessionID {
 		return fmt.Errorf("keygen confirmation session mismatch from party %d", confirmation.Sender)
@@ -31,6 +33,9 @@ func compareKeygenConfirmationBindingFields(local, confirmation *KeygenConfirmat
 	}
 	if !bytes.Equal(confirmation.PlanHash, local.PlanHash) {
 		return fmt.Errorf("keygen confirmation from party %d: %w", confirmation.Sender, errPlanHashMismatch)
+	}
+	if !bytes.Equal(confirmation.EpochID, local.EpochID) {
+		return fmt.Errorf("keygen confirmation epoch mismatch from party %d", confirmation.Sender)
 	}
 	return nil
 }

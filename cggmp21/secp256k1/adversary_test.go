@@ -4,13 +4,13 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
-	"github.com/islishude/tss/internal/wire"
 )
 
 func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
@@ -19,20 +19,27 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := tss.NewPartySet(1, 2)
-	kg1, out1, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
+	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	kg2, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	commit := out2[0]
-	shareOut, err := kg2.Handle(testutil.DeliverEnvelope(out1[0]))
+	direct, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
+		SessionID:   sessionID,
+		Round:       keygenAuxInfoProofRound,
+		From:        2,
+		To:          1,
+		PayloadType: payloadAuxInfoDirect,
+		Payload:     []byte("malformed-direct-payload"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	share := mustCGGMPEnvelope(t, shareOut, payloadKeygenShare, 1)
 	t.Run("wrong session", func(t *testing.T) {
 		mutated := commit
 		mutated.SessionID, err = tss.NewSessionID(nil)
@@ -55,7 +62,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
-		mutated := share
+		mutated := direct
 		mutated.To = 3
 		_, err := kg1.Handle(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrWrongRecipient) {
@@ -63,7 +70,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		}
 	})
 	t.Run("broadcast secret share", func(t *testing.T) {
-		mutated := share
+		mutated := direct
 		mutated.To = 0
 		_, err := kg1.Handle(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrExpectedDirectMessage) {
@@ -71,7 +78,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		}
 	})
 	t.Run("non-confidential secret share", func(t *testing.T) {
-		mutated := share
+		mutated := direct
 		_, err := kg1.Handle(testutil.DeliverEnvelopeWithProtection(mutated, tss.ChannelPlaintext))
 		if !errors.Is(err, tss.ErrMissingConfidentiality) {
 			t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
@@ -112,7 +119,7 @@ func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := testutil.RewriteWireFieldByName(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayload{}, "Commitments", wire.EncodeBytesList([][]byte{{0x02}}))
+	mutated, err := testutil.RewriteWireFieldByName(out2[0].Payload, figure6CommitmentPayloadWireType, figure6CommitmentPayload{}, "Commitment", []byte{0x02})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +193,7 @@ func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 		name   string
 		mutate func(*presignRound1Payload)
 	}{
-		{name: "gamma", mutate: func(p *presignRound1Payload) { p.Gamma = []byte{0x02} }},
+		{name: "Y", mutate: func(p *presignRound1Payload) { p.Y = []byte{0x02} }},
 		{name: "enc_k", mutate: func(p *presignRound1Payload) { p.EncK = []byte{0x01} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -444,7 +451,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 			t.Fatal(err)
 		}
 		mutated, err := mutatePresignRound1Payload(out2[0].Payload, func(p *presignRound1Payload) {
-			p.Gamma = []byte{0x02}
+			p.Y = []byte{0x02}
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -622,12 +629,13 @@ func TestCGGMP21SignRejectsBadDigestAndConflictingReuseBeforeOutbound(t *testing
 		t.Fatalf("bad digest should fail before creating session/outbound message: session=%v out=%d err=%v", session, len(out), err)
 	}
 	digest := sha256.Sum256([]byte("reuse outbound"))
-	store := newTestSignAttemptStore()
-	_, firstOut, err := StartSignDigestWithStore(h.shares[1], presigns[1], signID, digest[:], store)
+	store := newTestLifecycleStore()
+	firstSession, firstOut, err := StartSignDigestWithStore(h.shares[1], presigns[1], signID, digest[:], store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, resumedOut, err := StartSignDigestWithStore(h.shares[1], presigns[1], signID, digest[:], store)
+	query := firstSession.attempt.Query()
+	_, resumedOut, err := ResumeSign(context.Background(), store, query, firstSession.Guard())
 	if err != nil {
 		t.Fatalf("same attempt did not resume: %v", err)
 	}

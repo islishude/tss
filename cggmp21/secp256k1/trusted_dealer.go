@@ -215,13 +215,33 @@ func NewTrustedDealerImport(secretKey *SecretKey, option TrustedDealerImportOpti
 	return plan, contributions, nil
 }
 
-// StartTrustedDealerImport starts keygen using this party's dealer-provisioned
-// constant term while preserving the ordinary keygen rounds and payloads.
+// StartTrustedDealerImport starts the same Figure 6 then Figure 7 flow as
+// StartKeygen, using the dealer-provisioned additive x_i as the Figure 6
+// contribution and enforcing the dealer plan's public contribution and
+// chain-code commitments.
 func StartTrustedDealerImport(plan *TrustedDealerImportPlan, contribution *TrustedDealerContribution, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil trusted-dealer import plan"))
 	}
 	if err := plan.ValidateWithLimits(plan.limits); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
+	config, err := plan.thresholdConfig(local)
+	if err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
+	if err := config.ValidateWithLimits(plan.limits.ThresholdLimits()); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
+	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
+	config.Parties = config.SortedParties()
+	planHash, err := plan.Digest()
+	if err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	claimedScalar, claimedChainCode, err := contribution.beginClaimForPlan(plan, local.Self)
@@ -236,57 +256,19 @@ func StartTrustedDealerImport(plan *TrustedDealerImportPlan, contribution *Trust
 			contribution.rollbackClaim()
 		}
 	}()
-	config, err := plan.thresholdConfig(local)
-	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
-	}
-	if err := config.ValidateWithLimits(plan.limits.ThresholdLimits()); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
-	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
-	}
-	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
-	}
-	planHash, err := plan.Digest()
-	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
-	}
-	constant, err := secpScalarFromSecret(claimedScalar)
-	if err != nil {
-		return nil, nil, err
-	}
-	material, err := generateKeygenLocalMaterialWithContribution(
+	session, out, err := startPaperKeygenResolved(
 		config,
 		plan.limits,
+		plan.state.SecurityParams,
 		planHash,
-		&constant,
+		claimedScalar,
 		claimedChainCode,
-		plan.state.PaillierBits,
+		plan,
+		guard,
 	)
 	if err != nil {
 		return nil, nil, err
 	}
-	session, err := newKeygenSession(config, plan.limits, plan.state.SecurityParams, planHash, guard, material, plan)
-	if err != nil {
-		material.Destroy()
-		return nil, nil, err
-	}
-	prepared := &preparedCGGMPKeygenStart{session: session}
-	defer prepared.destroy()
-	out, err := emitKeygenRound1(session, material)
-	if err != nil {
-		return nil, nil, err
-	}
-	prepared.out = out
-	more, err := session.tryAdvance()
-	if err != nil {
-		return nil, nil, err
-	}
-	out = append(out, more...)
-	prepared.out = out
-	prepared.markCommitted()
 	contribution.commitClaim()
 	committed = true
 	return session, out, nil
@@ -509,6 +491,12 @@ func (p *TrustedDealerImportPlan) ValidateWithLimits(limits Limits) error {
 
 // Validate validates the public import plan with production limits.
 func (p *TrustedDealerImportPlan) Validate() error {
+	if p == nil || p.state == nil {
+		return errors.New("nil trusted-dealer import plan")
+	}
+	if !isProductionSecurityParams(p.state.SecurityParams) {
+		return errors.New("trusted-dealer import plan uses non-production security params")
+	}
 	return p.ValidateWithLimits(DefaultLimits())
 }
 

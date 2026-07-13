@@ -7,20 +7,28 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
-func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
-	// validateInbound was already called by Handle.
-	if env.Round != keygenConfirmationRound {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation in wrong round"))
+func (s *ReshareSession) handleReshareConfirmationInbound(in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
+	env := in.Envelope()
+	if env.Round != reshareConfirmationRound || env.To != tss.BroadcastPartyId {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation in wrong round or delivery mode"))
+	}
+	if s.isReceiver && s.auxInfo == nil && s.newShare == nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation arrived before the local Figure 7 phase"))
 	}
 	confirmation := new(KeygenConfirmation)
 	if err := confirmation.UnmarshalBinaryWithLimits(env.Payload, s.limits); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
+	owned := true
+	defer func() {
+		if owned {
+			clear(confirmation.ChainCode)
+		}
+	}()
 	if confirmation.Sender != env.From {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", env.From, confirmation.Sender))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("reshare confirmation sender mismatch"))
 	}
 	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
@@ -32,113 +40,81 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 	if err := requirePlanHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
-	npd, ok := s.newPartyData[env.From]
-	if !ok {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a new party", env.From))
+	if err := s.verifyReshareConfirmationPublicBinding(confirmation); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
-	if npd.confirmation != nil {
-		existing, err := npd.confirmation.MarshalBinary()
-		if err == nil && bytes.Equal(existing, canonical) {
-			return nil, nil
+	data, ok := s.newPartyData[env.From]
+	if !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a target reshare party", env.From))
+	}
+	if data.confirmation != nil {
+		existing, marshalErr := data.confirmation.MarshalBinaryWithLimits(s.limits)
+		if marshalErr == nil && bytes.Equal(existing, canonical) {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, tss.ErrDuplicateMessage)
 		}
-		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting reshare confirmation from party %d", env.From))
 	}
 	if s.newShare != nil {
 		if err := verifyKeygenConfirmationForPreservedChainCode(s.newShare, confirmation); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 	}
-	npd.confirmation = confirmation
-	return s.tryComplete()
+	confirmations := s.reshareConfirmationCandidates(env.From, confirmation)
+	defer destroyPaperConfirmationMap(confirmations)
+	var final *preparedPaperFinalKeyShare
+	if s.newShare != nil && len(confirmations) == len(s.newParties) {
+		final, err = s.buildReshareFinalKeyShare(s.newShare, confirmations)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+		defer final.destroy()
+	}
+	if err := s.validateInbound(in, s.newParties); err != nil {
+		return nil, err
+	}
+	data.confirmation = confirmation
+	s.accepted[key] = struct{}{}
+	owned = false
+	if final != nil {
+		if err := s.commitReshareFinalKeyShare(final); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, s.selfID, err)
+		}
+		return nil, nil
+	}
+	if !s.isReceiver {
+		if err := s.tryCompleteDealerOnly(); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
 }
 
-func (s *ReshareSession) verifyReshareConfirmationForPublicTranscript(c *KeygenConfirmation, newCommitments []*secp.Point) error {
-	if c == nil {
+func (s *ReshareSession) verifyReshareConfirmationPublicBinding(confirmation *KeygenConfirmation) error {
+	if confirmation == nil {
 		return errors.New("nil reshare confirmation")
 	}
-	if !tss.ContainsParty(s.newParties, c.Sender) {
-		return fmt.Errorf("reshare confirmation from unknown new party %d", c.Sender)
-	}
-	if c.SessionID != s.cfg.SessionID {
-		return fmt.Errorf("reshare confirmation session mismatch from party %d", c.Sender)
-	}
-	if c.Threshold != s.newThreshold {
-		return fmt.Errorf("reshare confirmation threshold mismatch from party %d: got %d, want %d", c.Sender, c.Threshold, s.newThreshold)
-	}
-	if !slices.Equal(c.Parties, s.newParties) {
-		return fmt.Errorf("reshare confirmation party set mismatch from party %d", c.Sender)
-	}
-	if !bytes.Equal(c.PublicKey, s.oldPublicKey) {
-		return fmt.Errorf("reshare confirmation public key mismatch from party %d", c.Sender)
-	}
-	transcriptHash, err := s.reshareTranscriptHash(newCommitments)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(c.TranscriptHash, transcriptHash) {
-		return fmt.Errorf("reshare confirmation transcript mismatch from party %d", c.Sender)
-	}
-	if !bytes.Equal(c.PlanHash, s.planHash) {
-		return fmt.Errorf("reshare confirmation from party %d: %w", c.Sender, errPlanHashMismatch)
-	}
-	commitmentsHash, err := keygenCommitmentsHash(newCommitments)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(c.CommitmentsHash, commitmentsHash) {
-		return fmt.Errorf("reshare confirmation commitments mismatch from party %d", c.Sender)
-	}
-	if !bytes.Equal(c.ChainCode, s.oldChainCode) {
-		return fmt.Errorf("reshare confirmation chain code mismatch from party %d", c.Sender)
+	if !s.newParties.Contains(confirmation.Sender) || confirmation.SessionID != s.cfg.SessionID ||
+		confirmation.Threshold != s.newThreshold || !slices.Equal(confirmation.Parties, s.newParties) ||
+		!bytes.Equal(confirmation.PublicKey, s.oldPublicKey) || !bytes.Equal(confirmation.ChainCode, s.oldChainCode) ||
+		!bytes.Equal(confirmation.PlanHash, s.planHash) {
+		return errors.New("reshare confirmation public binding mismatch")
 	}
 	return nil
 }
 
 func (s *ReshareSession) finalizeConfirmedShare() error {
 	if s.newShare == nil {
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, errors.New("missing pending reshare share"))
+		return tss.NewProtocolError(tss.ErrCodeVerification, reshareConfirmationRound, s.selfID, errors.New("missing pending reshare share"))
 	}
-	// Collect parsed confirmations in party order (no re-unmarshal needed).
-	confirmations := make([]*KeygenConfirmation, len(s.newParties))
-	for i, id := range s.newParties {
-		c := s.newPartyData[id].confirmation
-		if c == nil {
-			s.abort()
-			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing keygen confirmation from party %d", id))
-		}
-		confirmations[i] = c
+	confirmations := s.reshareConfirmationCandidates(tss.BroadcastPartyId, nil)
+	defer destroyPaperConfirmationMap(confirmations)
+	prepared, err := s.buildReshareFinalKeyShare(s.newShare, confirmations)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeVerification, reshareConfirmationRound, s.selfID, err)
 	}
-	if err := verifyKeygenConfirmationSetBinding(s.newShare, confirmations); err != nil {
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
+	defer prepared.destroy()
+	if err := s.commitReshareFinalKeyShare(prepared); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareConfirmationRound, s.selfID, err)
 	}
-	// Verify preserved chain code on each confirmation.
-	for _, c := range confirmations {
-		if err := verifyConfirmationPreservedChainCode(s.newShare.state.ChainCode, c); err != nil {
-			s.abort()
-			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, err)
-		}
-	}
-	for _, confirmation := range confirmations {
-		data := s.newShare.state.PartyData[confirmation.Sender]
-		data.KeygenConfirmation = confirmation.Clone()
-		s.newShare.state.PartyData[confirmation.Sender] = data
-	}
-	if err := s.newShare.ValidateWithLimits(s.limits); err != nil {
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
-	}
-	s.completed = true
-	if s.newPaillier != nil {
-		s.newPaillier.Destroy()
-		s.newPaillier = nil
-	}
-	confirmationSetHash := keygenConfirmationSetHash(confirmations)
-	s.log.Info(s.cfg.Ctx(), "reshare complete",
-		"party_id", s.selfID,
-		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
-		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
-	)
 	return nil
 }

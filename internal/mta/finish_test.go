@@ -43,7 +43,7 @@ func TestFinishErrors(t *testing.T) {
 	}
 
 	t.Run("nil skA", func(t *testing.T) {
-		_, err := Finish(params, []byte("response"), start.Message, *response, aCommit, bCommit, nil, skB.PublicKey, rpA)
+		_, err := Finish(params, []byte("response"), start.Message, *response, bCommit, nil, skB.PublicKey, rpA)
 		if err == nil {
 			t.Fatal("expected error for nil Paillier private key")
 		}
@@ -51,21 +51,21 @@ func TestFinishErrors(t *testing.T) {
 
 	t.Run("invalid start message", func(t *testing.T) {
 		badStart := StartMessage{Ciphertext: nil}
-		_, err := Finish(params, []byte("response"), badStart, *response, aCommit, bCommit, skA, skB.PublicKey, rpA)
+		_, err := Finish(params, []byte("response"), badStart, *response, bCommit, skA, skB.PublicKey, rpA)
 		if err == nil {
 			t.Fatal("expected error for invalid start message")
 		}
 	})
 
 	t.Run("invalid b commitment", func(t *testing.T) {
-		_, err := Finish(params, []byte("response"), start.Message, *response, aCommit, []byte{0x00, 0x01}, skA, skB.PublicKey, rpA)
+		_, err := Finish(params, []byte("response"), start.Message, *response, []byte{0x00, 0x01}, skA, skB.PublicKey, rpA)
 		if err == nil {
 			t.Fatal("expected error for invalid b commitment")
 		}
 	})
 
 	t.Run("empty b commitment", func(t *testing.T) {
-		_, err := Finish(params, []byte("response"), start.Message, *response, aCommit, nil, skA, skB.PublicKey, rpA)
+		_, err := Finish(params, []byte("response"), start.Message, *response, nil, skA, skB.PublicKey, rpA)
 		if err == nil {
 			t.Fatal("expected error for empty b commitment")
 		}
@@ -74,14 +74,14 @@ func TestFinishErrors(t *testing.T) {
 	t.Run("invalid response proof", func(t *testing.T) {
 		badResponse := *response
 		badResponse.Proof.A = new(big.Int)
-		_, err := Finish(params, []byte("response"), start.Message, badResponse, aCommit, bCommit, skA, skB.PublicKey, rpA)
+		_, err := Finish(params, []byte("response"), start.Message, badResponse, bCommit, skA, skB.PublicKey, rpA)
 		if err == nil {
 			t.Fatal("expected error for invalid response proof")
 		}
 	})
 
 	t.Run("wrong response domain", func(t *testing.T) {
-		_, err := Finish(params, []byte("wrong-domain"), start.Message, *response, aCommit, bCommit, skA, skB.PublicKey, rpA)
+		_, err := Finish(params, []byte("wrong-domain"), start.Message, *response, bCommit, skA, skB.PublicKey, rpA)
 		if err == nil {
 			t.Fatal("expected error for wrong response domain")
 		}
@@ -125,7 +125,7 @@ func TestFinishMultipleValues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		alphaShare, err := Finish(params, responseDomain, start.Message, *response, aCommit, bCommit, skA, skB.PublicKey, rpA)
+		alphaShare, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, skB.PublicKey, rpA)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,10 +167,6 @@ func TestFinishCenteredSignedPlaintextPreservesDeltaAndSigmaRelations(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			aCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(a)))
-			if err != nil {
-				t.Fatal(err)
-			}
 			bPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(b))
 			bCommitment, err := secp.PointBytes(bPoint)
 			if err != nil {
@@ -202,10 +198,6 @@ func TestFinishCenteredSignedPlaintextPreservesDeltaAndSigmaRelations(t *testing
 				t.Fatal(err)
 			}
 			defer rhoY.Destroy()
-			aPoint, err := secp.PointFromBytes(aCommitment)
-			if err != nil {
-				t.Fatal(err)
-			}
 			statement := zkpai.AffGStatement{
 				ReceiverPaillierN: skA.PublicKey,
 				ProverPaillierN:   skB.PublicKey,
@@ -213,7 +205,6 @@ func TestFinishCenteredSignedPlaintextPreservesDeltaAndSigmaRelations(t *testing
 				D:                 responseCiphertext,
 				Y:                 encMaskB,
 				X:                 bPoint,
-				K:                 aPoint,
 				VerifierAux:       rpA,
 			}
 			proof, err := zkpai.ProveAffG(params, tc.domain, statement, zkpai.AffGWitness{
@@ -222,8 +213,8 @@ func TestFinishCenteredSignedPlaintextPreservesDeltaAndSigmaRelations(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			response := ResponseMessage{Ciphertext: responseCiphertext.Bytes(), Proof: *proof}
-			alphaShare, err := Finish(params, tc.domain, start.Message, response, aCommitment, bCommitment, skA, skB.PublicKey, rpA)
+			response := ResponseMessage{Ciphertext: responseCiphertext.Bytes(), F: encMaskB.Bytes(), Proof: *proof}
+			alphaShare, err := Finish(params, tc.domain, start.Message, response, bCommitment, skA, skB.PublicKey, rpA)
 			if err != nil {
 				t.Fatal(err)
 			}

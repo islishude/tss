@@ -25,7 +25,11 @@ func TestGoldenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := secp.ScalarAdd(secp.ScalarMul(challenge(domain, public, commitment), sec), n)
+	challengeScalar, err := challenge(domain, public, commitment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := secp.ScalarAdd(secp.ScalarMul(challengeScalar, sec), n)
 
 	p := &Proof{Commitment: commitment, Response: response.Bytes()}
 

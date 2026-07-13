@@ -18,9 +18,10 @@ const (
 const (
 	maxSecurityParameterBits uint32 = tss.DefaultMaxPaillierModulusBits
 	proofResponseSlackBits   uint32 = 2
-	// Πdec reconstructs a sum of pairwise affine terms before multiplying by
-	// an ECDSA scalar. This covers aggregation carry bits for the protocol's
-	// bounded signer set instead of assuming a single EllPrime-bit term.
+	// CGGMP/secp256k1 caps a signer set at 16. Summing at most 16 signed
+	// pairwise terms needs at most four carry bits; 16 bits deliberately leaves
+	// a conservative margin while keeping the reduced 768-bit test profile
+	// below its Paillier plaintext modulus.
 	decAggregationSlackBits uint32 = 16
 )
 
@@ -33,7 +34,7 @@ type SecurityParams struct {
 	Ell uint32 `wire:"1,u32"`
 
 	// EllPrime is the secondary plaintext range for affine operations.
-	// For CGGMP affine proofs this is larger than Ell (typically 848).
+	// Appendix C.1 sets this to 5*Ell (1280 for secp256k1).
 	EllPrime uint32 `wire:"2,u32"`
 
 	// Epsilon is the statistical slack for zero-knowledge.
@@ -41,7 +42,8 @@ type SecurityParams struct {
 	Epsilon uint32 `wire:"3,u32"`
 
 	// ChallengeBits is the Fiat-Shamir challenge bit length.
-	// 128 bits provides 128-bit soundness.
+	// The production profile uses 256 bits and samples the canonical non-zero
+	// representative below the secp256k1 subgroup order.
 	ChallengeBits uint32 `wire:"4,u32"`
 
 	// MinPaillierBits is the Paillier and Ring-Pedersen auxiliary modulus
@@ -59,17 +61,17 @@ func (SecurityParams) WireVersion() uint16 { return securityParamsWireVersion }
 // DefaultSecurityParams returns the production CGGMP security parameters for
 // secp256k1 with 128-bit statistical and computational security.
 //
-//	Ell   = 256   (secp256k1 scalar bit length)
-//	EllPrime = 848 (affine secondary range, per CGGMP parameter set)
-//	Epsilon  = 230  (statistical slack ~2^230)
-//	ChallengeBits = 128 (128-bit soundness)
+//	Ell = 256 (secp256k1 scalar bit length)
+//	EllPrime = 1280 (5*Ell, Appendix C.1)
+//	Epsilon = 512 (2*Ell, Appendix C.1)
+//	ChallengeBits = 256 (log2 of the secp256k1 subgroup order)
 //	MinPaillierBits = 3072 (NIST SP 800-57 alignment)
 func DefaultSecurityParams() SecurityParams {
 	return SecurityParams{
 		Ell:             256,
-		EllPrime:        848,
-		Epsilon:         230,
-		ChallengeBits:   128,
+		EllPrime:        1280,
+		Epsilon:         512,
+		ChallengeBits:   256,
 		MinPaillierBits: 3072,
 	}
 }
@@ -105,7 +107,18 @@ func (sp SecurityParams) Validate() error {
 	if sp.EllPrime > maxRange-bonus {
 		return fmt.Errorf("SecurityParams affine range must not exceed %d bits", maxRange)
 	}
-	if sp.Ell > maxRange-sp.EllPrime || bonus > maxRange-sp.EllPrime-sp.Ell {
+	// Check every addition explicitly. The public range accessors saturate for
+	// defensive callers, so they cannot distinguish a valid boundary from an
+	// overflowed input here.
+	if sp.Ell > maxRange-sp.Ell {
+		return fmt.Errorf("SecurityParams decryption range must not exceed %d bits", maxRange)
+	}
+	decPlaintextBase := max(sp.EllPrime, sp.Ell+sp.Ell)
+	if decPlaintextBase > maxRange-decAggregationSlackBits {
+		return fmt.Errorf("SecurityParams decryption range must not exceed %d bits", maxRange)
+	}
+	decPlaintextRange := decPlaintextBase + decAggregationSlackBits
+	if bonus > maxRange-decPlaintextRange {
 		return fmt.Errorf("SecurityParams decryption range must not exceed %d bits", maxRange)
 	}
 	return nil
@@ -164,17 +177,18 @@ func (sp SecurityParams) AffGRange() uint32 {
 	return boundedProofRange(sp.EllPrime, bonus)
 }
 
-// DecPlaintextRange returns the public bound for online decryption witnesses.
-// The sigma ciphertext contains an affine plaintext multiplied by an ECDSA
-// scalar and sums multiple pairwise terms, so its bound includes conservative
-// aggregation carry slack in addition to EllPrime + Ell.
+// DecPlaintextRange returns the public bound for Figure 28 decryption
+// witnesses. One Figure 9 plaintext is a sum of affine masks and products of
+// two Ell-bit scalars. EllPrime already bounds each affine mask, so the base
+// bound is max(EllPrime, 2*Ell), plus conservative signer-aggregation carry.
 func (sp SecurityParams) DecPlaintextRange() uint32 {
-	return boundedProofRange(sp.EllPrime, sp.Ell+decAggregationSlackBits)
+	productRange := boundedProofRange(sp.Ell, sp.Ell)
+	return boundedProofRange(max(sp.EllPrime, productRange), decAggregationSlackBits)
 }
 
 // DecRange returns the response-mask bound for Πdec.
 func (sp SecurityParams) DecRange() uint32 {
-	return sp.DecPlaintextRange() + max(sp.Epsilon, sp.ChallengeBits)
+	return boundedProofRange(sp.DecPlaintextRange(), max(sp.Epsilon, sp.ChallengeBits))
 }
 
 func boundedProofRange(base, bonus uint32) uint32 {

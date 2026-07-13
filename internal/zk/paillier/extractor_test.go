@@ -3,6 +3,7 @@
 package paillier
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"io"
@@ -10,6 +11,10 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/wire"
+	zkchallenge "github.com/islishude/tss/internal/zk/challenge"
 )
 
 // replayReader is a deterministic io.Reader that produces reproducible output
@@ -55,7 +60,7 @@ func TestEncProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,9 +128,8 @@ func TestEncProofSpecialSoundness(t *testing.T) {
 	// k = (z1 − z1′) / (e − e′). Since zDiff = eDiff · k, the division
 	// recovers k exactly, preserving its sign regardless of eDiff ordering.
 	if extractedK.Cmp(k) != 0 {
-		t.Fatalf("extracted k = %s, want %s", extractedK, k)
+		t.Fatal("special-soundness extraction returned the wrong plaintext witness")
 	}
-	t.Logf("EncProof extractor: k = %s", extractedK)
 }
 
 // TestAffGProofSpecialSoundness demonstrates witness extraction for Πaff-g.
@@ -134,7 +138,7 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +176,6 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
 	witness := AffGWitness{
@@ -207,16 +210,14 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 		t.Fatal("commitments differ — RNG replay failed")
 	}
 
-	transcript1, err := buildAffGTranscript(params, []byte("extract-1"), stmt, proof1.Y,
-		proof1.A, proof1.Bx, proof1.By, proof1.E, proof1.S, proof1.F, proof1.T,
-		proof1.YPoint, proof1.BetaPointCommitment, proof1.AlphaPoint, proof1.ProductPointCommitment)
+	transcript1, err := buildAffGTranscript(params, []byte("extract-1"), stmt,
+		proof1.A, proof1.Bx, proof1.By, proof1.E, proof1.S, proof1.F, proof1.T)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e1, _ := transcript1.ChallengeSigned(params.ChallengeBits)
-	transcript2, err := buildAffGTranscript(params, []byte("extract-2"), stmt, proof2.Y,
-		proof2.A, proof2.Bx, proof2.By, proof2.E, proof2.S, proof2.F, proof2.T,
-		proof2.YPoint, proof2.BetaPointCommitment, proof2.AlphaPoint, proof2.ProductPointCommitment)
+	transcript2, err := buildAffGTranscript(params, []byte("extract-2"), stmt,
+		proof2.A, proof2.Bx, proof2.By, proof2.E, proof2.S, proof2.F, proof2.T)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +236,7 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 	}
 	extractedX := new(big.Int).Div(z1Diff, eDiff)
 	if extractedX.Cmp(x) != 0 {
-		t.Fatalf("extracted x = %s, want %s", extractedX, x)
+		t.Fatal("special-soundness extraction returned the wrong affine multiplier")
 	}
 
 	// Extract y.
@@ -245,9 +246,8 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 	}
 	extractedY := new(big.Int).Div(z2Diff, eDiff)
 	if extractedY.Cmp(y) != 0 {
-		t.Fatalf("extracted y = %s, want %s", extractedY, y)
+		t.Fatal("special-soundness extraction returned the wrong affine addend")
 	}
-	t.Logf("AffGProof extractor: x=%s, y=%s", extractedX, extractedY)
 }
 
 // TestLogStarProofSpecialSoundness demonstrates witness extraction for Πlog*.
@@ -255,7 +255,7 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,9 +323,8 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 
 	extractedX := new(big.Int).Div(zDiff, eDiff)
 	if extractedX.Cmp(x) != 0 {
-		t.Fatalf("extracted x = %s, want %s", extractedX, x)
+		t.Fatal("special-soundness extraction returned the wrong logarithm witness")
 	}
-	t.Logf("LogStarProof extractor: x = %s", extractedX)
 }
 
 // TestMulProofSpecialSoundness extracts the encrypted multiplier from two
@@ -393,7 +392,7 @@ func TestMulProofSpecialSoundness(t *testing.T) {
 	e2, _ := tr2.ChallengeSigned(params.ChallengeBits)
 	extracted := extractLinearWitness(t, proof1.Z, proof2.Z, e1, e2)
 	if extracted.Cmp(xValue) != 0 {
-		t.Fatalf("extracted multiplier = %s, want %s", extracted, xValue)
+		t.Fatal("special-soundness extraction returned the wrong multiplication witness")
 	}
 }
 
@@ -403,7 +402,7 @@ func TestMulStarProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,63 +463,249 @@ func TestMulStarProofSpecialSoundness(t *testing.T) {
 	e2, _ := tr2.ChallengeSigned(params.ChallengeBits)
 	extracted := extractLinearWitness(t, proof1.Z1, proof2.Z1, e1, e2)
 	if extracted.Cmp(xValue) != 0 {
-		t.Fatalf("extracted scalar = %s, want %s", extracted, xValue)
+		t.Fatal("special-soundness extraction returned the wrong multiplication-star witness")
 	}
 }
 
-// TestDecProofSpecialSoundness extracts the signed plaintext representative
-// from two accepting Πdec transcripts with identical commitments.
-func TestDecProofSpecialSoundness(t *testing.T) {
-	t.Parallel()
-	params := fastProofParams()
-	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+// TestEncElgProofSpecialSoundness extracts both Figure 24 scalar witnesses
+// from two accepting transcripts with identical prover commitments.
+func TestEncElgProofSpecialSoundness(t *testing.T) {
+	params, stmt, witness := testEncElgRelation(t)
+	rng := newReplayReader("extract-enc-elg")
+	proof1, err := ProveEncElg(params, []byte("extract-enc-elg-1"), stmt, witness, rng)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lambda.Destroy()
-	plaintext := big.NewInt(-19)
-	ciphertext, rho, err := sk.Encrypt(nil, plaintext)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stmt := DecStatement{PaillierN: sk.PublicKey, C: ciphertext, X: secp.ScalarFromBigInt(plaintext), VerifierAux: aux}
-	witness := DecWitness{
-		Y:   testSignedSecret(t, plaintext, signedPowerOfTwoBytes(params.DecPlaintextRange())),
-		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
-	}
-	rng := newReplayReader("extract-dec")
-	proof1, err := ProveDec(params, []byte("extract-1"), stmt, witness, rng)
-	if err != nil {
-		t.Fatal(err)
-	}
+	defer proof1.Destroy()
 	rng.reset()
-	proof2, err := ProveDec(params, []byte("extract-2"), stmt, witness, rng)
+	proof2, err := ProveEncElg(params, []byte("extract-enc-elg-2"), stmt, witness, rng)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyDec(params, []byte("extract-1"), stmt, proof1); err != nil {
+	defer proof2.Destroy()
+	if err := VerifyEncElg(params, []byte("extract-enc-elg-1"), stmt, proof1); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyDec(params, []byte("extract-2"), stmt, proof2); err != nil {
+	if err := VerifyEncElg(params, []byte("extract-enc-elg-2"), stmt, proof2); err != nil {
 		t.Fatal(err)
 	}
-	if proof1.S.Cmp(proof2.S) != 0 || proof1.T.Cmp(proof2.T) != 0 || proof1.A.Cmp(proof2.A) != 0 || string(proof1.Gamma) != string(proof2.Gamma) {
+	if proof1.PlaintextCommitment.Cmp(proof2.PlaintextCommitment) != 0 ||
+		proof1.CiphertextCommitment.Cmp(proof2.CiphertextCommitment) != 0 ||
+		!bytes.Equal(proof1.ElGamalCommitment, proof2.ElGamalCommitment) ||
+		!bytes.Equal(proof1.ExponentMaskCommitment, proof2.ExponentMaskCommitment) ||
+		proof1.RangeMaskCommitment.Cmp(proof2.RangeMaskCommitment) != 0 {
 		t.Fatal("commitments differ — RNG replay failed")
 	}
-	tr1, err := buildDecTranscript(params, []byte("extract-1"), stmt, proof1.S, proof1.T, proof1.A, proof1.Gamma)
+	transcript1, err := buildEncElgTranscript(params, []byte("extract-enc-elg-1"), stmt,
+		proof1.PlaintextCommitment, proof1.CiphertextCommitment, proof1.ElGamalCommitment,
+		proof1.ExponentMaskCommitment, proof1.RangeMaskCommitment)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tr2, err := buildDecTranscript(params, []byte("extract-2"), stmt, proof2.S, proof2.T, proof2.A, proof2.Gamma)
+	eScalar1, e1, err := transcript1.ChallengeScalar(params.ChallengeBits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	e1, _ := tr1.ChallengeSigned(params.ChallengeBits)
-	e2, _ := tr2.ChallengeSigned(params.ChallengeBits)
-	extracted := extractLinearWitness(t, proof1.Z1, proof2.Z1, e1, e2)
-	if extracted.Cmp(plaintext) != 0 {
-		t.Fatalf("extracted plaintext = %s, want %s", extracted, plaintext)
+	transcript2, err := buildEncElgTranscript(params, []byte("extract-enc-elg-2"), stmt,
+		proof2.PlaintextCommitment, proof2.CiphertextCommitment, proof2.ElGamalCommitment,
+		proof2.ExponentMaskCommitment, proof2.RangeMaskCommitment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eScalar2, e2, err := transcript2.ChallengeScalar(params.ChallengeBits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extractedPlaintext := extractLinearWitness(t, proof1.PlaintextResponse, proof2.PlaintextResponse, e1, e2)
+	defer secret.ClearBigInt(extractedPlaintext)
+	wantPlaintext, err := secretScalarBig(witness.Plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secret.ClearBigInt(wantPlaintext)
+	if extractedPlaintext.Cmp(wantPlaintext) != 0 {
+		t.Fatal("two accepting transcripts did not extract the Figure 24 plaintext")
+	}
+	w1, err := secp.ScalarFromBytesAllowZero(proof1.ExponentResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2, err := secp.ScalarFromBytesAllowZero(proof2.ExponentResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denominator := secp.ScalarSub(eScalar1, eScalar2)
+	denominatorInverse, err := secp.ScalarInvert(denominator)
+	if err != nil {
+		t.Fatal("challenges are identical")
+	}
+	extractedExponent := secp.ScalarMul(secp.ScalarSub(w1, w2), denominatorInverse)
+	wantExponent, err := secpScalarFromSecretAllowZero(witness.Exponent, "exponent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !extractedExponent.Equal(wantExponent) {
+		t.Fatal("two accepting transcripts did not extract the Figure 24 exponent")
+	}
+}
+
+// TestElogProofSpecialSoundness extracts both Figure 23 scalar witnesses from
+// two accepting transcripts with identical prover commitments.
+func TestElogProofSpecialSoundness(t *testing.T) {
+	stmt, witness := testElogRelation(t)
+	rng := newReplayReader("extract-elog")
+	proof1, err := ProveElog([]byte("extract-elog-1"), stmt, witness, rng)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proof1.Destroy()
+	rng.reset()
+	proof2, err := ProveElog([]byte("extract-elog-2"), stmt, witness, rng)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proof2.Destroy()
+	if err := VerifyElog([]byte("extract-elog-1"), stmt, proof1); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyElog([]byte("extract-elog-2"), stmt, proof2); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(proof1.A, proof2.A) || !bytes.Equal(proof1.N, proof2.N) || !bytes.Equal(proof1.B, proof2.B) {
+		t.Fatal("commitments differ — RNG replay failed")
+	}
+	root1, err := elogTranscript([]byte("extract-elog-1"), stmt, proof1.A, proof1.N, proof1.B)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e1, err := zkchallenge.DeriveCanonicalNonZeroSecp256k1(paillierChallengeDerivationLabel, root1, challengeCounterLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root2, err := elogTranscript([]byte("extract-elog-2"), stmt, proof2.A, proof2.N, proof2.B)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e2, err := zkchallenge.DeriveCanonicalNonZeroSecp256k1(paillierChallengeDerivationLabel, root2, challengeCounterLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denominatorInverse, err := secp.ScalarInvert(secp.ScalarSub(e1, e2))
+	if err != nil {
+		t.Fatal("challenges are identical")
+	}
+	z1, _ := secp.ScalarFromBytesAllowZero(proof1.Z)
+	z2, _ := secp.ScalarFromBytesAllowZero(proof2.Z)
+	u1, _ := secp.ScalarFromBytesAllowZero(proof1.U)
+	u2, _ := secp.ScalarFromBytesAllowZero(proof2.U)
+	extractedLambda := secp.ScalarMul(secp.ScalarSub(z1, z2), denominatorInverse)
+	extractedY := secp.ScalarMul(secp.ScalarSub(u1, u2), denominatorInverse)
+	wantLambda, err := secpScalarFromSecretAllowZero(witness.Lambda, "lambda")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantY, err := secpScalarFromSecretAllowZero(witness.Y, "y")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !extractedLambda.Equal(wantLambda) || !extractedY.Equal(wantY) {
+		t.Fatal("two accepting transcripts did not extract the Figure 23 witnesses")
+	}
+}
+
+// TestAffGStarProofSpecialSoundness extracts both Figure 27 plaintext
+// witnesses from one differing bit among two accepting transcripts.
+func TestAffGStarProofSpecialSoundness(t *testing.T) {
+	params := SecurityParams{Ell: 8, EllPrime: 16, Epsilon: 8, ChallengeBits: 8, MinPaillierBits: 512}
+	sk0 := testPaillierKey(t, 512)
+	defer sk0.Destroy()
+	sk1 := testAuxPaillierKey(t, 512)
+	defer sk1.Destroy()
+	xValue := big.NewInt(7)
+	yValue := big.NewInt(-19)
+	x := testSecpSecretScalar(t, xValue)
+	y := testSignedSecret(t, yValue, signedPowerOfTwoBytes(params.EllPrime))
+	cPlaintext := testSecpSecretScalar(t, big.NewInt(11))
+	c, cRandomness, err := sk0.EncryptSecret(testutil.DeterministicReader(3921), cPlaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cRandomness.Destroy()
+	encY0, rho, err := sk0.EncryptSignedSecret(testutil.DeterministicReader(3922), y)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rho.Destroy()
+	xSigned := testSignedSecret(t, xValue, signedPowerOfTwoBytes(params.Ell))
+	xC, err := OMulCT(sk0.PublicKey, xSigned, c, xSigned.FixedLen())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := OAdd(sk0.PublicKey, xC, encY0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yCiphertext, mu, err := sk1.EncryptSignedSecret(testutil.DeterministicReader(3923), y)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mu.Destroy()
+	stmt := AffGStarStatement{
+		ReceiverPaillierN: sk0.PublicKey,
+		ProverPaillierN:   sk1.PublicKey,
+		C:                 c,
+		D:                 d,
+		Y:                 yCiphertext,
+		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(xValue)),
+	}
+	witness := AffGStarWitness{X: x, Y: y, Rho: rho, Mu: mu}
+	rng := newReplayReader("extract-aff-g-star")
+	proof1, err := ProveAffGStar(params, []byte("extract-aff-g-star-1"), stmt, witness, rng)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proof1.Destroy()
+	rng.reset()
+	proof2, err := ProveAffGStar(params, []byte("extract-aff-g-star-2"), stmt, witness, rng)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proof2.Destroy()
+	if err := VerifyAffGStar(params, []byte("extract-aff-g-star-1"), stmt, proof1); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyAffGStar(params, []byte("extract-aff-g-star-2"), stmt, proof2); err != nil {
+		t.Fatal(err)
+	}
+	if !equalByteLists(proof1.A, proof2.A) || !equalByteLists(proof1.B, proof2.B) || !equalByteLists(proof1.R, proof2.R) {
+		t.Fatal("commitments differ — RNG replay failed")
+	}
+	bits1 := affGStarChallenges(proof1.TranscriptHash, len(proof1.A))
+	bits2 := affGStarChallenges(proof2.TranscriptHash, len(proof2.A))
+	round := -1
+	for i := range proof1.A {
+		if affGStarChallengeBit(bits1, i) != affGStarChallengeBit(bits2, i) {
+			round = i
+			break
+		}
+	}
+	if round < 0 {
+		t.Fatal("independent transcript states produced identical bit challenges")
+	}
+	z1, _ := wire.DecodeBigInt(proof1.Z[round])
+	z2, _ := wire.DecodeBigInt(proof2.Z[round])
+	zPrime1, _ := wire.DecodeBigInt(proof1.ZPrime[round])
+	zPrime2, _ := wire.DecodeBigInt(proof2.ZPrime[round])
+	if affGStarChallengeBit(bits1, round) == 0 {
+		z1, z2 = z2, z1
+		zPrime1, zPrime2 = zPrime2, zPrime1
+	}
+	extractedX := new(big.Int).Sub(z1, z2)
+	extractedY := new(big.Int).Sub(zPrime1, zPrime2)
+	defer secret.ClearBigInt(extractedX)
+	defer secret.ClearBigInt(extractedY)
+	if extractedX.Cmp(xValue) != 0 || extractedY.Cmp(yValue) != 0 {
+		t.Fatal("two accepting bit transcripts did not extract the Figure 27 witnesses")
 	}
 }
 

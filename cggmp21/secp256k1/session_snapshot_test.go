@@ -1,19 +1,36 @@
 package secp256k1
 
-import "github.com/islishude/tss"
+import (
+	"bytes"
+
+	"github.com/islishude/tss"
+)
 
 type cggmpKeygenSnapshot struct {
 	Completed bool
 	Aborted   bool
 	State     keygenState
 
-	HasPending  bool
-	HasKeyShare bool
-	HasPaillier bool
+	HasPending        bool
+	HasKeyShare       bool
+	HasFigure6        bool
+	HasAuxInfo        bool
+	HasPaillier       bool
+	HasFigure7Failure bool
+	Figure6RevealSent bool
+	Figure6ProofSent  bool
+	AuxRevealSent     bool
+	AuxProofsSent     bool
+	PaperAccepted     int
 
-	CommitmentSenders   tss.PartySet
-	ShareSenders        tss.PartySet
-	ConfirmationSenders tss.PartySet
+	Figure6CommitmentSenders tss.PartySet
+	Figure6RevealSenders     tss.PartySet
+	Figure6ProofSenders      tss.PartySet
+	AuxCommitmentSenders     tss.PartySet
+	AuxRevealSenders         tss.PartySet
+	AuxProofSenders          tss.PartySet
+	AuxShareSenders          tss.PartySet
+	ConfirmationSenders      tss.PartySet
 }
 
 type cggmpPresignSnapshot struct {
@@ -29,8 +46,17 @@ type cggmpPresignSnapshot struct {
 	AlphaSigmaSenders       tss.PartySet
 	BetaDeltaSenders        tss.PartySet
 	BetaSigmaSenders        tss.PartySet
+	Round3PayloadSenders    tss.PartySet
 	Round3DeltaSenders      tss.PartySet
-	Round3VerifyShareSender tss.PartySet
+	Round3ChiSenders        tss.PartySet
+	Round3DeltaPointSenders tss.PartySet
+	Round3SPointSenders     tss.PartySet
+	Round3ProofSenders      tss.PartySet
+
+	Identifying            bool
+	RedAlertKind           presignRedAlertKind
+	RedAlertDigest         []byte
+	RedAlertPayloadSenders tss.PartySet
 
 	Round2Sent bool
 	Round3Sent bool
@@ -39,8 +65,9 @@ type cggmpPresignSnapshot struct {
 	HasGamma        bool
 	HasXBar         bool
 	HasStartOpening bool
-	HasPresign      bool
-	PresignReturned bool
+	HasGammaOpening bool
+	HasPersisted    bool
+	LeaseFinished   bool
 }
 
 type cggmpSignSnapshot struct {
@@ -60,35 +87,64 @@ func snapshotCGGMPKeygenSession(s *KeygenSession) cggmpKeygenSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snap := cggmpKeygenSnapshot{
-		Completed:   s.completed,
-		Aborted:     s.aborted,
-		State:       s.state,
-		HasPending:  s.pending != nil,
-		HasKeyShare: s.keyShare != nil,
-		HasPaillier: s.local != nil && s.local.paillier != nil,
+		Completed:         s.completed,
+		Aborted:           s.aborted,
+		State:             s.state,
+		HasPending:        s.pending != nil,
+		HasKeyShare:       s.keyShare != nil,
+		HasFigure6:        s.figure6 != nil,
+		HasAuxInfo:        s.auxInfo != nil,
+		HasPaillier:       s.auxInfo != nil && s.auxInfo.local != nil && s.auxInfo.local.paillier != nil,
+		HasFigure7Failure: s.figure7Failure != nil,
+		PaperAccepted:     len(s.paperAccepted),
 	}
-	if s.round1 != nil {
-		for id, data := range s.round1.slots {
-			if data == nil {
+	if s.figure6 != nil {
+		snap.Figure6RevealSent = s.figure6.revealSent
+		snap.Figure6ProofSent = s.figure6.proofSent
+		for id, slot := range s.figure6.slots {
+			if slot == nil {
 				continue
 			}
-			if len(data.commitments) != 0 {
-				snap.CommitmentSenders = append(snap.CommitmentSenders, id)
+			if len(slot.commitment) != 0 {
+				snap.Figure6CommitmentSenders = append(snap.Figure6CommitmentSenders, id)
 			}
-			if data.share != nil {
-				snap.ShareSenders = append(snap.ShareSenders, id)
+			if slot.reveal != nil {
+				snap.Figure6RevealSenders = append(snap.Figure6RevealSenders, id)
 			}
-		}
-	}
-	if s.confirmations != nil {
-		for id, data := range s.confirmations.slots {
-			if data != nil {
-				snap.ConfirmationSenders = append(snap.ConfirmationSenders, id)
+			if slot.proof != nil {
+				snap.Figure6ProofSenders = append(snap.Figure6ProofSenders, id)
 			}
 		}
 	}
-	snap.CommitmentSenders = snap.CommitmentSenders.Sorted()
-	snap.ShareSenders = snap.ShareSenders.Sorted()
+	if s.auxInfo != nil {
+		snap.AuxRevealSent = s.auxInfo.revealSent
+		snap.AuxProofsSent = s.auxInfo.proofsSent
+		for id, slot := range s.auxInfo.slots {
+			if slot == nil {
+				continue
+			}
+			if len(slot.commitment) != 0 {
+				snap.AuxCommitmentSenders = append(snap.AuxCommitmentSenders, id)
+			}
+			if slot.reveal != nil {
+				snap.AuxRevealSenders = append(snap.AuxRevealSenders, id)
+			}
+			if slot.proofs != nil || slot.modProof != nil || slot.factor != nil {
+				snap.AuxProofSenders = append(snap.AuxProofSenders, id)
+			}
+			if slot.share != nil {
+				snap.AuxShareSenders = append(snap.AuxShareSenders, id)
+			}
+		}
+	}
+	snap.ConfirmationSenders = cggmpSnapshotMapKeys(s.paperConfirmations)
+	snap.Figure6CommitmentSenders = snap.Figure6CommitmentSenders.Sorted()
+	snap.Figure6RevealSenders = snap.Figure6RevealSenders.Sorted()
+	snap.Figure6ProofSenders = snap.Figure6ProofSenders.Sorted()
+	snap.AuxCommitmentSenders = snap.AuxCommitmentSenders.Sorted()
+	snap.AuxRevealSenders = snap.AuxRevealSenders.Sorted()
+	snap.AuxProofSenders = snap.AuxProofSenders.Sorted()
+	snap.AuxShareSenders = snap.AuxShareSenders.Sorted()
 	snap.ConfirmationSenders = snap.ConfirmationSenders.Sorted()
 	return snap
 }
@@ -100,16 +156,21 @@ func snapshotCGGMPPresignSession(s *PresignSession) cggmpPresignSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snap := cggmpPresignSnapshot{
-		Completed:       s.completed,
-		Aborted:         s.aborted,
-		Round2Sent:      s.round2Sent,
-		Round3Sent:      s.round3Sent,
-		HasKShare:       s.kShare != nil,
-		HasGamma:        s.gamma != nil,
-		HasXBar:         s.xBar != nil,
-		HasStartOpening: s.startOpening != nil,
-		HasPresign:      s.presign != nil,
-		PresignReturned: s.presignReturned,
+		Completed:              s.completed,
+		Aborted:                s.aborted,
+		Identifying:            s.identifying,
+		RedAlertKind:           s.redAlertKind,
+		RedAlertDigest:         bytes.Clone(s.redAlertDigest),
+		RedAlertPayloadSenders: cggmpSnapshotMapKeys(s.redAlertPayloads),
+		Round2Sent:             s.round2Sent,
+		Round3Sent:             s.round3Sent,
+		HasKShare:              s.kShare != nil,
+		HasGamma:               s.gamma != nil,
+		HasXBar:                s.xBar != nil,
+		HasStartOpening:        s.startOpening != nil,
+		HasGammaOpening:        s.gammaOpening != nil,
+		HasPersisted:           s.persistedPresign != nil,
+		LeaseFinished:          s.leaseFinished,
 	}
 	for _, state := range s.parties {
 		if state.round1.havePayload {
@@ -136,11 +197,23 @@ func snapshotCGGMPPresignSession(s *PresignSession) cggmpPresignSnapshot {
 		if state.mta.betaSigma != nil {
 			snap.BetaSigmaSenders = append(snap.BetaSigmaSenders, state.id)
 		}
-		if state.round3.haveDelta {
+		if state.round3.havePayload {
+			snap.Round3PayloadSenders = append(snap.Round3PayloadSenders, state.id)
+		}
+		if state.round3.delta != nil {
 			snap.Round3DeltaSenders = append(snap.Round3DeltaSenders, state.id)
 		}
-		if state.round3.haveVerifyShare {
-			snap.Round3VerifyShareSender = append(snap.Round3VerifyShareSender, state.id)
+		if state.round3.chi != nil {
+			snap.Round3ChiSenders = append(snap.Round3ChiSenders, state.id)
+		}
+		if len(state.round3.deltaPoint) != 0 {
+			snap.Round3DeltaPointSenders = append(snap.Round3DeltaPointSenders, state.id)
+		}
+		if len(state.round3.sPoint) != 0 {
+			snap.Round3SPointSenders = append(snap.Round3SPointSenders, state.id)
+		}
+		if len(state.round3.proof.TranscriptHash) != 0 {
+			snap.Round3ProofSenders = append(snap.Round3ProofSenders, state.id)
 		}
 	}
 	snap.Round1PayloadSenders = snap.Round1PayloadSenders.Sorted()
@@ -151,8 +224,12 @@ func snapshotCGGMPPresignSession(s *PresignSession) cggmpPresignSnapshot {
 	snap.AlphaSigmaSenders = snap.AlphaSigmaSenders.Sorted()
 	snap.BetaDeltaSenders = snap.BetaDeltaSenders.Sorted()
 	snap.BetaSigmaSenders = snap.BetaSigmaSenders.Sorted()
+	snap.Round3PayloadSenders = snap.Round3PayloadSenders.Sorted()
 	snap.Round3DeltaSenders = snap.Round3DeltaSenders.Sorted()
-	snap.Round3VerifyShareSender = snap.Round3VerifyShareSender.Sorted()
+	snap.Round3ChiSenders = snap.Round3ChiSenders.Sorted()
+	snap.Round3DeltaPointSenders = snap.Round3DeltaPointSenders.Sorted()
+	snap.Round3SPointSenders = snap.Round3SPointSenders.Sorted()
+	snap.Round3ProofSenders = snap.Round3ProofSenders.Sorted()
 	return snap
 }
 
@@ -167,7 +244,7 @@ func snapshotCGGMPSignSession(s *SignSession) cggmpSignSnapshot {
 		Aborted:        s.aborted,
 		HasSignature:   s.signature != nil,
 		PartialSenders: cggmpSnapshotMapKeys(s.partials),
-		HasAttempt:     len(s.attempt.PresignContentID) != 0 || len(s.attempt.AttemptHash) != 0,
+		HasAttempt:     s.attempt.PresignID != "" || s.attempt.Intent.AttemptID != "" || len(s.attempt.ExactOutbox) != 0,
 		HasCoordinator: s.coordinator != nil,
 	}
 }

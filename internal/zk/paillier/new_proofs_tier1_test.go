@@ -98,7 +98,6 @@ func TestAffGProofVerificationMatrix(t *testing.T) {
 		{name: "E non unit", mutate: func(p *AffGProof) { p.E = new(big.Int).Set(stmt.ProverPaillierN.NSquared) }},
 		{name: "S non unit", mutate: func(p *AffGProof) { p.S = new(big.Int).Set(stmt.VerifierAux.N) }},
 		{name: "F non unit", mutate: func(p *AffGProof) { p.F = new(big.Int).Set(stmt.ProverPaillierN.NSquared) }},
-		{name: "Y nil", mutate: func(p *AffGProof) { p.Y = nil }},
 		{name: "z1 out of range", mutate: func(p *AffGProof) { p.Z1 = signedPowerOfTwo(params.EncRange() + 2) }},
 		{name: "z2 non unit", mutate: func(p *AffGProof) { p.Z2 = new(big.Int).Set(stmt.ProverPaillierN.N) }},
 		{name: "z3 out of range", mutate: func(p *AffGProof) { p.Z3 = multRangeOutside(stmt.VerifierAux.N, params.EncRange()+2) }},
@@ -106,10 +105,6 @@ func TestAffGProofVerificationMatrix(t *testing.T) {
 		{name: "equation 1", mutate: func(p *AffGProof) { p.A = new(big.Int).Add(p.A, big.NewInt(1)) }},
 		{name: "equation 2", mutate: func(p *AffGProof) { p.S = new(big.Int).Add(p.S, big.NewInt(1)) }},
 		{name: "equation 3", mutate: func(p *AffGProof) { p.E = new(big.Int).Add(p.E, big.NewInt(1)) }},
-		{name: "y point relation", mutate: func(p *AffGProof) { p.YPoint = seedCurvePointBytes(81) }},
-		{name: "alpha point relation", mutate: func(p *AffGProof) { p.AlphaPoint = seedCurvePointBytes(82) }},
-		{name: "beta point commitment", mutate: func(p *AffGProof) { p.BetaPointCommitment = seedCurvePointBytes(83) }},
-		{name: "product point commitment", mutate: func(p *AffGProof) { p.ProductPointCommitment = seedCurvePointBytes(84) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

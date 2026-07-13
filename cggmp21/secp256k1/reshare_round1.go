@@ -36,7 +36,7 @@ func (s *ReshareSession) maybeSendDealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
-	lambda, err := shamir.LagrangeCoefficient(s.selfID, s.dealerParties)
+	lambda, err := epochLagrangeCoefficient(s.plan.state.SourceEpoch, s.selfID, s.dealerParties)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,23 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	defer cleanup.Run()
 	var selfShare *secret.Scalar
 	if s.isReceiver {
-		selfShare, err = secpSecretScalarFromScalarAllowZero(shamir.Eval(poly, s.selfID))
+		identifier, ok := s.provisionalIDs[s.selfID]
+		if !ok {
+			return nil, errors.New("missing local provisional reshare identifier")
+		}
+		parsed, err := shamir.IdentifierFromBytes(identifier)
+		if err != nil {
+			return nil, err
+		}
+		targetLambda, err := provisionalLagrangeCoefficient(s.provisionalIDs, s.selfID, s.newParties)
+		if err != nil {
+			return nil, err
+		}
+		evaluation, err := shamir.EvalAt(poly, parsed)
+		if err != nil {
+			return nil, err
+		}
+		selfShare, err = secpSecretScalarFromScalarAllowZero(secp.ScalarMul(targetLambda, evaluation))
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +110,23 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if receiverData == nil || receiverData.paillierPub.PublicKey == nil || receiverData.ringPedersen.Params == nil {
 			return nil, fmt.Errorf("missing reshare receiver material for party %d", id)
 		}
-		share, err := secpSecretScalarFromScalarAllowZero(shamir.Eval(poly, id))
+		targetIdentifier, ok := s.provisionalIDs[id]
+		if !ok {
+			return nil, fmt.Errorf("missing provisional reshare identifier for party %d", id)
+		}
+		parsedIdentifier, err := shamir.IdentifierFromBytes(targetIdentifier)
+		if err != nil {
+			return nil, err
+		}
+		targetLambda, err := provisionalLagrangeCoefficient(s.provisionalIDs, id, s.newParties)
+		if err != nil {
+			return nil, err
+		}
+		evaluatedShare, err := shamir.EvalAt(poly, parsedIdentifier)
+		if err != nil {
+			return nil, err
+		}
+		share, err := secpSecretScalarFromScalarAllowZero(secp.ScalarMul(targetLambda, evaluatedShare))
 		if err != nil {
 			return nil, err
 		}
@@ -103,13 +135,14 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 			share.Destroy()
 			return nil, err
 		}
-		evaluation, err := secp.EvalCommitments(commitments, id)
+		evaluation, err := evaluateEncodedCommitmentsAtIdentifier(commitments, targetIdentifier)
 		if err != nil {
 			share.Destroy()
 			randomness.Destroy()
 			return nil, err
 		}
-		domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, s.selfID, id, receiverData.paillierPub.PublicKey, s.planHash, s.limits)
+		evaluation = secp.ScalarMult(evaluation, targetLambda)
+		domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, s.selfID, id, targetIdentifier, receiverData.paillierPub.PublicKey, s.planHash, s.limits)
 		if err != nil {
 			share.Destroy()
 			randomness.Destroy()
@@ -130,6 +163,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		sharePayload, err := (reshareSharePayload{
 			Dealer:               s.selfID,
 			Receiver:             id,
+			TargetIdentifier:     bytes.Clone(targetIdentifier),
 			Ciphertext:           ciphertext.Bytes(),
 			Proof:                *proof,
 			DealerCommitmentHash: commitmentsHash,
@@ -184,16 +218,16 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
-	ringPedersenParams, ringPedersenLambda, err := zkpai.GenerateRingPedersenParams(s.cfg.Reader(), newPaillierKey)
-	if err != nil {
-		return err
-	}
-	defer ringPedersenLambda.Destroy()
-	ringDomain, err := reshareRingPedersenDomain(proofConfig, s.selfID, ringPedersenParams, s.planHash, s.limits)
-	if err != nil {
-		return err
-	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(s.cfg.Reader(), ringDomain, newPaillierKey, ringPedersenParams, ringPedersenLambda, s.selfID)
+	ringPedersenParams, ringPedersenProof, err := generateIndependentRingPedersen(
+		s.cfg.Ctx(),
+		s.cfg.Reader(),
+		s.plan.state.PaillierBits,
+		newPaillierKey.N,
+		s.selfID,
+		func(params *zkpai.RingPedersenParams) ([]byte, error) {
+			return reshareRingPedersenDomain(proofConfig, s.selfID, params, s.planHash, s.limits)
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -252,13 +286,13 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 		)
 	}
 	ringParams := &p.RingPedersenParams
-	if ringParams.N.Cmp(pk.N) != 0 {
+	if ringParams.N.Cmp(pk.N) == 0 {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindPaillierAux,
-			"reshare Ring-Pedersen modulus mismatch",
+			"reshare Ring-Pedersen modulus is not independent",
 			tss.NewPartySet(env.From),
-			errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
+			errors.New("Ring-Pedersen auxiliary modulus equals Paillier modulus"),
 			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
@@ -348,11 +382,20 @@ func (s *ReshareSession) applyReshareShare(env tss.Envelope, p reshareSharePaylo
 	if selfData == nil || selfData.paillierPub.PublicKey == nil || selfData.ringPedersen.Params == nil || s.newPaillier == nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, errors.New("missing local reshare receiver material"))
 	}
-	evaluation, err := secp.EvalCommitments(dd.commitments, s.selfID)
+	targetIdentifier, ok := s.provisionalIDs[s.selfID]
+	if !ok || !bytes.Equal(targetIdentifier, p.TargetIdentifier) {
+		return tss.NewProtocolError(tss.ErrCodeVerification, reshareShareRound, from, errors.New("dealer share target identifier mismatch"))
+	}
+	targetLambda, err := provisionalLagrangeCoefficient(s.provisionalIDs, s.selfID, s.newParties)
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, err)
 	}
-	domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, from, s.selfID, selfData.paillierPub.PublicKey, s.planHash, s.limits)
+	evaluation, err := evaluateEncodedCommitmentsAtIdentifier(dd.commitments, targetIdentifier)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, err)
+	}
+	evaluation = secp.ScalarMult(evaluation, targetLambda)
+	domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, from, s.selfID, targetIdentifier, selfData.paillierPub.PublicKey, s.planHash, s.limits)
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, err)
 	}
@@ -411,15 +454,15 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	if !tss.ContainsParty(s.dealerParties, dealer) {
 		return fmt.Errorf("sender %d is not a dealer", dealer)
 	}
-	verificationShare, ok := s.plan.state.OldVerificationShares[dealer]
+	epochShare, ok := s.plan.state.SourceEpoch.PublicShare(dealer)
 	if !ok {
-		return fmt.Errorf("missing old verification share for dealer %d", dealer)
+		return fmt.Errorf("missing source epoch public share for dealer %d", dealer)
 	}
-	oldPoint, err := secp.PointFromBytes(verificationShare)
+	oldPoint, err := secp.PointFromBytes(epochShare.PublicKey)
 	if err != nil {
 		return fmt.Errorf("invalid old verification share for dealer %d: %w", dealer, err)
 	}
-	lambda, err := shamir.LagrangeCoefficient(dealer, s.dealerParties)
+	lambda, err := epochLagrangeCoefficient(s.plan.state.SourceEpoch, dealer, s.dealerParties)
 	if err != nil {
 		return err
 	}

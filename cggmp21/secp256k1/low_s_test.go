@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"testing"
 
@@ -63,24 +62,6 @@ func TestFast_VerifySignatureRejectsHighS(t *testing.T) {
 	highS := secp.ScalarNeg(lowS)
 	if VerifySignature(publicBytes, request, &Signature{R: r.Bytes(), S: highS.Bytes()}) {
 		t.Fatal("VerifySignature accepted high-S signature")
-	}
-}
-
-func TestFast_SignAttemptResultRejectsHighS(t *testing.T) {
-	t.Parallel()
-
-	highS := secp.ScalarNeg(secp.ScalarFromUint64(1))
-	result := SignAttemptResult{
-		PresignContentID: bytes.Repeat([]byte{0x11}, sha256.Size),
-		AttemptHash:      bytes.Repeat([]byte{0x22}, sha256.Size),
-		Signature: Signature{
-			R:          secp.ScalarFromUint64(1).Bytes(),
-			S:          highS.Bytes(),
-			RecoveryID: 0,
-		},
-	}
-	if err := result.Validate(); err == nil {
-		t.Fatal("sign attempt result accepted high-S signature")
 	}
 }
 

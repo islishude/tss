@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
-	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -64,12 +63,15 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				vs, _ := presignVerifyShare(presign, presign.PartyID())
+				commitment, ok := normalizedCommitmentFor(presign, presign.PartyID())
+				if !ok {
+					t.Fatal("missing normalized commitment")
+				}
 				p.PartialEquationHash = partialEquationHash(
 					signID, presign.PartyID(), p.PresignTranscript,
 					p.PresignContext, p.PlanHash, digest[:],
 					mustPresignLittleR(t, presign), wrongS.Bytes(),
-					mustSignVerifyShareKPointBytes(t, vs), mustSignVerifyShareChiPointBytes(t, vs),
+					commitment.DeltaTilde, commitment.STilde,
 				)
 			},
 		},
@@ -174,22 +176,22 @@ func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 		if !ok {
 			t.Fatal("session did not complete")
 		}
-		if !VerifyDigest(mustKeySharePublicKey(t, s.key), s.digest, sig) {
+		if !VerifyDigest(s.publicKey, s.digest, sig) {
 			t.Fatal("valid partials produced invalid aggregate ECDSA signature")
 		}
 	}
 }
 
-// TestIntegration_PresignRejectsTamperedVerifySharePoints verifies that
-// presign records with tampered KPoint or ChiPoint in VerifyShares are
-// detected during structural validation or caught during online signing.
-func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
+// TestIntegration_PresignRejectsTamperedNormalizedCommitments verifies that
+// the two Figure 10 commitment families remain bound to the normalized
+// Figure 8 aggregate equations.
+func TestIntegration_PresignRejectsTamperedNormalizedCommitments(t *testing.T) {
 	tests := []struct {
 		name  string
-		field string // "KPoint" or "ChiPoint"
+		field string
 	}{
-		{name: "tampered KPoint", field: "KPoint"},
-		{name: "tampered ChiPoint", field: "ChiPoint"},
+		{name: "tampered DeltaTilde", field: "delta"},
+		{name: "tampered STilde", field: "chi"},
 	}
 
 	for _, tc := range tests {
@@ -201,18 +203,13 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 			presigns := secpPresign(t, shares, signers)
 
 			for _, r := range presigns {
-				if len(r.state.VerifyShares) == 0 {
-					continue
-				}
 				switch tc.field {
-				case "KPoint":
-					r.state.VerifyShares[0].KPoint = nil
-				case "ChiPoint":
-					r.state.VerifyShares[0].ChiPoint = nil
+				case "delta":
+					r.state.Commitments[0].DeltaTilde = testCurvePointBytes(t, 7)
+				case "chi":
+					r.state.Commitments[0].STilde = testCurvePointBytes(t, 7)
 				}
-
-				err := r.VerifySignMaterial()
-				if err != nil {
+				if err := r.VerifySignMaterial(); err != nil {
 					t.Logf("%s tampering correctly detected: %v", tc.field, err)
 					return
 				}
@@ -308,8 +305,9 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 }
 
 // TestIntegration_PresignRound3TamperingBlamesSender verifies that tampering
-// presign round3 fields (KPoint, ChiPoint, Proof) results in immediate
-// presign-phase blame of only the sender.
+// Figure 8 round-3 fields directly bound by Πelog results in immediate
+// presign-phase blame of only the sender. S is checked by the aggregate chi
+// equation and therefore has a separate Figure 9 transition test below.
 func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
@@ -320,56 +318,30 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		tamper func(t *testing.T, p presignRound3Payload) []byte
 	}{
 		{
-			name: "bit-flipped KPoint",
+			name: "bit-flipped DeltaPoint",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				tamperedK, err := secp.PointBytes(p.KPoint)
-				if err != nil {
-					t.Fatal(err)
-				}
+				tamperedK := bytes.Clone(p.DeltaPoint)
 				tamperedK[len(tamperedK)-1] ^= 0x01
-				kPoint, err := secp.PointFromBytes(tamperedK)
-				if err != nil {
-					t.Logf("KPoint tampering caused point rejection (valid): %v", err)
+				if _, err := secp.PointFromBytes(tamperedK); err != nil {
+					t.Logf("DeltaPoint tampering caused point rejection (valid): %v", err)
 					return nil
 				}
-				p.KPoint = kPoint
+				p.DeltaPoint = tamperedK
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
-					t.Logf("KPoint tampering caused marshal rejection (valid): %v", err)
+					t.Logf("DeltaPoint tampering caused marshal rejection (valid): %v", err)
 					return nil
 				}
 				return mutated
 			},
 		},
 		{
-			name: "replaced KPoint with different valid point",
+			name: "replaced DeltaPoint with different valid point",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				p.KPoint = secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2)))
+				p.DeltaPoint = testCurvePointBytes(t, 2)
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Fatal(err)
-				}
-				return mutated
-			},
-		},
-		{
-			name: "bit-flipped ChiPoint",
-			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				tamperedChi, err := secp.PointBytes(p.ChiPoint)
-				if err != nil {
-					t.Fatal(err)
-				}
-				tamperedChi[len(tamperedChi)-1] ^= 0x01
-				chiPoint, err := secp.PointFromBytes(tamperedChi)
-				if err != nil {
-					t.Logf("ChiPoint tampering caused point rejection (valid): %v", err)
-					return nil
-				}
-				p.ChiPoint = chiPoint
-				mutated, err := marshalPresignRound3Payload(p)
-				if err != nil {
-					t.Logf("ChiPoint tampering caused marshal rejection (valid): %v", err)
-					return nil
 				}
 				return mutated
 			},
@@ -377,7 +349,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		{
 			name: "corrupted proof scalar",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				p.Proof.KResponse = testSecretScalar(t, 123)
+				p.Proof.Z = secp.ScalarFromUint64(123).Bytes()
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Logf("proof tampering caused marshal rejection: %v", err)
@@ -394,6 +366,82 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 			runPresignRound3TamperTest(t, shares, signers, tc.tamper)
 		})
 	}
+}
+
+// TestIntegration_PresignRound3TamperedSEntersFigure9 deterministically changes
+// one valid S_i to S_i+G. This preserves canonical point encoding while making
+// the aggregate chi equation differ by exactly G, so the receiver must reject
+// Figure 8 completion and enter the Figure 9 chi red-alert phase.
+func TestIntegration_PresignRound3TamperedSEntersFigure9(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
+	signers := tss.NewPartySet(1, 2, 3)
+
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := make(map[tss.PartyID]*PresignSession, len(signers))
+	messages := make([]tss.Envelope, 0)
+	for _, id := range signers {
+		session, out, err := startTestPresign(shares[id], sessionID, signers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		messages = append(messages, out...)
+	}
+
+	tampered := false
+	for len(messages) > 0 {
+		env := messages[0]
+		messages = messages[1:]
+		for _, id := range signers {
+			if id == env.From || (env.To != 0 && env.To != id) || sessions[id].completed {
+				continue
+			}
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range out {
+				if out[i].PayloadType == payloadPresignRound3 && !tampered {
+					tampered = true
+					payload, err := unmarshalPresignRound3Payload(out[i].Payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					sPoint, err := decodePresignGroupElement(payload.S)
+					if err != nil {
+						t.Fatal(err)
+					}
+					payload.S, err = encodePresignGroupElement(secp.Add(sPoint, secp.G))
+					if err != nil {
+						t.Fatal(err)
+					}
+					out[i].Payload, err = marshalPresignRound3Payload(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if out[i].PayloadType == payloadPresignRedAlert {
+					alertSession := sessions[out[i].From]
+					if !alertSession.identifying || alertSession.redAlertKind != presignRedAlertChi || alertSession.completed {
+						t.Fatalf("tampered S did not enter the Figure 9 chi phase: identifying=%v kind=%q completed=%v", alertSession.identifying, alertSession.redAlertKind, alertSession.completed)
+					}
+					if _, ok := alertSession.Presign(); ok {
+						t.Fatal("tampered S exposed an available presign before Figure 9 resolution")
+					}
+					return
+				}
+			}
+			messages = append(messages, out...)
+		}
+	}
+	if !tampered {
+		t.Fatal("no round3 S value was tampered")
+	}
+	t.Fatal("tampered S did not activate Figure 9")
 }
 
 // TestIntegration_OriginalDefectRegression covers the original protocol defect
@@ -449,12 +497,15 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	p.S = testSecretScalar(t, 42)
 	// Recompute equation hash so hash mismatch doesn't fire first — we want
 	// the equation verification to catch it.
-	vs, _ := presignVerifyShare(presigns[maliciousSigner], maliciousSigner)
+	commitment, ok := normalizedCommitmentFor(presigns[maliciousSigner], maliciousSigner)
+	if !ok {
+		t.Fatal("missing malicious signer normalized commitment")
+	}
 	p.PartialEquationHash = partialEquationHash(
 		signID, maliciousSigner, p.PresignTranscript,
 		p.PresignContext, p.PlanHash, digest[:],
 		mustPresignLittleR(t, presigns[maliciousSigner]), p.S.FixedBytes(),
-		mustSignVerifyShareKPointBytes(t, vs), mustSignVerifyShareChiPointBytes(t, vs),
+		commitment.DeltaTilde, commitment.STilde,
 	)
 	mutated, err := marshalSignPartialPayload(p)
 	if err != nil {

@@ -59,7 +59,7 @@ func (s *PresignSession) allRound3Accepted() bool {
 		return false
 	}
 	for i := range s.parties {
-		if !s.parties[i].round3.haveDelta || !s.parties[i].round3.haveVerifyShare {
+		if !s.parties[i].round3.havePayload {
 			return false
 		}
 	}

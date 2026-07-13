@@ -122,13 +122,11 @@ func assertAffGTranscriptDiffersForMinPaillierBits(t *testing.T, params Security
 	t.Helper()
 	changed := params
 	changed.MinPaillierBits++
-	base, err := buildAffGTranscript(params, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T,
-		proof.YPoint, proof.BetaPointCommitment, proof.AlphaPoint, proof.ProductPointCommitment)
+	base, err := buildAffGTranscript(params, state, stmt, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := buildAffGTranscript(changed, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T,
-		proof.YPoint, proof.BetaPointCommitment, proof.AlphaPoint, proof.ProductPointCommitment)
+	other, err := buildAffGTranscript(changed, state, stmt, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
 	if err != nil {
 		t.Fatal(err)
 	}

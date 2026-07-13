@@ -20,9 +20,9 @@ const affGProofVersion = 1
 
 const affGProofType = "zk.paillier.aff-g-proof"
 
-// AffGStatement is the public input for a Πaff-g proof: the MtA ciphertexts,
-// the curve commitment, the Paillier keys of both parties, and the verifier's
-// Ring-Pedersen auxiliary parameters.
+// AffGStatement is the Figure 25 Πaff-g statement. ReceiverPaillierN is N0,
+// ProverPaillierN is N1, and the proved relation is
+// D=C^x*Enc_N0(y;rho), Y=Enc_N1(y;rhoY), and X=[x]G.
 type AffGStatement struct {
 	// ReceiverPaillierN is the initiator's Paillier modulus (Nj).
 	ReceiverPaillierN *pai.PublicKey
@@ -33,9 +33,8 @@ type AffGStatement struct {
 	D *big.Int    // D = x ⊙ C ⊕ Enc_Nj(y; rho) (the MtA response)
 	Y *big.Int    // Y = Enc_Ni(y; rhoY) (responder encrypts y under own key)
 	X *secp.Point // X = x * G (responder's curve commitment)
-	K *secp.Point // K = k * G for the initiator plaintext encrypted in C
 
-	VerifierAux *RingPedersenParams // initiator's RP params (Nhat_j = Nj)
+	VerifierAux *RingPedersenParams // independent verifier RP parameters
 }
 
 // AffGWitness is the secret witness for a Πaff-g proof.
@@ -46,10 +45,7 @@ type AffGWitness struct {
 	RhoY *secret.Scalar    // randomness for Y = Enc_Ni(y; rhoY)
 }
 
-// AffGProof is a CGGMP-compatible Πaff-g proof that an MtA response was
-// computed correctly: D = x ⊙ C ⊕ Enc_Nj(y; rho) with X = x*G and Y = Enc_Ni(y).
-// Y is included in the proof so the verifier can check equation 3 without
-// separately receiving the responder's encryption of y.
+// AffGProof is the Fiat-Shamir form of Figure 25 Πaff-g.
 type AffGProof struct {
 	A  *big.Int    `wire:"1,bigpos,max_bytes=paillier_modulus"` // (alpha ⊙ C) ⊕ Enc_Nj(beta; r)
 	Bx *secp.Point `wire:"2,custom,max_bytes=point"`            // alpha * G
@@ -59,21 +55,14 @@ type AffGProof struct {
 	F  *big.Int    `wire:"6,bigpos,max_bytes=paillier_modulus"` // RP: s_j^beta * t_j^delta mod Nhat_j
 	T  *big.Int    `wire:"7,bigpos,max_bytes=paillier_modulus"` // RP: s_j^y * t_j^mu mod Nhat_j
 
-	Y *big.Int `wire:"8,bigpos,max_bytes=paillier_modulus"` // Enc_Ni(y; rhoY) — public, carried in proof for verifier
+	Z1 *big.Int `wire:"8,bigint,max_bytes=signed_response"`   // alpha + e*x
+	Z2 *big.Int `wire:"9,bigint,max_bytes=signed_response"`   // beta + e*y
+	Z3 *big.Int `wire:"10,bigint,max_bytes=signed_response"`  // gamma + e*m
+	Z4 *big.Int `wire:"11,bigint,max_bytes=signed_response"`  // delta + e*mu
+	W  *big.Int `wire:"12,bigpos,max_bytes=paillier_modulus"` // r * rho^e mod N0
+	WY *big.Int `wire:"13,bigpos,max_bytes=paillier_modulus"` // rY * rhoY^e mod N1
 
-	Z1 *big.Int `wire:"9,bigint,max_bytes=signed_response"`   // alpha + e*x
-	Z2 *big.Int `wire:"10,bigint,max_bytes=signed_response"`  // beta + e*y
-	Z3 *big.Int `wire:"11,bigint,max_bytes=signed_response"`  // gamma + e*m
-	Z4 *big.Int `wire:"12,bigint,max_bytes=signed_response"`  // delta + e*mu
-	W  *big.Int `wire:"13,bigpos,max_bytes=paillier_modulus"` // r * rho^e mod Nj
-	WY *big.Int `wire:"14,bigpos,max_bytes=paillier_modulus"` // rY * rhoY^e mod Ni
-
-	TranscriptHash []byte `wire:"15,bytes"`
-
-	YPoint                 []byte `wire:"16,bytes,max_bytes=point"` // y * G; empty encodes infinity
-	BetaPointCommitment    []byte `wire:"17,bytes,max_bytes=point"` // beta * G; empty encodes infinity
-	AlphaPoint             []byte `wire:"18,bytes,max_bytes=point"` // x * K + y * G; empty encodes infinity
-	ProductPointCommitment []byte `wire:"19,bytes,max_bytes=point"` // alpha * K; empty encodes infinity
+	TranscriptHash []byte `wire:"14,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for AffGProof.
@@ -88,25 +77,20 @@ func (p *AffGProof) Clone() *AffGProof {
 		return nil
 	}
 	cp := &AffGProof{
-		A:                      tss.CloneBigInt(p.A),
-		Bx:                     secp.Clone(p.Bx),
-		By:                     tss.CloneBigInt(p.By),
-		E:                      tss.CloneBigInt(p.E),
-		S:                      tss.CloneBigInt(p.S),
-		F:                      tss.CloneBigInt(p.F),
-		T:                      tss.CloneBigInt(p.T),
-		Y:                      tss.CloneBigInt(p.Y),
-		Z1:                     tss.CloneBigInt(p.Z1),
-		Z2:                     tss.CloneBigInt(p.Z2),
-		Z3:                     tss.CloneBigInt(p.Z3),
-		Z4:                     tss.CloneBigInt(p.Z4),
-		W:                      tss.CloneBigInt(p.W),
-		WY:                     tss.CloneBigInt(p.WY),
-		TranscriptHash:         bytes.Clone(p.TranscriptHash),
-		YPoint:                 bytes.Clone(p.YPoint),
-		BetaPointCommitment:    bytes.Clone(p.BetaPointCommitment),
-		AlphaPoint:             bytes.Clone(p.AlphaPoint),
-		ProductPointCommitment: bytes.Clone(p.ProductPointCommitment),
+		A:              tss.CloneBigInt(p.A),
+		Bx:             secp.Clone(p.Bx),
+		By:             tss.CloneBigInt(p.By),
+		E:              tss.CloneBigInt(p.E),
+		S:              tss.CloneBigInt(p.S),
+		F:              tss.CloneBigInt(p.F),
+		T:              tss.CloneBigInt(p.T),
+		Z1:             tss.CloneBigInt(p.Z1),
+		Z2:             tss.CloneBigInt(p.Z2),
+		Z3:             tss.CloneBigInt(p.Z3),
+		Z4:             tss.CloneBigInt(p.Z4),
+		W:              tss.CloneBigInt(p.W),
+		WY:             tss.CloneBigInt(p.WY),
+		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 	return cp
 }
@@ -117,10 +101,11 @@ func (p *AffGProof) Validate() error {
 		return errors.New("nil AffGProof")
 	}
 	if p.A == nil || p.Bx == nil || p.By == nil || p.E == nil || p.S == nil || p.F == nil || p.T == nil ||
-		p.Y == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil || p.Z4 == nil || p.W == nil || p.WY == nil ||
-		!validOptionalAffGPoint(p.YPoint) || !validOptionalAffGPoint(p.BetaPointCommitment) ||
-		!validOptionalAffGPoint(p.AlphaPoint) || !validOptionalAffGPoint(p.ProductPointCommitment) {
+		p.Z1 == nil || p.Z2 == nil || p.Z3 == nil || p.Z4 == nil || p.W == nil || p.WY == nil {
 		return errors.New("incomplete AffGProof")
+	}
+	if _, err := secp.PointBytes(p.Bx); err != nil {
+		return fmt.Errorf("invalid AffGProof Bx: %w", err)
 	}
 	if len(p.TranscriptHash) != sha256.Size {
 		return errors.New("invalid AffGProof transcript hash")
@@ -139,7 +124,6 @@ func (p *AffGProof) Destroy() {
 	secret.ClearBigInt(p.S)
 	secret.ClearBigInt(p.F)
 	secret.ClearBigInt(p.T)
-	secret.ClearBigInt(p.Y)
 	secret.ClearBigInt(p.Z1)
 	secret.ClearBigInt(p.Z2)
 	secret.ClearBigInt(p.Z3)
@@ -147,23 +131,12 @@ func (p *AffGProof) Destroy() {
 	secret.ClearBigInt(p.W)
 	secret.ClearBigInt(p.WY)
 	clear(p.TranscriptHash)
+	*p = AffGProof{}
 }
 
 // ProveAffG creates a Πaff-g proof for the MtA response.
 func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWitness, rng io.Reader) (*AffGProof, error) {
-	var lastErr error
-	for range maxChallengeRetries {
-		proof, err := proveAffGOnce(params, state, stmt, w, rng)
-		if errors.Is(err, errZeroChallenge) {
-			lastErr = err
-			continue
-		}
-		return proof, err
-	}
-	if lastErr == nil {
-		lastErr = errZeroChallenge
-	}
-	return nil, lastErr
+	return proveAffGOnce(params, state, stmt, w, rng)
 }
 
 func proveAffGOnce(params SecurityParams, state []byte, stmt AffGStatement, w AffGWitness, rng io.Reader) (*AffGProof, error) {
@@ -179,7 +152,7 @@ func proveAffGOnce(params SecurityParams, state []byte, stmt AffGStatement, w Af
 
 	Ni := stmt.ProverPaillierN
 	Nj := stmt.ReceiverPaillierN
-	Nhat := stmt.VerifierAux.N // Nhat_j = Nj
+	Nhat := stmt.VerifierAux.N
 
 	// Sample masks.
 	alpha, err := sampleSignedSecret(rng, params.EncRange()) // ±2^(Ell+Epsilon)
@@ -313,47 +286,11 @@ func proveAffGOnce(params SecurityParams, state []byte, stmt AffGStatement, w Af
 	}
 
 	// Transcript and challenge.
-	yScalar, err := signedSecretSecpScalar(w.Y)
+	transcript, err := buildAffGTranscript(params, state, stmt, A, Bx, By, E, S, F, T)
 	if err != nil {
 		return nil, err
 	}
-	YPointValue := secp.ScalarBaseMult(yScalar)
-	betaScalar, err := signedSecretSecpScalar(beta)
-	if err != nil {
-		return nil, err
-	}
-	BetaPointCommitmentValue := secp.ScalarBaseMult(betaScalar)
-	xBytes := w.X.FixedBytes()
-	xScalar, err := secp.ScalarFromBytes(xBytes)
-	clear(xBytes)
-	if err != nil {
-		return nil, err
-	}
-	AlphaPointValue := secp.Add(secp.ScalarMult(stmt.K, xScalar), YPointValue)
-	ProductPointCommitmentValue := secp.ScalarMult(stmt.K, alphaScalar)
-	YPoint, err := affGOptionalPointBytes(YPointValue)
-	if err != nil {
-		return nil, err
-	}
-	BetaPointCommitment, err := affGOptionalPointBytes(BetaPointCommitmentValue)
-	if err != nil {
-		return nil, err
-	}
-	AlphaPoint, err := affGOptionalPointBytes(AlphaPointValue)
-	if err != nil {
-		return nil, err
-	}
-	ProductPointCommitment, err := affGOptionalPointBytes(ProductPointCommitmentValue)
-	if err != nil {
-		return nil, err
-	}
-
-	transcript, err := buildAffGTranscript(params, state, stmt, stmt.Y, A, Bx, By, E, S, F, T,
-		YPoint, BetaPointCommitment, AlphaPoint, ProductPointCommitment)
-	if err != nil {
-		return nil, err
-	}
-	e, err := transcript.ChallengeSigned(params.ChallengeBits)
+	_, e, err := transcript.ChallengeScalar(params.ChallengeBits)
 	if err != nil {
 		return nil, err
 	}
@@ -449,25 +386,20 @@ func proveAffGOnce(params SecurityParams, state []byte, stmt AffGStatement, w Af
 	wY.Mod(wY, Ni.N)
 
 	return &AffGProof{
-		A:                      new(big.Int).Set(A),
-		Bx:                     Bx,
-		By:                     new(big.Int).Set(By),
-		E:                      new(big.Int).Set(E),
-		S:                      new(big.Int).Set(S),
-		F:                      new(big.Int).Set(F),
-		T:                      new(big.Int).Set(T),
-		Y:                      new(big.Int).Set(stmt.Y),
-		Z1:                     new(big.Int).Set(z1),
-		Z2:                     new(big.Int).Set(z2),
-		Z3:                     new(big.Int).Set(z3),
-		Z4:                     new(big.Int).Set(z4),
-		W:                      new(big.Int).Set(wVal),
-		WY:                     new(big.Int).Set(wY),
-		TranscriptHash:         transcript.Sum(),
-		YPoint:                 YPoint,
-		BetaPointCommitment:    BetaPointCommitment,
-		AlphaPoint:             AlphaPoint,
-		ProductPointCommitment: ProductPointCommitment,
+		A:              new(big.Int).Set(A),
+		Bx:             Bx,
+		By:             new(big.Int).Set(By),
+		E:              new(big.Int).Set(E),
+		S:              new(big.Int).Set(S),
+		F:              new(big.Int).Set(F),
+		T:              new(big.Int).Set(T),
+		Z1:             new(big.Int).Set(z1),
+		Z2:             new(big.Int).Set(z2),
+		Z3:             new(big.Int).Set(z3),
+		Z4:             new(big.Int).Set(z4),
+		W:              new(big.Int).Set(wVal),
+		WY:             new(big.Int).Set(wY),
+		TranscriptHash: transcript.Sum(),
 	}, nil
 }
 
@@ -476,11 +408,11 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if err := params.Validate(); err != nil {
 		return err
 	}
-	if err := proof.Validate(); err != nil {
+	if err := validateAffGPublic(params, stmt); err != nil {
 		return err
 	}
-	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
-		return fmt.Errorf("AffGProof: invalid verifier aux: %w", err)
+	if err := proof.Validate(); err != nil {
+		return err
 	}
 	Ni := stmt.ProverPaillierN
 	Nj := stmt.ReceiverPaillierN
@@ -499,44 +431,12 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if _, err := RequireZN2Star(stmt.D, Nj.N); err != nil {
 		return fmt.Errorf("AffGProof: D not in Z*_Nj^2: %w", err)
 	}
-	if _, err := RequireZN2Star(proof.Y, Ni.N); err != nil {
-		return fmt.Errorf("AffGProof: Y not in Z*_Ni^2: %w", err)
-	}
-	// Bind the proof-carried Y to the statement Y. The statement is the
-	// authenticated public input; rejecting a mismatch ensures a caller that
-	// independently authenticates Y cannot accept a proof computed for a
-	// different Y.
-	if stmt.Y == nil {
-		return errors.New("AffGProof: nil statement Y")
-	}
-	if stmt.Y.Cmp(proof.Y) != 0 {
-		return errors.New("AffGProof: statement Y does not match proof Y")
-	}
-	if stmt.X == nil || stmt.K == nil {
-		return errors.New("AffGProof: nil curve statement point")
-	}
 	// Validate proof fields.
 	if _, err := RequireZN2Star(proof.A, Nj.N); err != nil {
 		return fmt.Errorf("AffGProof: A not in Z*_Nj^2: %w", err)
 	}
 	if proof.Bx == nil {
 		return errors.New("AffGProof: nil Bx")
-	}
-	yPoint, err := affGOptionalPointFromBytes(proof.YPoint)
-	if err != nil {
-		return fmt.Errorf("AffGProof: invalid YPoint: %w", err)
-	}
-	betaPointCommitment, err := affGOptionalPointFromBytes(proof.BetaPointCommitment)
-	if err != nil {
-		return fmt.Errorf("AffGProof: invalid beta point commitment: %w", err)
-	}
-	alphaPoint, err := affGOptionalPointFromBytes(proof.AlphaPoint)
-	if err != nil {
-		return fmt.Errorf("AffGProof: invalid alpha point: %w", err)
-	}
-	productPointCommitment, err := affGOptionalPointFromBytes(proof.ProductPointCommitment)
-	if err != nil {
-		return fmt.Errorf("AffGProof: invalid product point commitment: %w", err)
 	}
 	if _, err := RequireZN2Star(proof.By, Ni.N); err != nil {
 		return fmt.Errorf("AffGProof: By not in Z*_Ni^2: %w", err)
@@ -578,15 +478,14 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	}
 
 	// Recompute challenge.
-	transcript, err := buildAffGTranscript(params, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T,
-		proof.YPoint, proof.BetaPointCommitment, proof.AlphaPoint, proof.ProductPointCommitment)
+	transcript, err := buildAffGTranscript(params, state, stmt, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
 	if err != nil {
 		return err
 	}
 	if len(proof.TranscriptHash) != sha256.Size || !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
 		return errors.New("AffGProof: transcript hash mismatch")
 	}
-	e, err := transcript.ChallengeSigned(params.ChallengeBits)
+	eScalar, e, err := transcript.ChallengeScalar(params.ChallengeBits)
 	if err != nil {
 		return err
 	}
@@ -618,32 +517,13 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 
 	// Equation 2: z1 * G == Bx + e * X
 	left2 := secp.ScalarBaseMult(secp.ScalarFromBigInt(proof.Z1))
-	right2 := secp.Add(proof.Bx, secp.ScalarMult(stmt.X, secp.ScalarFromBigInt(e)))
+	right2 := secp.Add(proof.Bx, secp.ScalarMult(stmt.X, eScalar))
 	if !secp.Equal(left2, right2) {
 		return errors.New("AffGProof: equation 2 failed")
 	}
 
-	// Equation 2a binds the same x to the initiator's K point and the
-	// published alpha point: AlphaPoint - YPoint = x * K.
-	negYPoint := secp.Clone(yPoint)
-	negYPoint.Y = secp.FieldNeg(negYPoint.Y)
-	alphaMinusY := secp.Add(alphaPoint, negYPoint)
-	left2a := secp.ScalarMult(stmt.K, secp.ScalarFromBigInt(proof.Z1))
-	right2a := secp.Add(productPointCommitment, secp.ScalarMult(alphaMinusY, secp.ScalarFromBigInt(e)))
-	if !secp.Equal(left2a, right2a) {
-		return errors.New("AffGProof: alpha point relation failed")
-	}
-
-	// Equation 2b binds the Paillier additive plaintext y to YPoint modulo the
-	// curve order using the same integer response z2 as equations 1 and 3.
-	left2b := secp.ScalarBaseMult(secp.ScalarFromBigInt(proof.Z2))
-	right2b := secp.Add(betaPointCommitment, secp.ScalarMult(yPoint, secp.ScalarFromBigInt(e)))
-	if !secp.Equal(left2b, right2b) {
-		return errors.New("AffGProof: y point relation failed")
-	}
-
 	// Equation 3: By ⊕ (e ⊙ Y) == Enc_Ni(z2; wY)
-	eMulY, err := OMulPublic(Ni, e, proof.Y)
+	eMulY, err := OMulPublic(Ni, e, stmt.Y)
 	if err != nil {
 		return fmt.Errorf("AffGProof: e ⊙ Y: %w", err)
 	}
@@ -717,35 +597,8 @@ func (p *AffGProof) UnmarshalBinary(in []byte) error {
 }
 
 func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitness) error {
-	if stmt.ReceiverPaillierN == nil || stmt.ProverPaillierN == nil {
-		return errors.New("nil Paillier key")
-	}
-	if err := stmt.ReceiverPaillierN.Validate(); err != nil {
-		return fmt.Errorf("invalid receiver Paillier key: %w", err)
-	}
-	if err := stmt.ProverPaillierN.Validate(); err != nil {
-		return fmt.Errorf("invalid prover Paillier key: %w", err)
-	}
-	if err := params.CheckPaillierModulus(stmt.ReceiverPaillierN); err != nil {
+	if err := validateAffGPublic(params, stmt); err != nil {
 		return err
-	}
-	if err := params.CheckPaillierModulus(stmt.ProverPaillierN); err != nil {
-		return err
-	}
-	if stmt.C == nil || stmt.D == nil || stmt.Y == nil || stmt.X == nil || stmt.K == nil {
-		return errors.New("nil statement field")
-	}
-	if err := stmt.ReceiverPaillierN.ValidateCiphertext(stmt.C); err != nil {
-		return fmt.Errorf("invalid C: %w", err)
-	}
-	if err := stmt.ReceiverPaillierN.ValidateCiphertext(stmt.D); err != nil {
-		return fmt.Errorf("invalid D: %w", err)
-	}
-	if err := stmt.ProverPaillierN.ValidateCiphertext(stmt.Y); err != nil {
-		return fmt.Errorf("invalid Y: %w", err)
-	}
-	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
-		return fmt.Errorf("invalid verifier aux: %w", err)
 	}
 
 	if w.X == nil || w.Y == nil || w.Rho == nil || w.RhoY == nil {
@@ -843,7 +696,47 @@ func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitn
 	return nil
 }
 
-func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement, yVal *big.Int, A *big.Int, Bx *secp.Point, By *big.Int, E, S, F, T *big.Int, yPoint, betaPointCommitment, alphaPoint, productPointCommitment []byte) (*Transcript, error) {
+func validateAffGPublic(params SecurityParams, stmt AffGStatement) error {
+	if stmt.ReceiverPaillierN == nil || stmt.ProverPaillierN == nil {
+		return errors.New("nil Paillier key")
+	}
+	if err := stmt.ReceiverPaillierN.Validate(); err != nil {
+		return fmt.Errorf("invalid receiver Paillier key: %w", err)
+	}
+	if err := stmt.ProverPaillierN.Validate(); err != nil {
+		return fmt.Errorf("invalid prover Paillier key: %w", err)
+	}
+	if err := params.CheckPaillierModulus(stmt.ReceiverPaillierN); err != nil {
+		return err
+	}
+	if err := params.CheckPaillierModulus(stmt.ProverPaillierN); err != nil {
+		return err
+	}
+	if stmt.C == nil || stmt.D == nil || stmt.Y == nil || stmt.X == nil {
+		return errors.New("nil statement field")
+	}
+	if err := stmt.ReceiverPaillierN.ValidateCiphertext(stmt.C); err != nil {
+		return fmt.Errorf("invalid C: %w", err)
+	}
+	if err := stmt.ReceiverPaillierN.ValidateCiphertext(stmt.D); err != nil {
+		return fmt.Errorf("invalid D: %w", err)
+	}
+	if err := stmt.ProverPaillierN.ValidateCiphertext(stmt.Y); err != nil {
+		return fmt.Errorf("invalid Y: %w", err)
+	}
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
+		return fmt.Errorf("invalid verifier aux: %w", err)
+	}
+	if err := validateAuxModulusDistinct(stmt.VerifierAux, stmt.ReceiverPaillierN, stmt.ProverPaillierN); err != nil {
+		return fmt.Errorf("invalid verifier aux: %w", err)
+	}
+	if _, err := secp.PointBytes(stmt.X); err != nil {
+		return fmt.Errorf("invalid X: %w", err)
+	}
+	return nil
+}
+
+func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement, A *big.Int, Bx *secp.Point, By *big.Int, E, S, F, T *big.Int) (*Transcript, error) {
 	if stmt.ReceiverPaillierN == nil || stmt.ProverPaillierN == nil {
 		return nil, errors.New("AffGProof transcript: nil Paillier key")
 	}
@@ -883,13 +776,10 @@ func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement
 	if err := t.AppendBigInt("D", stmt.D); err != nil {
 		return nil, err
 	}
-	if err := t.AppendBigInt("Y", yVal); err != nil {
+	if err := t.AppendBigInt("Y", stmt.Y); err != nil {
 		return nil, err
 	}
 	if err := t.AppendPoint("X", stmt.X); err != nil {
-		return nil, err
-	}
-	if err := t.AppendPoint("K", stmt.K); err != nil {
 		return nil, err
 	}
 
@@ -915,45 +805,5 @@ func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement
 	if err := t.AppendBigInt("T", T); err != nil {
 		return nil, err
 	}
-	if err := appendOptionalAffGPoint(t, "Y_point", yPoint); err != nil {
-		return nil, err
-	}
-	if err := appendOptionalAffGPoint(t, "beta_point_commitment", betaPointCommitment); err != nil {
-		return nil, err
-	}
-	if err := appendOptionalAffGPoint(t, "alpha_point", alphaPoint); err != nil {
-		return nil, err
-	}
-	if err := appendOptionalAffGPoint(t, "product_point_commitment", productPointCommitment); err != nil {
-		return nil, err
-	}
-
 	return t, nil
-}
-
-func affGOptionalPointBytes(point *secp.Point) ([]byte, error) {
-	if point == nil || point.Inf != 0 {
-		return nil, nil
-	}
-	return secp.PointBytes(point)
-}
-
-func affGOptionalPointFromBytes(encoded []byte) (*secp.Point, error) {
-	if len(encoded) == 0 {
-		return secp.NewInfinity(), nil
-	}
-	return secp.PointFromBytes(encoded)
-}
-
-func validOptionalAffGPoint(encoded []byte) bool {
-	_, err := affGOptionalPointFromBytes(encoded)
-	return err == nil
-}
-
-func appendOptionalAffGPoint(t *Transcript, label string, encoded []byte) error {
-	if !validOptionalAffGPoint(encoded) {
-		return fmt.Errorf("AffGProof transcript: invalid %s", label)
-	}
-	t.AppendBytes(label, encoded)
-	return nil
 }

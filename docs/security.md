@@ -30,18 +30,18 @@ Callers must provide:
   payload hashes. After keygen completes, compare `KeygenTranscriptHash`
   across parties as an additional defense-in-depth check;
 - replay protection via `ReplayCache` and session-id freshness;
-- durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
-- an atomic durable `SignAttemptStore` for CGGMP21 presigns. `StartSign`
-  refuses to sign unless `SignRuntime.AttemptStore` is provided. The store is
-  the only StartSign linearization point and must bind one presign content ID to
-  one immutable attempt. The content ID commits to nonce secrets and is
-  secret-tainted: implementations must derive an opaque store-local key and
-  must not expose the content ID in paths, logs, metrics, or plaintext metadata.
-  Conflicts, burn tombstones, and same-intent/different-attempt
-  non-determinism are consumed outcomes; ordinary I/O, timeout, or cancellation
-  errors during commit have unknown outcome and must be recovered by retrying or
-  resuming the same attempt. `LoadSignAttempt` is not a StartSign concurrency
-  check;
+- durable storage encryption for key generations and available presigns. The
+  built-in passphrase and file helpers are reference implementations;
+  production should use a transactional database plus KMS or HSM protection;
+- one atomic durable `tssrun.LifecycleStore` for CGGMP21. `StartPresign` and
+  `StartSign` refuse to operate without the exact current
+  `GenerationBinding`. Figure 8 completion atomically stores one available
+  presign and finishes its lease. `CommitSignAttempt` is the only online
+  linearization point: it validates the complete generation, claims the public
+  presign slot, removes its secret availability, and persists one immutable
+  attempt and exact outbox. Conflicts and burns are terminal. Ordinary I/O,
+  timeout, or cancellation errors during commit have unknown outcome and must
+  be reconciled with the exact `AttemptQuery`; a new intent is forbidden;
 - durable delivery state for CGGMP21 online signing. The exact committed
   envelope may be replayed at least once until ACKs from all recipients and the
   final broadcast certificate are durable. After delivery completion, resume
@@ -158,13 +158,12 @@ arithmetic uses fixed-width scalar operations rather than retaining `big.Int`
 shares. Byte, slice, map, context, and nested-record getters return caller-owned
 copies. Their string and Go-string formatting is redacted.
 
-A shallow Go copy of a key share or presign is another handle to the same
-lifecycle state. It does not duplicate secret material and cannot bypass
-`Destroy()` or presign consumption. Key-share completion accessors return
-independently owned key shares, so mutating or destroying a returned share does
-not affect session-retained state. `PresignSession.Presign()` instead transfers
-its one completed record to the caller and will not return it again. Callers
-must destroy every caller-owned record when it is no longer needed.
+A shallow Go copy of an opaque secret handle refers to the same lifecycle state;
+it does not duplicate secret material or bypass `Destroy()`. Key-share
+completion accessors return independently owned key shares. CGGMP21 Figure 8
+completion is different: `PresignSession.Presign()` returns a repeatable,
+public-only `PersistedPresign` descriptor only after the normalized secret tuple
+has been committed to `LifecycleStore`. The store owns and clears that tuple.
 
 Call `Destroy` on key shares, presigns, keygen sessions, presign sessions, and
 signing sessions once they are no longer needed. These methods clear local
@@ -189,6 +188,13 @@ shares whose public metadata no longer matches their lifecycle state cannot
 derive child keys; public-only derivation requires a separately validated
 metadata snapshot.
 
+CGGMP21 signing accepts only an already established generation with an empty
+signing path. A non-hardened BIP32 result becomes signable only through
+`ChildDerivationPlan` and `StartChildDerivation`, which load the exact parent,
+run a fresh Figure 7/F.1 auxiliary protocol, and atomically create the first
+generation of a distinct child lineage. The child receives a new SID, RID,
+epoch, dynamic identifiers, Paillier keys, and independent auxiliary setup.
+
 FROST resharing share envelopes carry confidential scalar shares.
 Transports must authenticate the sender and encrypt these point-to-point
 messages, reporting `ChannelConfidential` in `ReceiveInfo` so the guard enforces the policy. New HD reshare recipients must be provisioned
@@ -206,6 +212,17 @@ The canonical `ResharePlan` binds those exact source-generation anchors and a
 dealer rejects a plan whose anchors do not match its local old share.
 Substituting any of that metadata can produce a share for the wrong key context
 even when the final public-key preservation check passes.
+
+The CGGMP21 reshare plan additionally carries the complete canonical source
+`EpochContext` and its explicit `EpochID`. Dealer interpolation uses the
+source epoch's dynamic Shamir identifiers, never transport `PartyID` values.
+The target handoff uses separate plan-bound provisional identifiers; those
+identifiers and all temporary Paillier keys, encrypted contributions, and
+proofs are destroyed after the handoff and are not sign-ready auxiliary
+material. Every target must complete a fresh Figure 7/F.1 run before a new
+`KeyShare` exists. The resulting epoch preserves the stable source SID, records
+the exact source EpochID, uses the reshare SessionID as its proof run, and
+derives fresh final identifiers from the new RID.
 
 CGGMP21 refresh binds the source generation's lifecycle session, keygen
 transcript hash, lifecycle plan hash, and group commitments hash into its plan.
@@ -253,10 +270,10 @@ values once they are no longer needed. The library does not hook into
 finalizers or runtime cleanup — only explicit `Destroy()` calls guarantee
 that owned byte slices and `big.Int` backing arrays are overwritten.
 
-Key shares and presign records held by a session as **references** (e.g.,
-`SignSession.key` and `SignSession.presign`) are NOT destroyed by the
-session's `Destroy()` — they are caller-owned and must be destroyed
-separately.
+Lifecycle-backed CGGMP21 sessions own the exact key and presign material they
+load from `LifecycleStore` and destroy it on terminal success or failure.
+Caller-owned key shares used to construct public plans remain separately owned
+and must still be destroyed by the caller.
 
 ### Deployment Recommendations
 
@@ -310,58 +327,44 @@ operations may remain variable-time.
 
 ## CGGMP21 Status
 
-`cggmp21/secp256k1` implements CGGMP21-style threshold ECDSA with Paillier MtA/ZK proofs. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports path-first BIP32 HD derivation through `tss.SigningContext`, and encodes all payloads as canonical binary TLV records.
+`cggmp21/secp256k1` follows Figures 6-10 of the bundled 2024 paper, with the
+Appendix F.1 threshold adaptation and repository lifecycle bindings:
 
-The Paillier/ZK proof layer has been rewritten to use CGGMP-compatible constructions:
+- Figure 6 commits and proves additive key contributions, then immediately
+  hands the public key into Figure 7/F.1.
+- Figure 7/F.1 creates the sign-ready authorization epoch. Each party generates
+  independent Paillier `N` and Ring-Pedersen `Nhat`, commits before reveal,
+  derives a common RID and dynamic Shamir identifiers, proves `Πprm`, `Πmod`,
+  and receiver-specific `Πfac`, and sends DH-masked polynomial evaluations.
+- Figure 8 uses verifier-specific `Πenc-elg`, then `Πelog` and pairwise
+  `Πaff-g`, then a final `Πelog`. It verifies both aggregate equations and
+  stores only normalized `(Gamma,kTilde_i,chiTilde_i,DeltaTilde,STilde)`.
+- Figure 9 is entered only after an aggregate nonce or chi equation fails. It
+  verifies the paper's setup-less `Πaff-g*` and `Πdec` records. An invalid proof
+  attributes its authenticated sender; an all-valid unresolved alert is an
+  unblamed invariant failure.
+- Figure 10 checks every partial directly against the normalized commitments.
+  There is no additional accountability exchange during signing.
 
-- **Πenc**: Paillier encryption in range with Ring-Pedersen commitments, large integer masks sampled from ±2^(Ell+Epsilon), and strict ciphertext membership and response range checks.
-- **Πaff-g**: Paillier affine operation with group commitments in range. In
-  addition to the Paillier equations, it binds the additive mask to `YPoint`
-  and proves `AlphaPoint = x·KPoint + YPoint` with the same responses.
-- MtA affine masks use fixed-width `EllPrime`-bit secret integers rather than
-  curve scalars. The responder reduces only its final additive share modulo the
-  curve order, and rejects a Paillier modulus too small to avoid plaintext
-  wraparound. After decryption, the initiator interprets the Paillier plaintext
-  through the centered interval around zero before reducing modulo the curve
-  order; treating a negative mask as its unsigned residue modulo `N` changes
-  the delta/sigma relation.
-- **Πlog\***: Group element vs Paillier encryption in range. Presign Round 1
-  uses verifier-specific Πlog\* proofs to bind `EncK` to `KPoint`; keygen,
-  refresh, and reshare use the same primitive for stored-share validation.
+The production profile is `(Ell,EllPrime,Epsilon,ChallengeBits) =
+(256,1280,512,256)` with independent Paillier and auxiliary moduli of at least
+3072 bits. This is the paper's 128-bit secp256k1 profile. Reduced profiles are
+test-only explicit inputs and remain bound into plans and proofs.
 
-All three proofs use the canonical typed transcript API; the Fiat-Shamir challenge is never reduced modulo the secp256k1 order for Paillier-integer proofs.
+`EpochContext` binds the stable SID, XOR-derived RID, non-zero collision-free
+dynamic identifiers, public shares, auxiliary material, source epoch, and
+`EpochID`. `KeyGeneration` is only a local durable token and never replaces the
+cryptographic epoch binding.
 
-Presign and signing entry points are enabled. The Paillier MtA/ZK proof layer has
-not yet received independent cryptographic review. See
-`docs/paillier-zk-proofs.md` for the current status and production blockers, and
-`docs/audit-guide.md` for the proof-to-paper mapping designed to facilitate such
-a review.
+All secret-exponent Paillier operations must use
+`internal/paillier/paillierct`. Affine masks are wide fixed-length signed
+integers. Decryption interprets them through the centered representative before
+curve-order reduction.
 
-The three-round SignPrep path binds every accepted signed round-2 payload and
-proves the delta and sigma correction equations. Signed Round-2 equivocation is
-attributed from the two envelopes. A nonce/delta aggregate alert enters the
-conditional O(n²) presign identification round and verifies fresh Πaff-g,
-Πmul, and Πdec proofs. A final ECDSA self-check alert similarly enters the
-online identification round and verifies fresh sigma Πaff-g, Πmul\*, and Πdec
-proofs. The first invalid identification payload is attributed only to its
-sender. If every identification proof verifies while the original failure
-persists, the session clears all retained witnesses, enters a terminal failed
-state, and returns an unblamed `ErrCodeInvariant`.
-
-Portable proof-backed blame includes a canonical `IdentificationRecord`.
-`VerifyBlameEvidence` fails closed unless `EvidenceContext` supplies the
-authenticated envelope/broadcast verifiers and trusted public transcript
-snapshots. Built-in CGGMP21 sign and presign identification is replayed by the
-library; `IdentificationVerifier` is only a fallback for unknown extensions. No
-private share, nonce, Paillier key, mask, or randomness belongs in that context
-or record. Attributable broadcast failures carry the exact accepted envelope
-and its broadcast ACK certificate; attributable direct failures carry the
-sender-signed envelope. Transport authentication failures remain unblamed.
-Conditional identification payloads have a 384 KiB phase-specific cap. The
-certified envelope is retained as the sole payload carrier, and sign evidence
-uses an accused-only compact MtA record plus per-signer hashes, so the statement,
-envelope, and ACK set fit within the 1 MiB public evidence hard cap at 16
-signers. Oversized payloads fail before replay or session mutation.
+The Paillier/ZK layer has not received independent cryptographic review. The
+paper-to-code map is in [`cggmp21-paper-mapping.md`](cggmp21-paper-mapping.md),
+and active proof relations and limitations are in
+[`paillier-zk-proofs.md`](paillier-zk-proofs.md).
 
 ## Keygen Broadcast Consistency
 
@@ -411,50 +414,58 @@ All Paillier public operations (`Decrypt`, `AddCiphertexts`, `AddPlaintext`, `Mu
 Caller integration responsibilities:
 
 - network transport with peer authentication and encryption;
-- storage encryption for key shares and presign records (the built-in `EncryptKeyShareWithPassphrase`/`EncryptPresignWithPassphrase` helpers are Argon2id-based reference/demo implementations — production deployments should integrate a KMS or HSM);
+- transactional storage encryption for key generations, available presigns,
+  attempts, delivery, and completion; reference helpers do not replace a KMS
+  or HSM;
 - distributed refresh coordination: every participant must use the same externally coordinated, unique session ID for one run;
-- atomic key-share replacement: `RefreshScheduler` drives FROST or CGGMP21 refresh, but `CommitKeyShare` must persist and install the new share only if the loaded previous share is still current;
-- hardened/private-key path derivation (online signing supports non-hardened BIP32-style public derivation);
+- atomic CGGMP21 cutover through `LifecycleStore`, including fencing new work,
+  installing the target epoch, retiring the source blob, and burning its
+  available presigns;
+- explicit child-lineage creation for non-hardened BIP32 keys; hardened
+  derivation is unsupported;
 - authenticated keygen message delivery through the confirmation round before any presign/sign operation.
 
-`RefreshScheduler` requires an explicit replay cache and broadcast ACK verifier,
-serializes local refresh runs, and exits on the first protocol, transport, or
-commit error. It does not provide cross-node transactions, automatic retries,
-or session-ID agreement. A commit error wrapping
-`ErrRefreshCommitOutcomeUnknown` transfers recovery responsibility for the new
-share to the caller because durable replacement may already have succeeded.
+`RefreshScheduler` coordinates local protocol execution but does not provide
+cross-node transactions, automatic retries, or session-ID agreement. CGGMP21
+deployments must still use the lifecycle lease and cutover transaction as the
+authoritative replacement boundary.
 
 ## One-Time Presigns
 
 CGGMP21 presigns include nonce-derived local material. Reusing a presign can
-break ECDSA security. Serialized presigns persist enough public context to replay
-every signprep proof and recompute the round-1 echo and presign transcript.
-SignPrep statements bind the ordered commitments and canonical delta/sigma MtA
-contribution views. Every Πaff-g response is reverified publicly, pairwise views
-must agree, and the resulting curve points constrain both `MPoint` and `Delta`.
-`UnmarshalBinary` is structural only; importers should explicitly call
-`VerifyCryptographicMaterialWithLimits`. `StartSign` and `ResumeSign` enforce
-the same full self-verification before durable attempt work. `StartSign` then
-constructs and self-verifies a candidate partial and canonical-encodes its
-envelope before consuming the presign. It atomically commits the immutable
-intent and exact envelope through `SignRuntime.AttemptStore`. Only a committed
-envelope may be returned or transmitted. A commit error has an unknown outcome:
-the presign remains bound and callers may only retry or `ResumeSign` the same
-attempt. Multi-signer Presigns require exactly one private sigma-opening record
-for every peer and one canonical public identification transcript for every
-signer. Before a durable signing-attempt claim or load, self-verification binds
-each transcript digest to the corresponding signprep proof, decodes a temporary
-witness copy, and validates its local transcript response plus the Paillier and
-curve opening relations and AffG parameter-bound witness ranges. The temporary
-copy is destroyed immediately.
-Session-owned records are activated only after the durable attempt and presign
-bindings validate. Each live or resumed `SignSession` owns an independent
-witness copy, so destroying one idempotent session cannot erase another
-session's recovery material or mutate the caller-owned presign.
-`MarshalBinary` persists a consumed snapshot, while the durable attempt record
-is the restart and outbox boundary. Presigns remain bound to the key share,
-security parameters, and all `tss.SigningContext` fields, including requested
-and resolved derivation paths.
+break ECDSA security.
+
+`StartPresign` loads the exact current generation, acquires a `RunPresign`
+lease, and releases Figure 8 envelopes only after both checks succeed. Figure 8
+completion calls `CommitAvailablePresignFromLease` before reporting success.
+The transaction persists the normalized secret tuple, public recovery metadata,
+and lease completion atomically. The public session accessor returns only a
+`PersistedPresign` descriptor.
+
+The private presign record contains `Gamma`, local `kTilde_i` and `chiTilde_i`,
+and signer-ordered `DeltaTilde_j` and `STilde_j`, together with exact epoch,
+plan, signer, context, and transcript bindings. Its binary encoding does not
+change lifecycle availability. Canonical decode is structural; use
+`VerifyCryptographicMaterialWithLimits` before importing a candidate outside
+the authoritative start path.
+
+`StartSign` loads the key generation and available candidate from
+`LifecycleStore`, canonically re-encodes them, performs full material checks,
+constructs and self-verifies the Figure 10 partial, and encodes the exact
+outbound envelope before mutation. `CommitSignAttempt` then atomically validates
+the generation, claims the presign, removes the secret candidate, and persists
+the immutable intent, public verification context, and exact outbox. Only a
+successful exact-attempt commit may release the envelope.
+
+After a successful, conflicting, burned, or outcome-unknown commit, no other
+intent may use that presign. An unknown outcome is reconciled only with the
+exact `AttemptQuery`; `ResumeSign` may replay the committed outbox until the
+authenticated delivery certificate is durable. Completion is a separate
+durable update. Recovery never reloads the normalized secret tuple.
+
+Presign and sign bind an already established lifecycle epoch and require an
+empty signing path. Use a distinct child generation before presigning for a
+non-hardened BIP32 child.
 
 ## Blame Evidence
 

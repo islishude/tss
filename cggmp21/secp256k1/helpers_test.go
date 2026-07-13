@@ -9,18 +9,14 @@ import (
 	"io"
 	"math/big"
 	"slices"
-	"sync"
 	"testing"
 
 	"github.com/islishude/tss"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/testutil"
-	"github.com/islishude/tss/internal/wire"
-	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
-	"github.com/islishude/tss/internal/zk/signprep"
+	"github.com/islishude/tss/tssrun"
 )
 
 type testEnvelopeIdentity struct{}
@@ -54,9 +50,31 @@ func mustKeyShareMetadata(t testing.TB, share *KeyShare) KeySharePublicMetadata 
 	return meta
 }
 
-func mustKeyShareParties(t testing.TB, share *KeyShare) tss.PartySet {
+func attachTestEpoch(t testing.TB, share *KeyShare) {
 	t.Helper()
-	return mustKeyShareMetadata(t, share).Parties
+	if share == nil || share.state == nil {
+		t.Fatal("nil key share")
+	}
+	publicShares := make([]EpochPublicShare, len(share.state.Parties))
+	for i, party := range share.state.Parties {
+		publicShares[i] = EpochPublicShare{Party: party, PublicKey: testCurvePointBytes(t, int64(i+1))}
+	}
+	var sid, rid tss.SessionID
+	sid[0] = 0x71
+	rid[0] = 0x72
+	auxiliaryDigest := sha256.Sum256([]byte("key share metadata test epoch"))
+	epoch, err := NewEpochContext(EpochContextOption{
+		SID:             sid,
+		RID:             rid,
+		Threshold:       share.state.Threshold,
+		Parties:         share.state.Parties,
+		PublicShares:    publicShares,
+		AuxiliaryDigest: auxiliaryDigest[:],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	share.state.Epoch = epoch
 }
 
 func mustKeySharePublicKey(t testing.TB, share *KeyShare) []byte {
@@ -99,41 +117,9 @@ func mustPresignMetadata(t testing.TB, presign *Presign) PresignPublicMetadata {
 	return meta
 }
 
-func mustPresignContextHash(t testing.TB, presign *Presign) []byte {
-	t.Helper()
-	return mustPresignMetadata(t, presign).ContextHash
-}
-
 func mustPresignLittleR(t testing.TB, presign *Presign) []byte {
 	t.Helper()
 	return mustPresignMetadata(t, presign).LittleR
-}
-
-func mustPresignVerifyShare(t testing.TB, presign *Presign, party tss.PartyID) signVerifyShare {
-	t.Helper()
-	share, ok := presignVerifyShare(presign, party)
-	if !ok {
-		t.Fatalf("missing presign verify share for party %d", party)
-	}
-	return share.Clone()
-}
-
-func mustSignVerifyShareKPointBytes(t testing.TB, share signVerifyShare) []byte {
-	t.Helper()
-	out, err := share.kPointBytes()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func mustSignVerifyShareChiPointBytes(t testing.TB, share signVerifyShare) []byte {
-	t.Helper()
-	out, err := share.chiPointBytes()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
 }
 
 // testCGGMP21Policies returns the production CGGMP21 policy set with broadcast
@@ -176,45 +162,33 @@ func clonePresignForTest(p *Presign) *Presign {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	identificationTranscripts := make([]presignIdentificationTranscript, len(p.state.IdentificationTranscripts))
-	for i := range p.state.IdentificationTranscripts {
-		identificationTranscripts[i] = presignIdentificationTranscript{
-			Party:         p.state.IdentificationTranscripts[i].Party,
-			Contributions: cloneMTAContributions(p.state.IdentificationTranscripts[i].Contributions),
-		}
-	}
-	sigmaOpeningRecords := make([]presignSigmaOpeningRecord, len(p.state.SigmaOpeningRecords))
-	for i := range p.state.SigmaOpeningRecords {
-		sigmaOpeningRecords[i] = presignSigmaOpeningRecord{
-			Peer:     p.state.SigmaOpeningRecords[i].Peer,
-			Response: p.state.SigmaOpeningRecords[i].Response.Clone(),
-			Opening:  slices.Clone(p.state.SigmaOpeningRecords[i].Opening),
-		}
+	commitments := make([]normalizedPresignCommitment, len(p.state.Commitments))
+	for i := range p.state.Commitments {
+		commitments[i] = p.state.Commitments[i].clone()
 	}
 	return &Presign{state: &presignState{
-		Consumed:                  p.state.Consumed,
-		attempt:                   p.state.attempt,
-		SecurityParams:            p.state.SecurityParams,
-		Party:                     p.state.Party,
-		Threshold:                 p.state.Threshold,
-		Signers:                   slices.Clone(p.state.Signers),
-		R:                         secp.Clone(p.state.R),
-		LittleR:                   p.state.LittleR,
-		TranscriptHash:            slices.Clone(p.state.TranscriptHash),
-		Context:                   p.state.Context.Clone(),
-		ContextHash:               slices.Clone(p.state.ContextHash),
-		Derivation:                p.state.Derivation.Clone(),
-		PlanHash:                  slices.Clone(p.state.PlanHash),
-		PublicKey:                 secp.Clone(p.state.PublicKey),
-		KeygenTranscriptHash:      slices.Clone(p.state.KeygenTranscriptHash),
-		PartiesHash:               slices.Clone(p.state.PartiesHash),
-		VerifyShares:              tss.CloneSlice(p.state.VerifyShares),
-		Verification:              p.state.Verification.clone(),
-		IdentificationTranscripts: identificationTranscripts,
-		SigmaOpeningRecords:       sigmaOpeningRecords,
-		KShare:                    p.state.KShare.Clone(),
-		ChiShare:                  p.state.ChiShare.Clone(),
-		DeltaAggregate:            p.state.DeltaAggregate.Clone(),
+		Consumed:             p.state.Consumed,
+		attempt:              p.state.attempt,
+		SecurityParams:       p.state.SecurityParams,
+		Party:                p.state.Party,
+		Threshold:            p.state.Threshold,
+		Signers:              slices.Clone(p.state.Signers),
+		PresignID:            slices.Clone(p.state.PresignID),
+		EpochID:              slices.Clone(p.state.EpochID),
+		Gamma:                secp.Clone(p.state.Gamma),
+		LittleR:              p.state.LittleR,
+		KShare:               p.state.KShare.Clone(),
+		ChiShare:             p.state.ChiShare.Clone(),
+		Commitments:          commitments,
+		TranscriptHash:       slices.Clone(p.state.TranscriptHash),
+		Context:              p.state.Context.Clone(),
+		ContextHash:          slices.Clone(p.state.ContextHash),
+		PublicKey:            secp.Clone(p.state.PublicKey),
+		KeygenTranscriptHash: slices.Clone(p.state.KeygenTranscriptHash),
+		PartiesHash:          slices.Clone(p.state.PartiesHash),
+		PlanHash:             slices.Clone(p.state.PlanHash),
+		Derivation:           p.state.Derivation.Clone(),
+		Epoch:                p.state.Epoch.Clone(),
 	}}
 }
 
@@ -262,6 +236,7 @@ func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, sign
 	plan, err := NewPresignPlan(PresignPlanOption{
 		Key:            key,
 		SessionID:      sessionID,
+		PresignID:      sessionID[:],
 		Signers:        signers,
 		Context:        ctx,
 		Limits:         testLimitsPtr(),
@@ -270,16 +245,80 @@ func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, sign
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartPresign(key, plan, tss.LocalConfig{Self: key.state.Party}, guard)
+	runtime, err := prepareTestPresignRuntime(context.Background(), key, plan, tss.LocalConfig{Self: key.state.Party}, guard)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartPresign(plan, runtime)
+}
+
+func prepareTestPresignRuntime(ctx context.Context, key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (PresignRuntime, error) {
+	if key == nil || key.state == nil || key.state.Epoch == nil || plan == nil || plan.state == nil {
+		return PresignRuntime{}, errors.New("invalid test presign runtime input")
+	}
+	epochID, err := tssrun.NewEpochID(key.state.Epoch.EpochID)
+	if err != nil {
+		return PresignRuntime{}, err
+	}
+	binding := tssrun.GenerationBinding{
+		KeyID:         plan.state.context.KeyID,
+		KeyGeneration: tssrun.KeyGeneration(fmt.Sprintf("test-presign-generation-%d", key.state.Party)),
+		EpochID:       epochID,
+	}
+	store := newTestLifecycleStore()
+	if err := installTestLifecycleGeneration(ctx, store, key, binding, plan.limits); err != nil {
+		return PresignRuntime{}, err
+	}
+	return PresignRuntime{
+		Local:          local,
+		Guard:          guard,
+		LifecycleStore: store,
+		Binding:        binding,
+	}, nil
+}
+
+func loadPersistedPresignForTest(session *PresignSession) (*Presign, error) {
+	if session == nil {
+		return nil, errors.New("nil presign session")
+	}
+	descriptor, ok := session.Presign()
+	if !ok {
+		return nil, errors.New("presign session is not durably complete")
+	}
+	storeCtx, cancel := durableStoreContext(context.Background(), session.lifecycleTimeout)
+	candidate, err := session.lifecycleStore.PreparePresignCandidate(storeCtx, session.lifecycleLease.Binding, descriptor.SlotID())
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	defer clear(candidate.Blob)
+	defer clear(candidate.Metadata)
+	var presign Presign
+	if err := presign.UnmarshalBinaryWithLimits(candidate.Blob, session.limits); err != nil {
+		return nil, err
+	}
+	if err := presign.VerifyCryptographicMaterialWithLimits(session.limits); err != nil {
+		presign.Destroy()
+		return nil, err
+	}
+	return &presign, nil
 }
 
 func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(key.state.Party, testCGGMP21GuardParties(key.state.Parties, key.state.Party), sessionID)
 	})
+	return startCGGMP21SignWithLocal(key, presign, sessionID, request, tss.LocalConfig{Self: key.state.Party}, guard)
+}
+
+func startCGGMP21SignWithLocal(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+	metadata, ok := presign.PublicMetadata()
+	if !ok {
+		return nil, nil, errors.New("invalid public presign metadata")
+	}
 	plan, err := NewSignPlan(SignPlanOption{
 		Key:     key,
-		Presign: presign,
+		Presign: metadata,
 		Intent: SignIntent{
 			SessionID: sessionID,
 			Context:   request.Context,
@@ -291,12 +330,12 @@ func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartSign(key, plan, SignRuntime{
-		Local:        tss.LocalConfig{Self: key.state.Party, Context: context.Background()},
-		Guard:        guard,
-		Presign:      presign,
-		AttemptStore: newTestSignAttemptStore(),
-	})
+	store := newTestLifecycleStore()
+	runtime, err := prepareTestSignRuntime(context.Background(), key, presign, sessionID, store, local, guard)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartSign(plan, runtime)
 }
 
 func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
@@ -312,28 +351,95 @@ func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ..
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartRefresh(oldKey, plan, localConfigFromThresholdConfig(config), guard)
+	runtime, err := prepareTestRefreshRuntime(oldKey, plan, localConfigFromThresholdConfig(config), guard)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartRefresh(plan, runtime)
 }
 
 func startCGGMP21ReshareDealer(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(oldKey.state.Party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), oldKey.state.Party), plan.state.SessionID)
 	})
-	return StartReshareDealer(oldKey, plan, tss.LocalConfig{Self: oldKey.state.Party, Rand: rng}, guard)
+	runtime, err := prepareTestReshareRuntime(oldKey, plan, tss.LocalConfig{Self: oldKey.state.Party, Rand: rng}, guard)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartReshareDealer(plan, runtime)
 }
 
 func startCGGMP21ReshareReceiver(plan *ResharePlan, localParty tss.PartyID, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(localParty, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), localParty), plan.state.SessionID)
 	})
-	return StartReshareReceiver(plan, tss.LocalConfig{Self: localParty, Rand: rng}, guard)
+	runtime, err := prepareTestReshareRuntime(nil, plan, tss.LocalConfig{Self: localParty, Rand: rng}, guard)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartReshareReceiver(plan, runtime)
 }
 
 func startCGGMP21ReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(oldKey.state.Party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), oldKey.state.Party), plan.state.SessionID)
 	})
-	return StartReshareOverlap(oldKey, plan, tss.LocalConfig{Self: oldKey.state.Party, Rand: rng}, guard)
+	runtime, err := prepareTestReshareRuntime(oldKey, plan, tss.LocalConfig{Self: oldKey.state.Party, Rand: rng}, guard)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartReshareOverlap(plan, runtime)
+}
+
+func prepareTestRefreshRuntime(key *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (RefreshRuntime, error) {
+	if key == nil || key.state == nil || key.state.Epoch == nil || plan == nil || plan.state == nil {
+		return RefreshRuntime{}, errors.New("invalid test refresh runtime input")
+	}
+	epochID, err := tssrun.NewEpochID(key.state.Epoch.EpochID)
+	if err != nil {
+		return RefreshRuntime{}, err
+	}
+	binding := tssrun.GenerationBinding{KeyID: "test-refresh-key", KeyGeneration: "refresh-source", EpochID: epochID}
+	store := newTestLifecycleStore()
+	if err := installTestLifecycleGeneration(context.Background(), store, key, binding, plan.limits); err != nil {
+		return RefreshRuntime{}, err
+	}
+	return RefreshRuntime{
+		Local:               local,
+		Guard:               guard,
+		LifecycleStore:      store,
+		Binding:             binding,
+		TargetKeyGeneration: "refresh-target",
+	}, nil
+}
+
+func prepareTestReshareRuntime(key *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (ReshareRuntime, error) {
+	if plan == nil || plan.state == nil {
+		return ReshareRuntime{}, errors.New("invalid test reshare runtime input")
+	}
+	epochID, err := tssrun.NewEpochID(plan.state.SourceEpochID)
+	if err != nil {
+		return ReshareRuntime{}, err
+	}
+	binding := tssrun.GenerationBinding{KeyID: "test-reshare-key", KeyGeneration: "reshare-source", EpochID: epochID}
+	store := newTestLifecycleStore()
+	if key != nil {
+		blob, marshalErr := key.MarshalBinaryWithLimits(plan.limits)
+		if marshalErr != nil {
+			return ReshareRuntime{}, marshalErr
+		}
+		defer clear(blob)
+		if _, installErr := store.InstallInitialGeneration(context.Background(), binding, blob, key.state.PlanHash); installErr != nil {
+			return ReshareRuntime{}, installErr
+		}
+	}
+	return ReshareRuntime{
+		Local:               local,
+		Guard:               guard,
+		LifecycleStore:      store,
+		Binding:             binding,
+		TargetKeyGeneration: "reshare-target",
+	}, nil
 }
 
 func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig {
@@ -389,10 +495,10 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 		}
 		return testCGGMP21Guard(key.state.Party, key.state.Parties, sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.ContextHash, newTestSignAttemptStore(), guard, testLimits())
+	return StartSignDigestWithStore(key, presign, sessionID, digest32, newTestLifecycleStore(), guard)
 }
 
-func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store SignAttemptStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store tssrun.LifecycleStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if presign == nil || presign.state == nil {
 		return nil, nil, errNilPresign
 	}
@@ -405,153 +511,174 @@ func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.Ses
 		}
 		return testCGGMP21Guard(key.state.Party, key.state.Parties, sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.ContextHash, store, guard, testLimits())
-}
-
-type testSignAttemptStore struct {
-	mu       sync.Mutex
-	attempts map[string]SignAttemptRecord
-	burns    map[string]struct{}
-}
-
-func newTestSignAttemptStore() *testSignAttemptStore {
-	return &testSignAttemptStore{
-		attempts: make(map[string]SignAttemptRecord),
-		burns:    make(map[string]struct{}),
-	}
-}
-
-func (s *testSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
-	if s == nil {
-		return SignAttemptRecord{}, errors.New("nil test sign attempt store")
-	}
-	if ctx == nil {
-		return SignAttemptRecord{}, errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[string(presignID)]; ok {
-		return SignAttemptRecord{}, ErrSignAttemptBurned
-	}
-	record, ok := s.attempts[string(presignID)]
-	if !ok {
-		return SignAttemptRecord{}, ErrSignAttemptNotFound
-	}
-	return record.Clone(), nil
-}
-
-func (s *testSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
-	if ctx == nil {
-		return SignAttemptCommit{}, errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptCommit{}, err
-	}
-	if err := validateSignAttemptCandidate(candidate); err != nil {
-		return SignAttemptCommit{}, err
-	}
-	key := string(candidate.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[key]; ok {
-		return SignAttemptCommit{}, ErrSignAttemptBurned
-	}
-	if existing, ok := s.attempts[key]; ok {
-		if candidate.SameBaseAttempt(existing) {
-			return SignAttemptCommit{Status: SignAttemptExistingSame, Record: existing.Clone()}, nil
-		}
-		if bytes.Equal(existing.IntentHash, candidate.IntentHash) {
-			return SignAttemptCommit{}, ErrSignAttemptNonDeterminism
-		}
-		return SignAttemptCommit{}, ErrSignAttemptConflict
-	}
-	s.attempts[key] = candidate.Clone()
-	return SignAttemptCommit{Status: SignAttemptCreated, Record: candidate.Clone()}, nil
-}
-
-func (s *testSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
-	if ctx == nil {
-		return SignAttemptRecord{}, errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	key := string(update.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[key]; ok {
-		return SignAttemptRecord{}, ErrSignAttemptBurned
-	}
-	record, ok := s.attempts[key]
-	if !ok {
-		return SignAttemptRecord{}, ErrSignAttemptNotFound
-	}
-	updated, err := applySignAttemptDeliveryUpdate(record, update)
+	ctx := context.Background()
+	runtime, err := prepareTestSignRuntime(ctx, key, presign, sessionID, store, tss.LocalConfig{Self: key.state.Party, Context: ctx}, guard)
 	if err != nil {
-		return SignAttemptRecord{}, err
+		return nil, nil, err
 	}
-	s.attempts[key] = updated.Clone()
-	return updated.Clone(), nil
+	planHashInput := append(bytes.Clone(sessionID[:]), digest32...)
+	planHashInput = append(planHashInput, presign.state.ContextHash...)
+	planHash := sha256.Sum256(planHashInput)
+	publicContext := signAttemptPublicContextFromPresign(presign)
+	defer publicContext.destroy()
+	outbox, rawOutbox, err := buildSignAttemptOutbox(ctx, key, presign, publicContext, runtime.Binding,
+		runtime.PresignID, runtime.AttemptID, sessionID, digest32, presign.state.ContextHash, planHash[:], runtime.DeliveryPolicy, runtime.Local.EnvelopeSigner, testLimits())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer clearSignAttemptOutbox(&outbox)
+	defer clear(rawOutbox)
+	lease, err := store.AcquireRunLease(ctx, runtime.Binding, tssrun.RunSign, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	query := tssrun.AttemptQuery{Binding: runtime.Binding, PresignID: runtime.PresignID, AttemptID: runtime.AttemptID, IntentDigest: bytes.Clone(outbox.IntentDigest)}
+	coordinator, err := newSignAttemptCoordinator(store, lease, query, DefaultLifecycleStoreTimeout, testLimits())
+	if err != nil {
+		return nil, nil, err
+	}
+	commit, err := coordinator.claim(ctx, outbox, rawOutbox)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The lifecycle-backed session owns and destroys the key it receives.
+	// Keep the caller's fixture independently usable across later presign/sign
+	// attempts by transferring an explicit clone to the session.
+	sessionKey := key.Clone()
+	if sessionKey == nil {
+		return nil, nil, errors.New("clone sign-session key share")
+	}
+	session, out, err := signSessionFromLifecycleAttempt(ctx, sessionKey, commit.Record, coordinator, guard, testLimits())
+	if err != nil {
+		sessionKey.Destroy()
+		return nil, nil, err
+	}
+	return session, out, nil
 }
 
-func (s *testSignAttemptStore) CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error) {
-	if ctx == nil {
-		return SignAttemptRecord{}, errors.New("nil context")
+func prepareTestSignRuntime(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, store tssrun.LifecycleStore, local tss.LocalConfig, guard *tss.EnvelopeGuard) (SignRuntime, error) {
+	if store == nil || key == nil || key.state == nil || key.state.Epoch == nil || presign == nil || presign.state == nil {
+		return SignRuntime{}, errors.New("invalid test sign runtime input")
 	}
-	if err := ctx.Err(); err != nil {
-		return SignAttemptRecord{}, err
+	if local.Self == tss.BroadcastPartyId {
+		local.Self = key.state.Party
 	}
-	key := string(result.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.burns[key]; ok {
-		return SignAttemptRecord{}, ErrSignAttemptBurned
+	if local.Context == nil {
+		local.Context = ctx
 	}
-	record, ok := s.attempts[key]
+	epochID, err := tssrun.NewEpochID(key.state.Epoch.EpochID)
+	if err != nil {
+		return SignRuntime{}, err
+	}
+	binding := tssrun.GenerationBinding{KeyID: presign.state.Context.KeyID, KeyGeneration: "test-generation", EpochID: epochID}
+	if err := installTestLifecycleGeneration(ctx, store, key, binding, testLimits()); err != nil {
+		return SignRuntime{}, err
+	}
+	blob, err := presign.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		return SignRuntime{}, err
+	}
+	defer clear(blob)
+	metadata, err := presign.LifecycleMetadataWithLimits(testLimits())
+	if err != nil {
+		return SignRuntime{}, err
+	}
+	defer clear(metadata)
+	presignID, err := PresignSlotID(presign.state.PresignID)
+	if err != nil {
+		return SignRuntime{}, err
+	}
+	if err := commitTestAvailablePresignFromLease(ctx, store, binding, presignID, blob, metadata, fmt.Sprintf("sign-runtime-%x", sessionID)); err != nil {
+		return SignRuntime{}, err
+	}
+	policy, err := CGGMP21Policies().Match(tss.ProtocolCGGMP21Secp256k1, signStartRound, payloadSignPartial)
+	if err != nil {
+		return SignRuntime{}, err
+	}
+	return SignRuntime{
+		Local:          local,
+		Guard:          guard,
+		LifecycleStore: store,
+		Binding:        binding,
+		PresignID:      presignID,
+		AttemptID:      fmt.Sprintf("test-attempt-%d-%x", key.state.Party, sessionID),
+		DeliveryPolicy: SignAttemptDeliveryPolicy{Mode: policy.Mode, Confidentiality: policy.Confidentiality, BroadcastConsistency: policy.BroadcastConsistency, Recipients: presign.state.Signers.Clone()},
+	}, nil
+}
+
+func installTestLifecycleGeneration(ctx context.Context, store tssrun.LifecycleStore, key *KeyShare, binding tssrun.GenerationBinding, limits Limits) error {
+	if store == nil || key == nil || key.state == nil {
+		return errors.New("invalid test lifecycle generation input")
+	}
+	metadata, ok := key.PublicMetadata()
 	if !ok {
-		return SignAttemptRecord{}, ErrSignAttemptNotFound
+		return errors.New("missing key share metadata")
 	}
-	if !bytes.Equal(record.AttemptHash, result.AttemptHash) {
-		return SignAttemptRecord{}, ErrSignAttemptConflict
-	}
-	if record.Completed {
-		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) && record.SignatureRecoveryID == result.Signature.RecoveryID {
-			return record.Clone(), nil
-		}
-		return SignAttemptRecord{}, ErrSignAttemptConflict
-	}
-	record.Completed = true
-	record.SignatureR = slices.Clone(result.Signature.R)
-	record.SignatureS = slices.Clone(result.Signature.S)
-	record.SignatureRecoveryID = result.Signature.RecoveryID
-	s.attempts[key] = record
-	return record.Clone(), nil
-}
-
-func (s *testSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
-	if s == nil {
-		return errors.New("nil test sign attempt store")
-	}
-	if ctx == nil {
-		return errors.New("nil context")
-	}
-	if err := ctx.Err(); err != nil {
+	blob, err := key.MarshalBinaryWithLimits(limits)
+	if err != nil {
 		return err
 	}
-	key := string(burn.PresignContentID)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.attempts[key]; ok {
-		return ErrSignAttemptConflict
+	defer clear(blob)
+	_, err = store.InstallInitialGeneration(ctx, binding, blob, metadata.PlanHash)
+	return err
+}
+
+func commitTestAvailablePresignFromLease(
+	ctx context.Context,
+	store tssrun.LifecycleStore,
+	binding tssrun.GenerationBinding,
+	presignID string,
+	blob, metadata []byte,
+	label string,
+) error {
+	if ctx == nil || store == nil {
+		return errors.New("invalid test available-presign input")
 	}
-	if s.burns == nil {
-		s.burns = make(map[string]struct{})
+	h := sha256.New()
+	_, _ = h.Write([]byte("cggmp21-test-presign-lease"))
+	_, _ = h.Write([]byte(binding.KeyID))
+	_, _ = h.Write([]byte(binding.KeyGeneration))
+	_, _ = h.Write(binding.EpochID[:])
+	_, _ = h.Write([]byte(presignID))
+	_, _ = h.Write([]byte(label))
+	sessionID, err := tss.NewSessionID(bytes.NewReader(h.Sum(nil)))
+	if err != nil {
+		return err
 	}
-	s.burns[key] = struct{}{}
-	return nil
+	lease, err := store.AcquireRunLease(ctx, binding, tssrun.RunPresign, sessionID)
+	if err != nil {
+		return err
+	}
+	return store.CommitAvailablePresignFromLease(ctx, lease, presignID, blob, metadata)
+}
+
+func prepareTestSignRuntimeFromPersisted(ctx context.Context, session *PresignSession, descriptor PersistedPresign, signSessionID tss.SessionID, guard *tss.EnvelopeGuard) (SignRuntime, error) {
+	if session == nil || session.lifecycleStore == nil || !session.leaseFinished {
+		return SignRuntime{}, errors.New("presign session is not durably complete")
+	}
+	metadata := descriptor.PublicMetadata()
+	policy, err := CGGMP21Policies().Match(tss.ProtocolCGGMP21Secp256k1, signStartRound, payloadSignPartial)
+	if err != nil {
+		return SignRuntime{}, err
+	}
+	return SignRuntime{
+		Local:          tss.LocalConfig{Self: metadata.Party, Context: ctx},
+		Guard:          guard,
+		LifecycleStore: session.lifecycleStore,
+		Binding:        session.lifecycleLease.Binding,
+		PresignID:      descriptor.SlotID(),
+		AttemptID:      fmt.Sprintf("test-attempt-%d-%x", metadata.Party, signSessionID),
+		DeliveryPolicy: SignAttemptDeliveryPolicy{
+			Mode:                 policy.Mode,
+			Confidentiality:      policy.Confidentiality,
+			BroadcastConsistency: policy.BroadcastConsistency,
+			Recipients:           metadata.Signers.Clone(),
+		},
+	}, nil
+}
+
+func newTestLifecycleStore() *tssrun.MemoryLifecycleStore {
+	return tssrun.NewMemoryLifecycleStore()
 }
 
 // errNilPresign is a sentinel error for nil presign in test helpers.
@@ -603,26 +730,42 @@ func deliverKeygenMessagesE(sessions map[tss.PartyID]*KeygenSession, parties tss
 
 // --- Minimal presign fixture ---
 
-// minimalCGGMP21Presign creates a Presign with minimal valid fields for
-// wire-format testing. No keygen or Paillier crypto is performed.
+// minimalCGGMP21Presign creates a mathematically valid normalized Figure 8
+// artifact for wire and lifecycle tests. Party 1 owns the full local opening;
+// party 2's public commitments are the group identity.
 func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	one := secp.ScalarOne()
-	otherOne := one
-	paillier65 := testPaillierPublicKey(65)
-	paillier77 := testPaillierPublicKey(77)
-	RPoint := secp.ScalarBaseMult(one)
-	R, err := secp.PointBytes(RPoint)
+	gamma := secp.ScalarBaseMult(one)
+	gammaBytes, err := secp.PointBytes(gamma)
 	if err != nil {
 		tb.Fatal("PointBytes: " + err.Error())
 	}
-	minimalProof := mustMinimalSignPrepProofForTest(tb)
-	littleR := secp.ScalarFromFieldElement(RPoint.X)
+	littleR := secp.ScalarFromFieldElement(gamma.X)
 	transcript := sha256.Sum256([]byte("minimal presign"))
 	planHash := sha256.Sum256([]byte("minimal presign plan"))
+	presignID := sha256.Sum256([]byte("minimal presign id"))
+	var epochSID, epochRID tss.SessionID
+	epochSID[0] = 0x41
+	epochRID[0] = 0x42
+	auxiliaryDigest := sha256.Sum256([]byte("minimal epoch auxiliary digest"))
+	epoch, err := NewEpochContext(EpochContextOption{
+		SID:       epochSID,
+		RID:       epochRID,
+		Threshold: 2,
+		Parties:   tss.NewPartySet(1, 2),
+		PublicShares: []EpochPublicShare{
+			{Party: 1, PublicKey: bytes.Clone(gammaBytes)},
+			{Party: 2, PublicKey: bytes.Clone(gammaBytes)},
+		},
+		AuxiliaryDigest: auxiliaryDigest[:],
+	})
+	if err != nil {
+		tb.Fatal("epoch context: " + err.Error())
+	}
 	ctx := testPresignContext()
+	ctx.Derivation.Path = nil
+	ctx.Derivation.ResolvedPath = nil
 	contextHash := presignContextHash(ctx)
-	zeroShift := secp.ScalarZero().Bytes()
-	childChainCode := bytes.Repeat([]byte{0x42}, 32)
 	kShare, err := secpSecretScalarFromScalar(one)
 	if err != nil {
 		tb.Fatal("k share: " + err.Error())
@@ -631,30 +774,6 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	if err != nil {
 		tb.Fatal("chi share: " + err.Error())
 	}
-	delta, err := secpSecretScalarFromScalar(one)
-	if err != nil {
-		tb.Fatal("delta: " + err.Error())
-	}
-	var verificationSessionID tss.SessionID
-	copy(verificationSessionID[:], bytes.Repeat([]byte{0x31}, len(verificationSessionID)))
-	sigmaOpeningRecord := minimalPresignSigmaOpeningRecord(tb, RPoint)
-	response := sigmaOpeningRecord.Response
-	identificationTranscripts := []presignIdentificationTranscript{
-		{
-			Party: 1,
-			Contributions: []presignMTAContribution{{
-				Peer: 2, Inbound: response.Clone(), Outbound: response.Clone(),
-				InboundDelta: response.Clone(), OutboundDelta: response.Clone(),
-			}},
-		},
-		{
-			Party: 2,
-			Contributions: []presignMTAContribution{{
-				Peer: 1, Inbound: response.Clone(), Outbound: response.Clone(),
-				InboundDelta: response.Clone(), OutboundDelta: response.Clone(),
-			}},
-		},
-	}
 	return &Presign{state: &presignState{
 		Consumed:       NewAtomicBoolWire(false),
 		attempt:        newPresignAttemptBinding(false),
@@ -662,125 +781,31 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		Party:          1,
 		Threshold:      2,
 		Signers:        tss.NewPartySet(1, 2),
-		R:              secp.Clone(RPoint),
+		PresignID:      presignID[:],
+		EpochID:        bytes.Clone(epoch.EpochID),
+		Gamma:          secp.Clone(gamma),
 		LittleR:        littleR,
-		TranscriptHash: transcript[:],
-		Context:        ctx,
-		ContextHash:    contextHash,
-		Derivation: &tss.DerivationResult{
-			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
-			ChildPublicKey: slices.Clone(R),
-			ChildChainCode: slices.Clone(childChainCode),
-			AdditiveShift:  slices.Clone(zeroShift),
+		KShare:         kShare,
+		ChiShare:       chiShare,
+		Commitments: []normalizedPresignCommitment{
+			{Party: 1, DeltaTilde: bytes.Clone(gammaBytes), STilde: bytes.Clone(gammaBytes)},
+			{Party: 2},
 		},
-		PlanHash:             planHash[:],
-		PublicKey:            secp.Clone(RPoint),
+		TranscriptHash:       transcript[:],
+		Context:              ctx,
+		ContextHash:          contextHash,
+		PublicKey:            secp.Clone(gamma),
 		KeygenTranscriptHash: transcript[:],
 		PartiesHash:          tss.PartySetHash(tss.NewPartySet(1, 2), partySetHashLabel),
-		VerifyShares: []signVerifyShare{{
-			Party:                 1,
-			KPoint:                secp.Clone(RPoint),
-			ChiPoint:              secp.Clone(RPoint),
-			Proof:                 minimalProof,
-			Round2CommitmentsHash: bytes.Repeat([]byte{0x33}, 32),
-			MTAContributionsHash:  bytes.Repeat([]byte{0x34}, 32),
-			MTABasePoint:          slices.Clone(R),
-			DeltaBasePoint:        slices.Clone(R),
-		}, {
-			Party:                 2,
-			KPoint:                secp.Clone(RPoint),
-			ChiPoint:              secp.Clone(RPoint),
-			Proof:                 minimalProof.Clone(),
-			Round2CommitmentsHash: bytes.Repeat([]byte{0x33}, 32),
-			MTAContributionsHash:  bytes.Repeat([]byte{0x34}, 32),
-			MTABasePoint:          slices.Clone(R),
-			DeltaBasePoint:        slices.Clone(R),
-		}},
-		Verification: presignVerificationContext{
-			SessionID:  verificationSessionID,
-			Round1Echo: bytes.Repeat([]byte{0x32}, 32),
-			Entries: []presignVerificationEntry{{
-				Party:             1,
-				Gamma:             slices.Clone(R),
-				EncK:              []byte{1},
-				EncGamma:          []byte{1},
-				PaillierPublicKey: paillier65,
-				XBarPoint:         secp.Clone(RPoint),
-				Delta:             &one,
-				KPoint:            slices.Clone(R),
-			}, {
-				Party:             2,
-				Gamma:             slices.Clone(R),
-				EncK:              []byte{1},
-				EncGamma:          []byte{1},
-				PaillierPublicKey: paillier77,
-				XBarPoint:         secp.Clone(RPoint),
-				Delta:             &otherOne,
-				KPoint:            slices.Clone(R),
-			}},
+		PlanHash:             planHash[:],
+		Derivation: &tss.DerivationResult{
+			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
+			ChildPublicKey: bytes.Clone(gammaBytes),
+			ChildChainCode: bytes.Repeat([]byte{0x43}, 32),
+			AdditiveShift:  secp.ScalarZero().Bytes(),
 		},
-		IdentificationTranscripts: identificationTranscripts,
-		SigmaOpeningRecords:       []presignSigmaOpeningRecord{sigmaOpeningRecord},
-		KShare:                    kShare,
-		ChiShare:                  chiShare,
-		DeltaAggregate:            delta,
+		Epoch: epoch,
 	}}
-}
-
-type minimalResponseOpeningWire struct {
-	X     []byte `wire:"1,bytes,len=32"`
-	YSign []byte `wire:"2,bytes,len=1"`
-	Y     []byte `wire:"3,bytes,max_bytes=paillier_signed"`
-	Rho   []byte `wire:"4,bytes,max_bytes=paillier_signed"`
-	RhoY  []byte `wire:"5,bytes,max_bytes=paillier_signed"`
-}
-
-func (minimalResponseOpeningWire) WireType() string { return "mta.response-opening-private" }
-
-func (minimalResponseOpeningWire) WireVersion() uint16 { return 1 }
-
-// minimalPresignSigmaOpeningRecord returns structurally valid wire-only
-// material. It is not a cryptographically coherent protocol fixture.
-func minimalPresignSigmaOpeningRecord(tb testing.TB, point *secp.Point) presignSigmaOpeningRecord {
-	tb.Helper()
-	one := func() *big.Int { return big.NewInt(1) }
-	proof := zkpai.AffGProof{
-		A:              one(),
-		Bx:             secp.Clone(point),
-		By:             one(),
-		E:              one(),
-		S:              one(),
-		F:              one(),
-		T:              one(),
-		Y:              one(),
-		Z1:             one(),
-		Z2:             one(),
-		Z3:             one(),
-		Z4:             one(),
-		W:              one(),
-		WY:             one(),
-		TranscriptHash: bytes.Repeat([]byte{0x35}, sha256.Size),
-	}
-	opening, err := wire.Marshal(
-		minimalResponseOpeningWire{
-			X: bytes.Repeat([]byte{1}, secp.ScalarSize), YSign: []byte{0},
-			Y: []byte{1}, Rho: []byte{1}, RhoY: []byte{1},
-		},
-		wire.WithFieldLimitsForMarshal(wire.FieldLimits{
-			"paillier_signed": tss.DefaultMaxPaillierCiphertextBytes,
-		}),
-	)
-	if err != nil {
-		tb.Fatal("marshal minimal sigma opening: " + err.Error())
-	}
-	return presignSigmaOpeningRecord{
-		Peer: 2,
-		Response: mta.ResponseMessage{
-			Ciphertext: []byte{1},
-			Proof:      proof,
-		},
-		Opening: opening,
-	}
 }
 
 func testLimitsPtr() *Limits {
@@ -791,54 +816,4 @@ func testLimitsPtr() *Limits {
 func testSecurityParamsPtr() *SecurityParams {
 	params := testSecurityParams()
 	return &params
-}
-
-func mustMinimalSignPrepProofForTest(tb testing.TB) *signprep.Proof {
-	one := big.NewInt(1)
-	two := big.NewInt(2)
-	kScalar := secp.ScalarFromBigInt(one)
-	twoScalar := secp.ScalarFromBigInt(two)
-	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(kScalar))
-	xBarPoint := kPoint
-	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(twoScalar))
-	stmt := signprep.Statement{
-		Protocol:              tss.ProtocolCGGMP21Secp256k1,
-		SessionID:             tss.SessionID{1},
-		Party:                 1,
-		Signers:               tss.NewPartySet(1),
-		PlanHash:              bytes.Repeat([]byte{0x99}, 32),
-		ContextHash:           bytes.Repeat([]byte{0xaa}, 32),
-		PublicKey:             kPoint,
-		KeygenTranscriptHash:  bytes.Repeat([]byte{0xbb}, 32),
-		PartiesHash:           bytes.Repeat([]byte{0xcc}, 32),
-		Round2CommitmentsHash: bytes.Repeat([]byte{0x33}, 32),
-		MTAContributionsHash:  bytes.Repeat([]byte{0x34}, 32),
-		MTABasePoint:          kPoint,
-		DeltaBasePoint:        kPoint,
-		KPoint:                kPoint,
-		ChiPoint:              chiPoint,
-		XBarPoint:             xBarPoint,
-		EncK:                  make([]byte, 256),
-		PaillierPublicKey:     make([]byte, 256),
-		Gamma:                 kPoint,
-		Delta:                 kScalar.Bytes(),
-	}
-	wit := signprep.Witness{
-		KShare:   testSecretScalar(tb, 1),
-		MTASum:   testSecretScalar(tb, 1),
-		ChiShare: testSecretScalar(tb, 2),
-	}
-	proof, err := signprep.Prove(testutil.DeterministicReader(42), stmt, wit)
-	if err != nil {
-		tb.Fatal("signprep.Prove: " + err.Error())
-	}
-	return proof
-}
-
-func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
-	var planHash []byte
-	if presign != nil && presign.state != nil {
-		planHash = presign.state.PlanHash
-	}
-	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, store, guard, DefaultSignAttemptStoreTimeout, limits)
 }

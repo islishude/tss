@@ -10,35 +10,51 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
-	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
+	"github.com/islishude/tss/tssrun"
 )
 
 // StartPresign starts this party's local offline CGGMP-style presign state
-// machine from a shared immutable lifecycle plan. Production applications should
-// create one presign run with one session ID, one signer set, and one context,
-// then have every signer reconstruct an equivalent plan locally. The resulting
-// Presign is a party-local one-use record and must be durably persisted before
-// it is made available for signing.
-func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (s *PresignSession, out []tss.Envelope, err error) {
-	if key == nil || key.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil key share"))
-	}
-	if local.Self == 0 {
-		local.Self = key.state.Party
-	}
+// machine from a shared immutable lifecycle plan and an exact current key
+// generation loaded from runtime.LifecycleStore. A caller-supplied raw KeyShare
+// is intentionally not accepted. The RunPresign lease is durable before any
+// protocol envelope is returned, and successful completion atomically installs
+// the secret presign record before the session exposes public metadata.
+func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession, out []tss.Envelope, err error) {
+	local := runtime.Local
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
+	if runtime.LifecycleStore == nil {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("PresignRuntime.LifecycleStore is required"))
+	}
+	if err := runtime.Binding.Validate(); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
+	if local.Self == tss.BroadcastPartyId {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("PresignRuntime.Local.Self is required"))
+	}
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	if err := key.requireMPCMaterial(plan.limits); err != nil {
+	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
+	if runtime.Binding.KeyID != plan.state.context.KeyID {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("presign runtime key id does not match plan context"))
+	}
+
+	timeout := durableStoreTimeout(runtime.DurableStoreTimeout)
+	key, err := loadLifecycleKeyShare(local.Ctx(), runtime.LifecycleStore, runtime.Binding, plan.limits, timeout)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyOwned := true
+	defer func() {
+		if keyOwned {
+			key.Destroy()
+		}
+	}()
 	limits := plan.limits
 	if err := plan.validateKey(key, local); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
@@ -48,6 +64,32 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	sessionID := plan.state.sessionID
+	storeCtx, cancel := durableStoreContext(local.Ctx(), timeout)
+	lease, err := runtime.LifecycleStore.AcquireRunLease(storeCtx, runtime.Binding, tssrun.RunPresign, sessionID)
+	cancel()
+	if err != nil {
+		return nil, nil, err
+	}
+	leaseOwned := true
+	defer func() {
+		if err == nil || !leaseOwned {
+			return
+		}
+		for i := range out {
+			clearEnvelope(&out[i])
+		}
+		out = nil
+		if s != nil {
+			s.abort()
+			s = nil
+		}
+		storeCtx, finishCancel := durableStoreContext(local.Ctx(), timeout)
+		finishErr := runtime.LifecycleStore.FinishRunLease(storeCtx, lease, tssrun.LeaseAborted)
+		finishCancel()
+		if finishErr != nil {
+			err = errors.Join(err, fmt.Errorf("abort uncommitted presign run lease: %w", finishErr))
+		}
+	}()
 	signers := slices.Clone(plan.state.signers)
 	// Snapshot the normalized context and derivation once. The resulting
 	// Presign stores derivation.ChildPublicKey as the verification key.
@@ -81,25 +123,63 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		Log:            local.Log,
 		EnvelopeSigner: local.EnvelopeSigner,
 	}
-	// k_i and gamma_i are local nonce scalars. Only Enc(k_i) and Gamma_i leave
-	// the process; the raw nonce scalars stay inside the local presign record.
+	// Figure 8 round 1 samples k_i, gamma_i and the two ElGamal exponents.
+	// Only Paillier ciphertexts and curve commitments leave the process.
 	kShare, err := secp.RandomScalar(config.Reader())
 	if err != nil {
 		return nil, nil, err
 	}
+	defer kShare.Set(secp.ScalarZero())
 	gamma, err := secp.RandomScalar(config.Reader())
 	if err != nil {
 		return nil, nil, err
 	}
+	defer gamma.Set(secp.ScalarZero())
+	a, err := secp.RandomScalar(config.Reader())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer a.Set(secp.ScalarZero())
+	b, err := secp.RandomScalar(config.Reader())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer b.Set(secp.ScalarZero())
+	yExponent, err := secp.RandomScalar(config.Reader())
+	if err != nil {
+		return nil, nil, err
+	}
+	defer yExponent.Set(secp.ScalarZero())
+	Y := secp.ScalarBaseMult(yExponent)
+	A1 := secp.ScalarBaseMult(a)
+	A2 := secp.Add(secp.ScalarMult(Y, a), secp.ScalarBaseMult(kShare))
+	B1 := secp.ScalarBaseMult(b)
+	B2 := secp.Add(secp.ScalarMult(Y, b), secp.ScalarBaseMult(gamma))
 	gammaComm, err := secp.PointBytes(secp.ScalarBaseMult(gamma))
 	if err != nil {
 		return nil, nil, err
 	}
-	kPoint, err := secp.PointBytes(secp.ScalarBaseMult(kShare))
+	yBytes, err := secp.PointBytes(Y)
 	if err != nil {
 		return nil, nil, err
 	}
-	lambda, err := shamir.LagrangeCoefficient(key.state.Party, signers)
+	a1Bytes, err := secp.PointBytes(A1)
+	if err != nil {
+		return nil, nil, err
+	}
+	a2Bytes, err := secp.PointBytes(A2)
+	if err != nil {
+		return nil, nil, err
+	}
+	b1Bytes, err := secp.PointBytes(B1)
+	if err != nil {
+		return nil, nil, err
+	}
+	b2Bytes, err := secp.PointBytes(B2)
+	if err != nil {
+		return nil, nil, err
+	}
+	lambda, err := epochLagrangeCoefficient(key.state.Epoch, key.state.Party, signers)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,6 +208,24 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 			gammaSecret.Destroy()
 		}
 	}()
+	aSecret, err := secpSecretScalarFromScalar(a)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			aSecret.Destroy()
+		}
+	}()
+	bSecret, err := secpSecretScalarFromScalar(b)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err != nil {
+			bSecret.Destroy()
+		}
+	}()
 	xBarSecret, err := secpSecretScalarFromScalar(xBar)
 	if err != nil {
 		return nil, nil, err
@@ -149,8 +247,8 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	// Round 1 publishes Enc_i(k_i); each peer receives a verifier-specific
-	// Πlog* proof binding Enc(k_i) to KPoint_i and the peer's RP parameters.
+	// Round 1 publishes K_i/G_i and both ElGamal tuples. Each peer receives
+	// verifier-specific Πenc-elg proofs under its independent auxiliary setup.
 	startOpening, err := mta.Start(config.Reader(), kShareSecret, paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
@@ -172,12 +270,17 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		}
 	}()
 	presignPayload := presignRound1Payload{
-		Gamma:             gammaComm,
 		EncK:              slices.Clone(startOpening.Message.Ciphertext),
+		EncGamma:          slices.Clone(gammaOpening.Message.Ciphertext),
+		Y:                 yBytes,
+		A1:                a1Bytes,
+		A2:                a2Bytes,
+		B1:                b1Bytes,
+		B2:                b2Bytes,
 		PaillierPublicKey: paillierPub,
 		PlanHash:          slices.Clone(planHash),
-		KPoint:            kPoint,
-		EncGamma:          slices.Clone(gammaOpening.Message.Ciphertext),
+		EpochID:           slices.Clone(plan.state.epochID),
+		PresignID:         slices.Clone(plan.state.presignID),
 	}
 	payload, err := presignPayload.MarshalBinaryWithLimits(limits)
 	if err != nil {
@@ -197,29 +300,38 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	selfState.round1.havePayload = true
 	selfState.round1.verified = true
 	s = &PresignSession{
-		key:            key,
-		sessionID:      sessionID,
-		config:         config,
-		log:            config.Logger(),
-		limits:         limits,
-		securityParams: plan.securityParams,
-		signers:        signers,
-		context:        ctx,
-		contextHash:    contextHash,
-		derivation:     derivation,
-		planHash:       slices.Clone(planHash),
-		paillier:       paillierKey,
-		kShare:         kShareSecret,
-		gamma:          gammaSecret,
-		xBar:           xBarSecret,
-		gammaComm:      gammaComm,
-		xBarComm:       xBarComm,
-		partyIndex:     partyIndex,
-		parties:        parties,
-		startOpening:   startOpening,
-		gammaOpening:   gammaOpening,
-		guard:          guard,
+		key:              key,
+		ownsKey:          true,
+		sessionID:        sessionID,
+		config:           config,
+		log:              config.Logger(),
+		limits:           limits,
+		securityParams:   plan.securityParams,
+		signers:          signers,
+		context:          ctx,
+		contextHash:      contextHash,
+		presignID:        slices.Clone(plan.state.presignID),
+		epochID:          slices.Clone(plan.state.epochID),
+		derivation:       derivation,
+		planHash:         slices.Clone(planHash),
+		paillier:         paillierKey,
+		kShare:           kShareSecret,
+		gamma:            gammaSecret,
+		a:                aSecret,
+		b:                bSecret,
+		xBar:             xBarSecret,
+		gammaComm:        gammaComm,
+		xBarComm:         xBarComm,
+		partyIndex:       partyIndex,
+		parties:          parties,
+		startOpening:     startOpening,
+		gammaOpening:     gammaOpening,
+		guard:            runtime.Guard,
+		lifecycleStore:   runtime.LifecycleStore,
+		lifecycleLease:   lease,
+		lifecycleTimeout: timeout,
 	}
+	keyOwned = false
 	derivationOwned = true
 	paillierOwned = true
 	openingReturned = true
@@ -242,27 +354,29 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proofDomain, err := mtaStartProofDomain(key, sessionID, signers, key.state.Party, peer, paillierKey.PublicKey, contextHash, planHash, limits)
+		proofDomain, err := figure8ProofDomain(sessionID, s.epochID, s.presignID, planHash, contextHash, signers, presignStartRound, key.state.Party, peer, "enc-elg-k")
 		if err != nil {
 			return nil, nil, err
 		}
-		proof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, s.startOpening, kPoint, s.paillier.PublicKey, peerRP)
+		proof, err := s.startOpening.ProveEncElgForVerifier(plan.securityParams, config.Reader(), proofDomain, yBytes, a1Bytes, a2Bytes, s.a, s.paillier.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
 		}
-		gammaDomain, err := gammaStartProofDomain(key, sessionID, signers, key.state.Party, peer, paillierKey.PublicKey, contextHash, planHash, limits)
+		gammaDomain, err := figure8ProofDomain(sessionID, s.epochID, s.presignID, planHash, contextHash, signers, presignStartRound, key.state.Party, peer, "enc-elg-gamma")
 		if err != nil {
 			return nil, nil, err
 		}
-		gammaProof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), gammaDomain, s.gammaOpening, gammaComm, s.paillier.PublicKey, peerRP)
+		gammaProof, err := s.gammaOpening.ProveEncElgForVerifier(plan.securityParams, config.Reader(), gammaDomain, yBytes, b1Bytes, b2Bytes, s.b, s.paillier.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
 		}
 		proofPayload, err := (presignRound1ProofPayload{
 			PublicRound1Hash: publicHash,
 			EncKProof:        *proof,
-			PlanHash:         slices.Clone(planHash),
 			EncGammaProof:    *gammaProof,
+			PlanHash:         slices.Clone(planHash),
+			EpochID:          slices.Clone(s.epochID),
+			PresignID:        slices.Clone(s.presignID),
 		}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, nil, err
@@ -287,6 +401,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	out = append(out, round3...)
 	prepared.out = out
 	prepared.markCommitted()
+	leaseOwned = false
 	return s, out, nil
 }
 
@@ -309,6 +424,9 @@ func (s *PresignSession) buildAcceptPresignRound1PayloadTx(env tss.Envelope) (*a
 	// ---- 2. POLICY VALIDATE ----
 	// (round, broadcast, duplicate, transport checks done in dispatcher)
 	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
+	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 
@@ -376,6 +494,9 @@ func (s *PresignSession) buildAcceptPresignRound1ProofTx(env tss.Envelope) (*acc
 	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
+	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 
 	st, ok := s.partyState(env.From)
 	if !ok {
@@ -419,9 +540,15 @@ func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presign
 	fields = append(fields,
 		observedPaillierField,
 		rawEvidenceField("round1_public_hash", publicHash),
-		hashEvidenceField("gamma_hash", p.Gamma),
 		hashEvidenceField("enc_k_hash", p.EncK),
 		hashEvidenceField("enc_gamma_hash", p.EncGamma),
+		hashEvidenceField("y_hash", p.Y),
+		hashEvidenceField("a1_hash", p.A1),
+		hashEvidenceField("a2_hash", p.A2),
+		hashEvidenceField("b1_hash", p.B1),
+		hashEvidenceField("b2_hash", p.B2),
+		rawEvidenceField("epoch_id", p.EpochID),
+		rawEvidenceField("presign_id", p.PresignID),
 	)
 	if expected, err := s.key.paillierPublicFor(from, s.limits); err == nil {
 		if encoded, err := expected.MarshalBinary(); err == nil {
@@ -443,11 +570,16 @@ func (s *PresignSession) presignRound1ProofEvidenceFields(from tss.PartyID, publ
 }
 
 func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1Payload) error {
-	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
-		return fmt.Errorf("invalid gamma: %w", err)
+	for _, field := range []struct {
+		name  string
+		value []byte
+	}{{"Y", p.Y}, {"A1", p.A1}, {"A2", p.A2}, {"B1", p.B1}, {"B2", p.B2}} {
+		if _, err := secp.PointFromBytes(field.value); err != nil {
+			return fmt.Errorf("invalid Figure 8 %s: %w", field.name, err)
+		}
 	}
-	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
-		return fmt.Errorf("invalid KPoint: %w", err)
+	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
+		return err
 	}
 	expectedPK, err := s.key.paillierPublicFor(from, s.limits)
 	if err != nil {
@@ -483,6 +615,9 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 	if !bytes.Equal(publicHash, proof.PublicRound1Hash) {
 		return errors.New("presign round1 proof public hash mismatch")
 	}
+	if err := requireFigure8Binding(proof.EpochID, proof.PresignID, s.epochID, s.presignID); err != nil {
+		return err
+	}
 	proverPK, err := s.key.paillierPublicFor(from, s.limits)
 	if err != nil {
 		return err
@@ -491,19 +626,18 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 	if err != nil {
 		return err
 	}
-	start := mta.StartMessage{Ciphertext: public.EncK}
-	domain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.Party, public.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+	domain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignStartRound, from, s.key.state.Party, "enc-elg-k")
 	if err != nil {
 		return err
 	}
-	if err := mta.VerifyStart(s.securityParams, domain, start, public.KPoint, proverPK, localRP, &proof.EncKProof); err != nil {
+	if err := mta.VerifyStartEncElg(s.securityParams, domain, mta.StartMessage{Ciphertext: public.EncK}, public.Y, public.A1, public.A2, proverPK, localRP, &proof.EncKProof); err != nil {
 		return err
 	}
-	gammaDomain, err := gammaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.Party, public.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+	gammaDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignStartRound, from, s.key.state.Party, "enc-elg-gamma")
 	if err != nil {
 		return err
 	}
-	return mta.VerifyStart(s.securityParams, gammaDomain, mta.StartMessage{Ciphertext: public.EncGamma}, public.Gamma, proverPK, localRP, &proof.EncGammaProof)
+	return mta.VerifyStartEncElg(s.securityParams, gammaDomain, mta.StartMessage{Ciphertext: public.EncGamma}, public.Y, public.B1, public.B2, proverPK, localRP, &proof.EncGammaProof)
 }
 
 func presignRound1PublicHash(p presignRound1Payload, limits Limits) ([]byte, error) {

@@ -142,7 +142,7 @@ func TestProofReplayAcrossDifferentStatements(t *testing.T) {
 func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 	t.Parallel()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,6 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 		D:                 dZero,
 		Y:                 encYZero,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(xVal)),
-		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(xVal)),
 		VerifierAux:       aux,
 	}
 	// Witness: Rho is the randomness for Enc_Nj(y; rho) inside D, which is encYZero's rhoYZero.
@@ -228,7 +227,7 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 func TestRingPedersenCommitmentCollisionResistance(t *testing.T) {
 	t.Parallel()
 	sk := testPaillierKey(t, 512)
-	params, _, err := GenerateRingPedersenParams(nil, sk)
+	params, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +348,7 @@ func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
 	params := fastProofParams()
 
 	// Valid params first.
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, _, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}

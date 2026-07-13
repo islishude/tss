@@ -155,7 +155,7 @@ func encProofFixture(t *testing.T) (SecurityParams, EncStatement, EncWitness, *E
 	t.Helper()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 	t.Helper()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,6 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
 	witness := AffGWitness{X: xSecret, Y: ySigned, Rho: rho, RhoY: rhoY}
@@ -236,7 +235,7 @@ func logStarProofFixture(t *testing.T) (SecurityParams, LogStarStatement, LogSta
 	t.Helper()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +266,7 @@ func TestLogStarProofAcceptsZeroPlaintextAndIdentityCommitment(t *testing.T) {
 	t.Parallel()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := testIndependentRingPedersenParams(t, nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}

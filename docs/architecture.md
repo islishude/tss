@@ -1,76 +1,150 @@
 # Architecture
 
-This module is a transport-neutral threshold-signature library. The public API is split by protocol family:
+This module is a transport- and database-neutral threshold-signature library.
 
-- `github.com/islishude/tss`: shared session ids, envelopes, algorithm identifiers, key-share/signature interfaces, protocol errors, and blame evidence.
-- `github.com/islishude/tss/frost/ed25519`: dealerless FROST-style Ed25519 DKG and two-round signing.
-- `github.com/islishude/tss/cggmp21/secp256k1`: CGGMP21-style secp256k1 threshold ECDSA keygen, presign, online signing, key refresh, resharing, BIP32 HD derivation, and evidence verification.
-- `internal/wire`: strict TLV encoding used by binary envelope, key-share, and presign records.
-- `internal/curve`, `internal/shamir`, `internal/paillier`, `internal/paillier/paillierct`, `internal/secret`, `internal/mta`, and `internal/zk`: protocol-local cryptographic helpers. `paillierct` wraps constant-time `c^λ mod n²` via `filippo.io/bigmod`. `secret.Scalar` is a fixed-length secret type that rejects JSON and variable-length encoding. Curve scalar and field wrappers use committed fiat-crypto generated arithmetic under `internal/fiat`.
-- `internal/zk/signprep`: CGGMP21 signprep proof (Πsignprep) proving that a signer's published KPoint and ChiPoint during presign round 3 are correctly derived from its private nonce and signing key contribution, bound to the presign transcript.
+## Package Ownership
+
+- `github.com/islishude/tss` owns shared identifiers, envelopes, authenticated
+  inbound opening, guards, replay protection, broadcast certificates, evidence,
+  signing context, and scheduling helpers.
+- `github.com/islishude/tss/tssrun` owns accepted run intent, session registry,
+  dispatch, unknown-session policy, exact generation bindings, and the unified
+  durable lifecycle contract.
+- `github.com/islishude/tss/frost/ed25519` owns FROST-style Ed25519 DKG,
+  signing, refresh, resharing, import, reconstruction, and derivation.
+- `github.com/islishude/tss/cggmp21/secp256k1` owns the Figure 6-10 CGGMP21
+  state machines, Figure 7/F.1 epoch creation, trusted import, reconstruction,
+  refresh, resharing, and explicit non-hardened child generation.
+- `internal/wire` owns strict canonical TLV encoding.
+- `internal/transcript` owns repository-defined labeled SHA-256 transcripts.
+- `internal/secret` owns fixed-width secret scalar and signed-integer wrappers.
+- `internal/curve`, `internal/shamir`, `internal/bip32util`,
+  `internal/paillier`, `internal/paillier/paillierct`, `internal/mta`, and
+  `internal/zk` own narrow cryptographic primitives. CGGMP21 Figure 8 uses
+  `Πenc-elg`, `Πelog`, and `Πaff-g`; Figure 9 uses setup-less `Πaff-g*` and
+  `Πdec`.
+- `internal/testharness`, `internal/testutil`, and `internal/testvectors` own
+  shared runners, mutation tools, and canonical fixtures.
 
 ## Transport Model
 
-Protocol start APIs return outbound `tss.Envelope` values. Inbound handlers
-accept `tss.InboundEnvelope`, which integrators construct by calling
-`OpenEnvelope(raw, ReceiveInfo, ...)` after authenticating the peer and
-classifying the actual channel protection. The library does not open sockets,
-retry messages, authenticate peers, encrypt payloads, or persist state.
-Integrators must provide authenticated delivery, confidentiality for
-secret-bearing envelopes, reliable ordering, broadcast certificates where
-required by `PolicySet`, and replay protection via `ReplayCache`.
+Protocol starts and inbound handlers return `tss.Envelope` values. The library
+does not open sockets, authenticate peers, encrypt messages, or retry delivery.
 
-`OpenEnvelope` first rejects the wrong envelope wire type or schema version.
-`EnvelopeGuard.Validate` is the next fail-closed boundary: it checks protocol
-name, session id, sender membership, transport authentication, identity binding,
-delivery mode, confidentiality policy, broadcast consistency, and replay before
-package-specific state machines decode payloads.
+The receive path is:
+
+```text
+raw bytes + authenticated transport facts
+  -> tss.OpenEnvelope
+  -> tssrun.Dispatcher.Dispatch
+  -> ProtocolSession.Handle
+  -> caller transport
+```
+
+`OpenEnvelope` validates the envelope wire record and binds
+`ReceiveInfo.Peer`. `EnvelopeGuard` then checks protocol, semantic version,
+session, sender, recipient, delivery mode, confidentiality, sender signature,
+broadcast certificate, and replay slot before protocol payload decoding.
+
+Secret-bearing direct payloads require authenticated confidential transport.
+Broadcast payloads require the policy's complete consistency certificate.
 
 ## Protocol Handler Transactions
 
-FROST and CGGMP21 inbound handlers use the same internal transaction boundary:
+All state-machine handlers follow:
 
 ```text
-decode -> policy validate -> cryptographic verify -> prepare transition -> commit -> effects
+decode -> policy validate -> cryptographic verify
+       -> prepare transition and outbound envelopes
+       -> commit replay, state, store, and secret ownership
+       -> release effects
 ```
 
-Decode, policy, and cryptographic failures do not mutate protocol session state
-or emit envelopes. A prepared transition owns any decoded secret material until
-commit transfers that ownership to the session; rejected or abandoned prepared
-values are destroyed. Outbound envelopes are constructed before the state that
-authorizes them is committed, so marshal or envelope-construction failure cannot
-leave a partially advanced session.
+Rejected input cannot mutate accepted state or emit envelopes. Prepared secret
+objects remain owned by a cleanup stack until commit transfers ownership.
+Outbound envelopes are constructed before the state that authorizes them is
+committed.
 
-Identical duplicate delivery follows the documented handler lifecycle policy
-and never reapplies a transition. Conflicting duplicates are replay,
-equivocation, or verification errors and do not overwrite accepted state.
-Readiness is derived from accepted per-party state rather than independent
-message counters.
+Identical duplicates follow the phase's explicit idempotence rule. Conflicting
+duplicates are replay, equivocation, or verification failures and never
+overwrite accepted state. Readiness is derived from authoritative accepted
+party slots rather than a separate message counter.
 
-## Key-Share Lifecycle
+## Key and Epoch Model
 
-Keygen state machines produce algorithm-specific `KeyShare` records. `MarshalBinary` is deterministic and uses canonical TLV encoding for the share record. Secret material is not encrypted by this package; callers must encrypt persisted shares when needed and call `Destroy` when practical.
+`GenerationBinding` identifies one durable key ID, local generation token, and
+cryptographic authorization `EpochID`.
 
-FROST key shares store verification shares and optional keygen confirmations in
-a party-keyed map whose key set exactly matches the canonical participant set.
-The participant set remains the only ordering source for transcripts,
-confirmation sets, and public materialization. Retired record-list KeyShare
-encodings are rejected rather than decoded through compatibility paths.
+FROST generations bind their participant set, commitments, public key, chain
+code, and confirmation set.
 
-CGGMP21 key shares include Paillier private material, party-keyed public
-verification/Paillier/Ring-Pedersen material, proof data, and a mandatory
-32-byte HD chain code needed by the signing path. The party-data map key set
-must exactly match the canonical participant set; ordered protocol material is
-derived from that participant order. Old CGGMP21 shares without current
-Paillier/ZK fields or using the retired per-party record-list layout are
-rejected and require rerunning keygen. Old GG20 wire identifiers are rejected.
+Every sign-ready CGGMP21 generation additionally contains a canonical
+`EpochContext` with stable SID, common RID, dynamic Shamir identifiers, public
+shares, independent Paillier and Ring-Pedersen material, auxiliary digest, and
+source epoch. Figure 6 output becomes usable only after Figure 7/F.1 and the
+target confirmation set complete.
 
-## Signing Lifecycle
+Opaque key-share accessors return defensive public copies. Secret records use
+canonical binary encoding and must be encrypted by the production store.
 
-FROST Ed25519 signs in two online rounds: nonce commitments, then partial signatures. Aggregation verifies each partial before producing a 64-byte Ed25519 signature accepted by `crypto/ed25519.Verify`.
+## Unified Durable Lifecycle
 
-CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `NewPresignPlan` binds key id, chain id, derivation path, policy domain, message domain, signer set, and key metadata before nonce generation. `NewSignPlan` binds the presign, message, and durable attempt policy; `StartSign` verifies the plan against the key and presign, constructs a candidate partial locally, then claims it through an internal sign-attempt coordinator whose store commit is the only durable linearization point before returning the envelope. Online partial verification and aggregate signature preparation are independent of the durable store. Aggregate signatures are always normalized to low-S, and public verification rejects high-S encodings. A committed, outcome-unknown, or possibly sent presign can only resume the same immutable attempt; delivery ACKs/certificates and final signature visibility are persisted as separate durable state on that attempt.
+`tssrun.LifecycleStore` is the transaction boundary for:
+
+- loading and validating the exact current generation;
+- acquiring generation-bound run leases;
+- committing available CGGMP21 presigns;
+- atomically claiming a presign with an immutable signing intent and exact
+  outbox;
+- persisting delivery, completion, abort, and burn state;
+- fencing refresh or reshare cutover; and
+- installing the first generation of a distinct child lineage.
+
+`MemoryLifecycleStore` is for tests and examples. `FileLifecycleStore` is an
+encrypted reference implementation. It takes sorted per-lineage OS locks plus
+the global manifest lock, writes immutable encrypted blobs before one fsynced
+manifest swap, and removes unreferenced crash artifacts when reopening state.
+Neither store replaces a production database transaction and KMS/HSM policy.
+
+### CGGMP21 presign and sign
+
+`StartPresign` loads the exact current generation from `LifecycleStore` and
+acquires a lease before releasing Figure 8 envelopes. Successful completion
+atomically stores the normalized tuple and finishes the lease. The public
+session accessor returns only a persisted descriptor.
+
+`StartSign` constructs and verifies the Figure 10 partial before
+`CommitSignAttempt` atomically validates the generation, claims the available
+presign, removes its secret availability, and stores the exact recovery outbox.
+Unknown outcomes may only recover the same attempt. Delivery and final
+signature visibility are separate durable updates.
+
+### Refresh, reshare, and child generation
+
+Refresh and reshare use an exclusive lease and generation fence. The final
+cutover transaction installs the target, retires the source, clears its secret
+blob, and burns source-epoch available presigns.
+
+A non-hardened BIP32 child is not installed by mutating its parent. The child
+plan binds a distinct key ID and generation, applies the public tweak, runs a
+fresh Figure 7/F.1 auxiliary protocol, and atomically creates the first child
+generation. The parent remains current.
+
+## Signing Lifecycles
+
+FROST Ed25519 signs in two online rounds: nonce commitments and partial
+signatures. Aggregation verifies each partial and produces a standard 64-byte
+Ed25519 signature.
+
+CGGMP21 separates Figure 8 offline presigning from Figure 10 signing. The
+available presign contains local one-use normalized secret shares and public
+per-signer commitments. Figure 10 checks each partial directly, sums only valid
+partials, and applies low-S normalization to the final ECDSA signature.
 
 ## Public vs Internal
 
-The public packages expose state-machine APIs and deterministic encoding. Internal packages are intentionally narrow helpers for curve arithmetic, sharing, Paillier, MtA, and proof binding. They are documented because protocol reviewers need to understand their invariants, but they are not stable public API.
+Public packages expose plans, party-local sessions, public metadata snapshots,
+and durability interfaces. Internal packages are deliberately narrow and are
+not stable APIs. Their documentation exists so protocol reviewers can trace
+equations, transcript domains, resource limits, ownership, and failure
+behavior.

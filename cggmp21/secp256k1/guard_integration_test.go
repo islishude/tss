@@ -54,10 +54,10 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   sessionID,
-		Round:       keygenStartRound,
+		Round:       keygenFigure6CommitmentRound,
 		From:        12,
 		To:          0,
-		PayloadType: payloadKeygenCommitments,
+		PayloadType: payloadFigure6Commitment,
 		Payload:     []byte("not-a-real-commitment"),
 	})
 	if err != nil {
@@ -87,10 +87,10 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   sessionID,
-		Round:       keygenShareRound,
+		Round:       keygenAuxInfoProofRound,
 		From:        22,
 		To:          21,
-		PayloadType: payloadKeygenShare,
+		PayloadType: payloadAuxInfoDirect,
 		Payload:     []byte("not-a-real-share"),
 	})
 	if err != nil {
@@ -122,7 +122,7 @@ func TestCGGMP21KeygenRejectsUnauthenticatedTransport(t *testing.T) {
 		Round:       1,
 		From:        32,
 		To:          0,
-		PayloadType: payloadKeygenCommitments,
+		PayloadType: payloadFigure6Commitment,
 		Payload:     []byte("not-real-commitments"),
 	})
 	if err != nil {
@@ -153,7 +153,7 @@ func TestCGGMP21KeygenRejectsSenderSpoofing(t *testing.T) {
 		Round:       1,
 		From:        42,
 		To:          0,
-		PayloadType: payloadKeygenCommitments,
+		PayloadType: payloadFigure6Commitment,
 		Payload:     []byte("test"),
 	})
 	if err != nil {
@@ -181,33 +181,22 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// First delivery of a valid broadcast message.
-	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		SessionID:   sessionID,
-		Round:       1,
-		From:        52,
-		To:          0,
-		PayloadType: payloadKeygenConfirmation,
-		Payload:     []byte("test-confirmation"),
-	})
+	// First delivery of an actual Figure 6 commitment is accepted and commits
+	// its replay slot; the exact second delivery must then be rejected.
+	_, out, err := startCGGMP21Keygen(configs[52])
 	if err != nil {
 		t.Fatal(err)
 	}
+	commitEnv := out[0]
 
-	// First delivery: may fail (invalid payload) but should NOT fail with ErrDuplicateMessage.
-	_, _ = session.Handle(testutil.DeliverEnvelope(commitEnv))
+	if _, err := session.Handle(testutil.DeliverEnvelope(commitEnv)); err != nil {
+		t.Fatal(err)
+	}
 
-	// Second delivery: must fail with ErrDuplicateMessage if it passed the guard the first time.
+	// Second delivery must fail with ErrDuplicateMessage.
 	_, err = session.Handle(testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrDuplicateMessage) {
-		// If it wasn't ErrDuplicateMessage, ensure it's some other valid error (not nil).
-		if err == nil {
-			t.Error("expected ErrDuplicateMessage or other error on second delivery, got nil")
-		}
-		// The first delivery may have failed before the replay check for other reasons
-		// (wrong round, etc.). That's acceptable - we're testing that when the guard
-		// processes a message, replay is detected.
+		t.Fatalf("expected ErrDuplicateMessage, got %v", err)
 	}
 }
 

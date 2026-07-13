@@ -1,63 +1,95 @@
-# CGGMP secp256k1 Protocol Checklist
+# CGGMP21 secp256k1 Protocol Checklist
 
-This checklist tracks the active `cggmp21/secp256k1` implementation. The package
-name is historical; the Paillier proof layer uses CGGMP24 Πmod and
-Ring-Pedersen Πprm semantics.
+This checklist tracks the active `cggmp21/secp256k1` implementation against the
+bundled 2024 paper. `DONE` means the repository contains the implementation and
+tests; it is not an audit or production-readiness claim.
 
-## Keygen, Refresh, Reshare
+## Figure 6: Key Generation
 
-| Requirement                                                                        | Code Location                                                              | Status |
-| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------ |
-| Generate Paillier safe-prime modulus `N=pq` with `p≡q≡3 mod 4`                     | `internal/paillier`, `keygen.go`, `refresh.go`, `reshare.go`               | DONE   |
-| Prove and verify CGGMP24 Πmod with `w` and exactly 128 verifier-derived rounds     | `internal/zk/paillier/proofs.go`                                           | DONE   |
-| Generate, store, and verify Ring-Pedersen `(N,s,t)` parameters and Πprm            | `internal/zk/paillier/proofs.go`, `keygen.go`, `refresh.go`, `reshare.go`  | DONE   |
-| Generate `T=τ²`, `S=T^λ` and require public Jacobi `+1` for both bases             | `internal/zk/paillier/ring_pedersen.go`                                    | DONE   |
-| Prove receiver-specific Πfac and enforce `2^Ell < p,q < 2^Ell sqrt(N)`             | `internal/zk/paillier/factor.go`, keygen/refresh/reshare handlers          | DONE   |
-| Persist and revalidate every remote Πfac against the local verifier parameters     | `keyshare.go`, lifecycle completion paths                                  | DONE   |
-| Reject mismatched Ring-Pedersen modulus vs Paillier public key                     | `types.go`, protocol receive handlers                                      | DONE   |
-| Bind keygen/refresh/reshare transcripts to Paillier keys and Ring-Pedersen records | `keygen.go`, `refresh.go`, `reshare.go`                                    | DONE   |
-| Prove share-to-verification-share discrete-log equality with Πlog\*                | `keygen.go`, `refresh.go`, `reshare.go`, `internal/zk/paillier/logstar.go` | DONE   |
-| Preserve group secret in party-set-changing reshare with Lagrange-weighted dealers | `reshare.go`, `internal/shamir`                                            | DONE   |
-| Source new Paillier/Ring-Pedersen material from the new receiver set               | `reshare.go`                                                               | DONE   |
-| Accept reshare Πfac before receiver broadcast and reject a later key conflict      | `reshare.go`, `reshare_round1.go`                                          | DONE   |
-| Store only canonical TLV key-share records with no legacy proof fallback           | `encoding.go`, `payload_encoding.go`                                       | DONE   |
+| Requirement                                                                  | Code location                                        | Status |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------- | ------ |
+| Commit `rho_i`, `X_i`, Schnorr first message, and decommitment before reveal | `paper_keygen.go`, `paper_keygen_figure6.go`         | DONE   |
+| Reject a wrong or equivocated round-1 opening before state mutation          | `paper_keygen_figure6.go`, `paper_keygen_payload.go` | DONE   |
+| Derive the common XOR coin from every accepted opening                       | `paper_keygen_figure6.go`                            | DONE   |
+| Finalize Schnorr with the exact committed first message and common coin      | `paper_keygen_figure6.go`, `internal/zk/schnorr`     | DONE   |
+| Enter Figure 7/F.1 before exposing a sign-ready `KeyShare`                   | `paper_keygen.go`, `paper_auxiliary_state.go`        | DONE   |
 
-## Proof Verifier Policy
+## Figure 7 and Appendix F.1
 
-| Requirement                                                                                | Code Location                                 | Status |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------- | ------ |
-| Structural validation before algebraic comparison                                          | `internal/zk/paillier/proofs.go`              | DONE   |
-| Reject non-canonical scalar responses and wrong-width Paillier integers                    | `internal/zk/paillier/proofs.go`              | DONE   |
-| Reject Paillier ciphertexts outside `Z*_{N²}`                                              | `internal/paillier`, `internal/zk/paillier`   | DONE   |
-| Reject invalid Ring-Pedersen parameters outside `Z*_N`                                     | `ValidateRingPedersenParams`                  | DONE   |
-| Reject malformed secp256k1 points before challenge derivation                              | `internal/zk/paillier`, `internal/zk/schnorr` | DONE   |
-| Domain separate every active proof tag and bind curve/version/domain/statement/commitments | `proofTranscript`, `domain.go`                | DONE   |
+| Requirement                                                                    | Code location                                                       | Status |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ------ |
+| Generate independent Paillier `N` and auxiliary `Nhat` moduli                  | `auxiliary_setup.go`, `internal/zk/paillier/ring_pedersen.go`       | DONE   |
+| Reject `N == Nhat` and enforce both production modulus floors                  | `paper_auxiliary_payload.go`, `internal/zk/paillier`                | DONE   |
+| Commit all public setup, polynomial, DH, RID, and proof material before reveal | `paper_auxiliary_primitives.go`, `paper_auxiliary_payload.go`       | DONE   |
+| Verify `Πprm`, `Πmod`, and receiver-specific `Πfac` under bound domains        | `paper_auxiliary_state.go`, `internal/zk/paillier`                  | DONE   |
+| Use degree `t-1` Shamir polynomials for repository threshold `t`               | `epoch_shamir.go`, `paper_auxiliary_state.go`                       | DONE   |
+| Derive non-zero collision-free identifiers from `H(SID,RID,party)`             | `epoch_context.go`, `epoch_context_test.go`                         | DONE   |
+| Encrypt polynomial evaluations with authenticated pairwise DH masks            | `paper_auxiliary_primitives.go`, `paper_auxiliary_state.go`         | DONE   |
+| Restrict DH exponent disclosure to the dedicated accusation record             | `paper_auxiliary_failure.go`, `paper_auxiliary_payload.go`          | DONE   |
+| Bind the complete epoch and require target-holder confirmation before output   | `epoch_context.go`, `keygen_confirmation.go`, lifecycle completions | DONE   |
 
-## Presign And Signing
+## Figure 8: Presigning
 
-| Requirement                                                                     | Code Location                                        | Status |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------- | ------ |
-| Bind presigns to `tss.SigningContext`/`PresignContext` before nonce generation  | `NewPresignPlan` + `StartPresign`                    | DONE   |
-| Bind key id, chain id, derivation path, policy domain, and message domain       | `presignContextHash`, `Presign` TLV                  | DONE   |
-| Move BIP32 path resolution into presign creation                                | `preparePresignContext`, `tryEmitRound3`             | DONE   |
-| Reject online signing under mismatched context, path, or derived key before use | `StartSign`                                          | DONE   |
-| Mark presign consumed before emitting online partial                            | `startSignDigestBound`                               | DONE   |
-| Avoid raw digest signing with persisted presigns                                | no public raw-digest signing helper; use `StartSign` | DONE   |
-| Reject early identification without committing its replay slot                  | `guard.go`, sign/presign handlers                    | DONE   |
-| Verify built-in identification evidence from authenticated public context       | `identification_portable.go`, `evidence.go`          | DONE   |
-| Bind sign replay inputs and fit portable evidence at the 16-signer limit        | `identification_portable.go`, evidence size tests    | DONE   |
+| Requirement                                                                   | Code location                                               | Status |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------- | ------ |
+| Publish `K_i,G_i,Y_i,A_i,B_i` and verifier-specific `Πenc-elg` proofs         | `presign_round1.go`, `internal/zk/paillier/enc_elg.go`      | DONE   |
+| Bind the accepted canonical public round-1 view into every recipient proof    | `presign_round1.go`, `paper_presign_domains.go`             | DONE   |
+| Prove `Gamma_i` with `Πelog` and both pairwise affine paths with `Πaff-g`     | `presign_round2.go`, `internal/mta`, `internal/zk/paillier` | DONE   |
+| Interpret decrypted affine masks as centered signed integers before reduction | `internal/mta/finish.go`                                    | DONE   |
+| Publish `delta_i,Delta_i,S_i` with the Figure 8 `Πelog` relation              | `presign_round3.go`, `internal/zk/paillier/elog.go`         | DONE   |
+| Verify both aggregate equations independently before producing an artifact    | `presign_round3.go`, `presign_verification.go`              | DONE   |
+| Reject zero `delta` or invalid ECDSA nonce as an unattributed burned run      | `presign_round3.go`, `paper_presign_artifact.go`            | DONE   |
+| Persist only normalized `(Gamma,kTilde_i,chiTilde_i,DeltaTilde,STilde)`       | `paper_presign_artifact.go`, `sign.go`, `encoding.go`       | DONE   |
 
-## Negative Tests
+## Figure 9: Failed Nonce or Chi
 
-| Scenario                                                                               | Test Location                                                    |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Πmod Jacobi, round count, missing equations, invalid `Z*_N` elements, extra fields     | `internal/zk/paillier/proofs_test.go`                            |
-| Invalid Ring-Pedersen params, response bounds, wrong transcript/party/domain           | `internal/zk/paillier/proofs_test.go`, `encoding_test.go`        |
-| Πfac canonical wire, field mutation, context replay, response bounds, small-factor key | `internal/zk/paillier/factor*_test.go`, `payload_limits_test.go` |
-| Invalid ciphertexts, malformed points, non-canonical responses                         | `internal/zk/paillier/proofs_test.go`                            |
-| MtA proof domain binds presign context                                                 | `domain_test.go`                                                 |
-| MtA additive masks use EllPrime-width fixed secret integers                            | `internal/mta/helpers_test.go`                                   |
-| SignPrep binds ordered round-2 payload commitments                                     | `integration_presign_adversary_test.go`                          |
-| Round1 Πlog\* binds EncK to KPoint; SignPrep binds delta and sigma MtA equations       | `domain_test.go`, `internal/zk/signprep/correctness_test.go`     |
-| Presign reuse across key id, chain id, derivation path, policy domain, message domain  | `presign_policy_test.go`                                         |
-| Early identification retry and portable evidence verification/mutation                 | `guard_test.go`, `integration_identification_test.go`            |
+| Requirement                                                             | Code location                                     | Status |
+| ----------------------------------------------------------------------- | ------------------------------------------------- | ------ |
+| Enter only after one Figure 8 aggregate equation fails                  | `figure9.go`, `presign_round3.go`                 | DONE   |
+| Publish the aggregated ciphertext and a setup-less `Πdec`               | `figure9.go`, `internal/zk/paillier/dec.go`       | DONE   |
+| Publish one setup-less `Πaff-g*` per peer over canonical MtA views      | `figure9.go`, `internal/zk/paillier/affg_star.go` | DONE   |
+| Attribute the first invalid proof to its authenticated sender           | `figure9.go`, `evidence.go`                       | DONE   |
+| Return an unblamed invariant if all proofs verify but the alert remains | `figure9.go`, `figure9_tier1_test.go`             | DONE   |
+
+## Figure 10: Signing
+
+| Requirement                                                                      | Code location                              | Status |
+| -------------------------------------------------------------------------------- | ------------------------------------------ | ------ |
+| Compute `sigma_i = kTilde_i*m + r*chiTilde_i`                                    | `online_sign_lifecycle.go`                 | DONE   |
+| Check every authenticated partial with `Gamma^sigma_i=DeltaTilde_i^m STilde_i^r` | `online_sign_transition.go`                | DONE   |
+| Attribute an invalid partial directly without another proof phase                | `online_sign_transition.go`, `evidence.go` | DONE   |
+| Sum verified partials and normalize only the final signature to low-S            | `online_sign_session.go`, `low_s_test.go`  | DONE   |
+
+## Durable Lifecycle
+
+| Requirement                                                                        | Code location                                             | Status |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------- | ------ |
+| Load the exact current generation and validate canonical key material before start | `lifecycle_keyshare.go`, `presign_round1.go`              | DONE   |
+| Acquire a generation-bound presign lease before releasing initial envelopes        | `presign_round1.go`, `tssrun/lifecycle.go`                | DONE   |
+| Atomically persist an available presign and finish its lease                       | `presign_lifecycle.go`, `tssrun/LifecycleStore`           | DONE   |
+| Expose only a public persisted descriptor after successful presign commit          | `presign_runtime.go`, `presign_runtime_test.go`           | DONE   |
+| Atomically claim availability and persist exact intent and outbox                  | `online_sign_lifecycle.go`, `sign_attempt_coordinator.go` | DONE   |
+| Reconcile unknown outcomes only with the exact attempt query                       | `online_sign_lifecycle.go`, `tssrun/lifecycle.go`         | DONE   |
+| Fence refresh/reshare cutover and burn source-epoch available presigns             | `tssrun/lifecycle.go`, lifecycle conformance tests        | DONE   |
+| Install a non-hardened child as a distinct lineage after fresh Figure 7/F.1        | `child_derivation.go`, `child_derivation_plan.go`         | DONE   |
+
+## Security Profile and Negative Coverage
+
+| Requirement                                                                               | Code location                                                  | Status |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------ |
+| Default `(Ell,EllPrime,Epsilon,ChallengeBits)=(256,1280,512,256)`                         | `internal/zk/paillier/params.go`                               | DONE   |
+| Enforce independent 3072-bit minimum Paillier and auxiliary moduli                        | `internal/zk/paillier`, `paper_auxiliary_payload.go`           | DONE   |
+| Use bounded rejection sampling for canonical non-zero field and modulus challenges        | `internal/zk/challenge`, `internal/zk/paillier/modulus.go`     | DONE   |
+| Reject malformed points, ciphertext non-members, range violations, and wrong domains      | `internal/zk/paillier/*_test.go`                               | DONE   |
+| Reject wrong epoch, RID, plan, sender, recipient, committee, or signer set                | protocol state-transition and integration tests                | DONE   |
+| Reject early, duplicate, conflicting, replayed, and out-of-order payloads without effects | `presign_state_transition_test.go`, lifecycle transition tests | DONE   |
+| Keep Figure 7 accusation records and Figure 9 evidence public-only where required         | `paper_auxiliary_state_test.go`, `figure9_tier1_test.go`       | DONE   |
+
+## Review Gaps
+
+- Independent cryptographic review of the Paillier, range-proof, and
+  accountability implementations is still required.
+- The repository transport, persistence, and threshold-extension bindings are
+  outside the paper's exact protocol model and require separate review.
+- Reference file and memory stores are not production durability or key
+  management.

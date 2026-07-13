@@ -11,6 +11,9 @@ func TestMemoryImplementationsConform(t *testing.T) {
 		NewRunStore: func(testing.TB) tssrun.RunStore {
 			return tssrun.NewMemoryRunStore()
 		},
+		NewLifecycleStore: func(testing.TB) tssrun.LifecycleStore {
+			return tssrun.NewMemoryLifecycleStore()
+		},
 		NewSessionRegistry: func(testing.TB) tssrun.SessionRegistry {
 			return tssrun.NewMemorySessionRegistry()
 		},

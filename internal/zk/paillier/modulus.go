@@ -15,11 +15,154 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-// ProveModulus creates the CGGMP24 Πmod proof for a Paillier-Blum modulus.
-func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uint32) (*ModulusProof, error) {
+// ModulusPreparation owns a one-use Paillier factorization and the already
+// published first-message commitment for Πmod. Its fields are intentionally
+// opaque.
+type ModulusPreparation struct {
+	sk     *pai.PrivateKey
+	party  uint32
+	w      []byte
+	staged bool
+}
+
+// ModulusFinalization is a caller-owned staged Πmod proof. Commit consumes
+// the source preparation; Destroy cancels the stage before any effect is
+// emitted.
+type ModulusFinalization struct {
+	owner *ModulusPreparation
+	proof *ModulusProof
+}
+
+// PrepareModulus samples the public first-message commitment for Πmod before
+// the final proof domain is known.
+func PrepareModulus(reader io.Reader, sk *pai.PrivateKey, party uint32) (*ModulusPreparation, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
+	if sk == nil {
+		return nil, errors.New("nil paillier private key")
+	}
+	if err := sk.Validate(); err != nil {
+		return nil, err
+	}
+	p, q, err := paillierFactors(sk)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(p)
+	defer secret.ClearBigInt(q)
+	if err := validateBlumFactors(p, q); err != nil {
+		return nil, err
+	}
+	w, err := randomJacobiMinusOne(reader, sk.N)
+	if err != nil {
+		return nil, err
+	}
+	wBytes, err := fixedModNBytes(w, modulusBytes(sk.N))
+	if err != nil {
+		return nil, fmt.Errorf("encode modulus proof w: %w", err)
+	}
+	return &ModulusPreparation{sk: sk.Clone(), party: party, w: wBytes}, nil
+}
+
+// Commitment returns a defensive copy of the prepared public W commitment.
+func (p *ModulusPreparation) Commitment() []byte {
+	if p == nil || p.sk == nil {
+		return nil
+	}
+	return bytes.Clone(p.w)
+}
+
+// Destroy clears the retained factorization and releases the public first
+// message.
+func (p *ModulusPreparation) Destroy() {
+	if p == nil {
+		return
+	}
+	if p.sk != nil {
+		p.sk.Destroy()
+	}
+	clear(p.w)
+	*p = ModulusPreparation{}
+}
+
+// Finalize consumes the preparation and constructs a Πmod proof under the
+// final domain while reusing the exact published W commitment.
+func (p *ModulusPreparation) Finalize(domain []byte) (*ModulusProof, error) {
+	finalization, err := p.PrepareFinalize(domain)
+	if err != nil {
+		return nil, err
+	}
+	proof := finalization.Proof()
+	if err := finalization.Commit(); err != nil {
+		finalization.Destroy()
+		return nil, err
+	}
+	return proof, nil
+}
+
+// PrepareFinalize computes a staged Πmod proof without consuming the source
+// preparation. Call Commit after the state transition is durable, or Destroy
+// before any staged proof is emitted.
+func (p *ModulusPreparation) PrepareFinalize(domain []byte) (*ModulusFinalization, error) {
+	if p == nil || p.sk == nil || len(p.w) == 0 || p.staged {
+		return nil, errors.New("destroyed, consumed, or already staged modulus preparation")
+	}
+	proof, err := finalizeModulus(domain, p.sk, p.party, p.w)
+	if err != nil {
+		p.Destroy()
+		return nil, err
+	}
+	p.staged = true
+	return &ModulusFinalization{owner: p, proof: proof}, nil
+}
+
+// Proof returns a defensive copy of the staged public Πmod proof.
+func (f *ModulusFinalization) Proof() *ModulusProof {
+	if f == nil || f.owner == nil || f.proof == nil {
+		return nil
+	}
+	return f.proof.Clone()
+}
+
+// Commit consumes the source preparation after the caller commits the state
+// transition that makes the staged proof visible.
+func (f *ModulusFinalization) Commit() error {
+	if f == nil || f.owner == nil || f.proof == nil || !f.owner.staged {
+		return errors.New("destroyed or committed modulus finalization")
+	}
+	owner := f.owner
+	f.proof.Destroy()
+	*f = ModulusFinalization{}
+	owner.Destroy()
+	return nil
+}
+
+// Destroy cancels a staged finalization without consuming the source
+// preparation. It is safe only before the staged proof has been emitted.
+func (f *ModulusFinalization) Destroy() {
+	if f == nil {
+		return
+	}
+	if f.owner != nil && f.owner.sk != nil {
+		f.owner.staged = false
+	}
+	if f.proof != nil {
+		f.proof.Destroy()
+	}
+	*f = ModulusFinalization{}
+}
+
+// ProveModulus creates the CGGMP24 Πmod proof for a Paillier-Blum modulus.
+func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uint32) (*ModulusProof, error) {
+	preparation, err := PrepareModulus(reader, sk, party)
+	if err != nil {
+		return nil, err
+	}
+	return preparation.Finalize(domain)
+}
+
+func finalizeModulus(domain []byte, sk *pai.PrivateKey, party uint32, wBytes []byte) (*ModulusProof, error) {
 	if sk == nil {
 		return nil, errors.New("nil paillier private key")
 	}
@@ -51,14 +194,11 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 	}
 	defer secret.ClearBigInt(invN)
 
-	w, err := randomJacobiMinusOne(reader, sk.N)
-	if err != nil {
-		return nil, err
+	w, err := decodeFixedUnit("modulus proof w", wBytes, sk.N, nLen)
+	if err != nil || big.Jacobi(w, sk.N) != -1 {
+		return nil, errors.New("invalid prepared modulus proof commitment")
 	}
-	wBytes, err := fixedModNBytes(w, nLen)
-	if err != nil {
-		return nil, fmt.Errorf("encode modulus proof w: %w", err)
-	}
+	wBytes = bytes.Clone(wBytes)
 	transcript := proofTranscript(modulusProofTag, domain, [][]byte{partyBytes(party), raw}, [][]byte{wBytes})
 
 	xs := make([][]byte, modulusProofRounds)
@@ -211,19 +351,58 @@ func validateModulusProof(p *ModulusProof) error {
 
 // --- Modulus-proof-specific helpers ---
 
+const modulusChallengeCounterLimit = 256
+
 func deriveModulusY(n *big.Int, transcript []byte, round int) (*big.Int, error) {
 	if n == nil || n.Cmp(big.NewInt(1)) <= 0 || n.Bit(0) == 0 {
 		return nil, errors.New("invalid modulus")
 	}
-	nLen := modulusBytes(n)
-	for counter := uint32(0); ; counter++ {
-		candidate := new(big.Int).SetBytes(expandHash(nLen, []byte(modulusYLabel), transcript, wire.Uint32(uint32(round)), wire.Uint32(counter)))
-		candidate.Mod(candidate, n)
-		if _, err := requireUnit(candidate, n); err != nil {
-			continue
-		}
-		return candidate, nil
+	if round < 0 || uint64(round) > uint64(^uint32(0)) {
+		return nil, errors.New("invalid modulus proof round")
 	}
+	nLen := modulusBytes(n)
+	limit, err := modulusRejectionLimit(n, nLen)
+	if err != nil {
+		return nil, err
+	}
+	for counter := range uint32(modulusChallengeCounterLimit) {
+		candidateBytes := expandHash(nLen, []byte(modulusYLabel), transcript, wire.Uint32(uint32(round)), wire.Uint32(counter))
+		candidate, ok := reduceUniformModulusCandidate(candidateBytes, n, limit)
+		if ok {
+			return candidate, nil
+		}
+	}
+	return nil, errors.New("modulus proof challenge rejection counter exhausted")
+}
+
+func modulusRejectionLimit(n *big.Int, nLen int) (*big.Int, error) {
+	if n == nil || n.Cmp(big.NewInt(1)) <= 0 || nLen <= 0 {
+		return nil, errors.New("invalid modulus rejection parameters")
+	}
+	space := new(big.Int).Lsh(big.NewInt(1), uint(8*nLen))
+	if n.Cmp(space) > 0 {
+		return nil, errors.New("modulus exceeds candidate space")
+	}
+	quotient := new(big.Int).Quo(space, n)
+	if quotient.Sign() == 0 {
+		return nil, errors.New("empty modulus rejection quotient")
+	}
+	return quotient.Mul(quotient, n), nil
+}
+
+func reduceUniformModulusCandidate(encoded []byte, n, limit *big.Int) (*big.Int, bool) {
+	if len(encoded) == 0 || n == nil || limit == nil {
+		return nil, false
+	}
+	candidate := new(big.Int).SetBytes(encoded)
+	if candidate.Cmp(limit) >= 0 {
+		return nil, false
+	}
+	candidate.Mod(candidate, n)
+	if _, err := requireUnit(candidate, n); err != nil {
+		return nil, false
+	}
+	return candidate, true
 }
 
 func randomJacobiMinusOne(reader io.Reader, n *big.Int) (*big.Int, error) {

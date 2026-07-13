@@ -12,110 +12,93 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/tssrun"
 )
 
 const (
-	signAttemptRecordVersion       uint16 = 1
-	signAttemptWireVersion         uint16 = 1
-	signAttemptWireType                   = "cggmp21.secp256k1.sign-attempt"
-	signAttemptIntentLabel                = "cggmp21-secp256k1-sign-attempt-intent-v1"
-	signAttemptHashLabel                  = "cggmp21-secp256k1-sign-attempt-hash-v1"
-	signAttemptSignerSetLabel             = "cggmp21-secp256k1-sign-attempt-signers-v1"
-	signAttemptDeliveryPolicyLabel        = "cggmp21-secp256k1-sign-attempt-delivery-policy-v1"
+	signAttemptOutboxVersion     uint16 = 1
+	signAttemptDeliveryVersion   uint16 = 1
+	signAttemptCompletionVersion uint16 = 1
+	signAttemptMetadataVersion   uint16 = 1
+
+	signAttemptOutboxWireType     = "cggmp21.secp256k1.sign-outbox"
+	signAttemptDeliveryWireType   = "cggmp21.secp256k1.sign-delivery"
+	signAttemptCompletionWireType = "cggmp21.secp256k1.sign-completion"
+	signAttemptMetadataWireType   = "cggmp21.secp256k1.sign-public-context"
+
+	signAttemptIntentLabel         = "cggmp21-secp256k1-sign-attempt-intent-v1"
+	signAttemptSignerSetLabel      = "cggmp21-secp256k1-sign-attempt-signers-v1"
+	signAttemptDeliveryPolicyLabel = "cggmp21-secp256k1-sign-attempt-delivery-policy-v1"
+	maxSignLifecycleIdentifier     = 256
 )
 
-// SignAttemptCommitStatus reports whether CommitSignAttempt created or reused
-// the durable record.
-type SignAttemptCommitStatus uint8
-
-const (
-	// SignAttemptCreated reports that CommitSignAttempt created a new attempt.
-	SignAttemptCreated SignAttemptCommitStatus = iota
-	// SignAttemptExistingSame reports that CommitSignAttempt found the same attempt.
-	SignAttemptExistingSame
-)
-
-// SignAttemptCommit is the result of a successful durable attempt commit.
-type SignAttemptCommit struct {
-	Status SignAttemptCommitStatus
-	Record SignAttemptRecord
+// signAttemptPublicContext is the public Figure 10 verification and exact
+// generation/epoch/slot state retained after the available presign's secret
+// tuple is destroyed at commit.
+type signAttemptPublicContext struct {
+	RecordVersion     uint16                        `wire:"1,u16"`
+	Party             tss.PartyID                   `wire:"2,u32"`
+	Threshold         int                           `wire:"3,u32"`
+	Signers           tss.PartySet                  `wire:"4,u32list,max_items=signers"`
+	ProtocolPresignID []byte                        `wire:"5,bytes,len=32"`
+	EpochID           []byte                        `wire:"6,bytes,len=32"`
+	Gamma             *secp.Point                   `wire:"7,custom,len=33"`
+	LittleR           secp.Scalar                   `wire:"8,custom,len=32"`
+	Commitments       []normalizedPresignCommitment `wire:"9,recordlist,max_items=signers"`
+	TranscriptHash    []byte                        `wire:"10,bytes,len=32"`
+	ContextHash       []byte                        `wire:"11,bytes,len=32"`
+	VerificationKey   []byte                        `wire:"12,bytes,max_bytes=point"`
+	KeyID             string                        `wire:"13,string"`
+	Derivation        *tss.DerivationResult         `wire:"14,record"`
+	Epoch             *EpochContext                 `wire:"15,record"`
+	PresignSlot       string                        `wire:"16,string"`
 }
 
-// SignAttemptDescriptor is the non-secret recovery identity for one durable
-// online signing attempt. It intentionally excludes the presign content ID, the
-// raw ECDSA digest, canonical envelopes, partial signatures, and completion
-// material.
-type SignAttemptDescriptor struct {
-	SessionID         tss.SessionID
-	Party             tss.PartyID
-	SignerSetHash     []byte
-	SignPlanHash      []byte
-	ContextHash       []byte
-	DigestBindingHash []byte
-	AttemptHash       []byte
-}
-
-// Clone returns an independent copy of the descriptor.
-func (d SignAttemptDescriptor) Clone() SignAttemptDescriptor {
-	return SignAttemptDescriptor{
-		SessionID:         d.SessionID,
-		Party:             d.Party,
-		SignerSetHash:     slices.Clone(d.SignerSetHash),
-		SignPlanHash:      slices.Clone(d.SignPlanHash),
-		ContextHash:       slices.Clone(d.ContextHash),
-		DigestBindingHash: slices.Clone(d.DigestBindingHash),
-		AttemptHash:       slices.Clone(d.AttemptHash),
+func (c signAttemptPublicContext) clone() signAttemptPublicContext {
+	clone := signAttemptPublicContext{
+		RecordVersion:     c.RecordVersion,
+		Party:             c.Party,
+		Threshold:         c.Threshold,
+		Signers:           c.Signers.Clone(),
+		ProtocolPresignID: bytes.Clone(c.ProtocolPresignID),
+		EpochID:           bytes.Clone(c.EpochID),
+		Gamma:             secp.Clone(c.Gamma),
+		LittleR:           c.LittleR,
+		Commitments:       make([]normalizedPresignCommitment, len(c.Commitments)),
+		TranscriptHash:    bytes.Clone(c.TranscriptHash),
+		ContextHash:       bytes.Clone(c.ContextHash),
+		VerificationKey:   bytes.Clone(c.VerificationKey),
+		KeyID:             c.KeyID,
+		Derivation:        c.Derivation.Clone(),
+		Epoch:             c.Epoch.Clone(),
+		PresignSlot:       c.PresignSlot,
 	}
-}
-
-// SignAttemptMetadata is the non-secret load result applications can use to
-// construct recovery control-plane state before calling ResumeSign.
-type SignAttemptMetadata struct {
-	Descriptor       SignAttemptDescriptor
-	DeliveryComplete bool
-	Completed        bool
-}
-
-// Clone returns an independent copy of the metadata.
-func (m SignAttemptMetadata) Clone() SignAttemptMetadata {
-	return SignAttemptMetadata{
-		Descriptor:       m.Descriptor.Clone(),
-		DeliveryComplete: m.DeliveryComplete,
-		Completed:        m.Completed,
+	for i := range c.Commitments {
+		clone.Commitments[i] = c.Commitments[i].clone()
 	}
+	return clone
 }
 
-// SignAttemptOutcomeUnknownError reports a commit error whose durable outcome
-// is unknown and carries the non-secret descriptor for the attempted recovery
-// intent.
-type SignAttemptOutcomeUnknownError struct {
-	Cause      error
-	Descriptor SignAttemptDescriptor
-}
-
-// Error returns the public error string.
-func (e *SignAttemptOutcomeUnknownError) Error() string {
-	if e == nil || e.Cause == nil {
-		return ErrSignAttemptOutcomeUnknown.Error()
+func (c *signAttemptPublicContext) destroy() {
+	if c == nil {
+		return
 	}
-	return ErrSignAttemptOutcomeUnknown.Error() + ": " + e.Cause.Error()
-}
-
-// Unwrap returns the underlying store error.
-func (e *SignAttemptOutcomeUnknownError) Unwrap() error {
-	if e == nil {
-		return nil
+	for i := range c.Commitments {
+		c.Commitments[i].destroy()
 	}
-	return e.Cause
+	clear(c.ProtocolPresignID)
+	clear(c.EpochID)
+	clear(c.TranscriptHash)
+	clear(c.ContextHash)
+	clear(c.VerificationKey)
+	if c.Derivation != nil {
+		c.Derivation.Destroy()
+	}
+	*c = signAttemptPublicContext{}
 }
 
-// Is preserves errors.Is(err, ErrSignAttemptOutcomeUnknown).
-func (e *SignAttemptOutcomeUnknownError) Is(target error) bool {
-	return target == ErrSignAttemptOutcomeUnknown
-}
-
-// SignAttemptDeliveryPolicy snapshots the delivery policy that applies to the
-// committed outbound signing envelope.
+// SignAttemptDeliveryPolicy snapshots the delivery policy for the exact
+// committed online-sign outbox.
 type SignAttemptDeliveryPolicy struct {
 	Mode                 tss.DeliveryMode               `wire:"1,u8"`
 	Confidentiality      tss.ConfidentialityPolicy      `wire:"2,u8"`
@@ -123,17 +106,17 @@ type SignAttemptDeliveryPolicy struct {
 	Recipients           tss.PartySet                   `wire:"4,u32list,max_items=parties"`
 }
 
-// Clone returns an independent copy of the delivery policy snapshot.
+// Clone returns an independent delivery policy.
 func (p SignAttemptDeliveryPolicy) Clone() SignAttemptDeliveryPolicy {
 	return SignAttemptDeliveryPolicy{
 		Mode:                 p.Mode,
 		Confidentiality:      p.Confidentiality,
 		BroadcastConsistency: p.BroadcastConsistency,
-		Recipients:           slices.Clone(p.Recipients),
+		Recipients:           p.Recipients.Clone(),
 	}
 }
 
-// Equal reports whether p and other contain the same delivery policy snapshot.
+// Equal reports whether p and other are the same policy.
 func (p SignAttemptDeliveryPolicy) Equal(other SignAttemptDeliveryPolicy) bool {
 	return p.Mode == other.Mode &&
 		p.Confidentiality == other.Confidentiality &&
@@ -141,637 +124,677 @@ func (p SignAttemptDeliveryPolicy) Equal(other SignAttemptDeliveryPolicy) bool {
 		slices.Equal(p.Recipients, other.Recipients)
 }
 
-// SignAttemptDeliveryState tracks durable outbox delivery progress for one
-// committed attempt.
-type SignAttemptDeliveryState struct {
-	Acks             []tss.BroadcastAck        `wire:"1,recordlist,max_items=parties"`
-	Certificate      *tss.BroadcastCertificate `wire:"2,nested,optional,max_bytes=envelope"`
-	DeliveryComplete bool                      `wire:"3,bool"`
+// signAttemptOutbox is the exact immutable protocol outbox stored inside a
+// tssrun signing attempt. It contains the canonical envelope and every
+// non-secret value required to validate or replay that envelope.
+type signAttemptOutbox struct {
+	RecordVersion   uint16         `wire:"1,u16"`
+	Protocol        tss.ProtocolID `wire:"2,string,max_bytes=protocol_name"`
+	ProtocolVersion uint16         `wire:"3,u16"`
+
+	KeyID         string `wire:"4,string"`
+	KeyGeneration string `wire:"5,string"`
+	EpochID       []byte `wire:"6,bytes,len=32"`
+	PresignID     string `wire:"7,string"`
+	AttemptID     string `wire:"8,string"`
+
+	ProtocolPresignID []byte        `wire:"9,bytes,len=32"`
+	SessionID         tss.SessionID `wire:"10,bytes,len=32"`
+	Party             tss.PartyID   `wire:"11,u32"`
+	SignerSetHash     []byte        `wire:"12,bytes,len=32"`
+	SignPlanHash      []byte        `wire:"13,bytes,len=32"`
+	ContextHash       []byte        `wire:"14,bytes,len=32"`
+	Digest            []byte        `wire:"15,bytes,len=32"`
+	DigestBindingHash []byte        `wire:"16,bytes,len=32"`
+
+	CanonicalEnvelope     []byte                    `wire:"17,bytes,max_bytes=envelope"`
+	CanonicalEnvelopeHash []byte                    `wire:"18,bytes,len=32"`
+	EnvelopeDigest        []byte                    `wire:"19,bytes,len=32"`
+	PayloadHash           []byte                    `wire:"20,bytes,len=32"`
+	DeliveryPolicy        SignAttemptDeliveryPolicy `wire:"21,record"`
+	IntentDigest          []byte                    `wire:"22,bytes,len=32"`
+	VerificationKey       []byte                    `wire:"23,bytes,max_bytes=point"`
 }
 
-// Clone returns an independent copy of the delivery state.
-func (s SignAttemptDeliveryState) Clone() SignAttemptDeliveryState {
-	return SignAttemptDeliveryState{
-		Acks:             tss.CloneSlice(s.Acks),
-		Certificate:      s.Certificate.Clone(),
-		DeliveryComplete: s.DeliveryComplete,
+// signAttemptDelivery is persisted only after a complete authenticated
+// broadcast certificate exists. It intentionally excludes the partial
+// signature envelope while retaining non-secret recovery inputs.
+type signAttemptDelivery struct {
+	RecordVersion uint16 `wire:"1,u16"`
+
+	KeyID         string `wire:"2,string"`
+	KeyGeneration string `wire:"3,string"`
+	EpochID       []byte `wire:"4,bytes,len=32"`
+	PresignID     string `wire:"5,string"`
+	AttemptID     string `wire:"6,string"`
+
+	ProtocolPresignID []byte        `wire:"7,bytes,len=32"`
+	SessionID         tss.SessionID `wire:"8,bytes,len=32"`
+	Party             tss.PartyID   `wire:"9,u32"`
+	SignerSetHash     []byte        `wire:"10,bytes,len=32"`
+	SignPlanHash      []byte        `wire:"11,bytes,len=32"`
+	ContextHash       []byte        `wire:"12,bytes,len=32"`
+	Digest            []byte        `wire:"13,bytes,len=32"`
+	DigestBindingHash []byte        `wire:"14,bytes,len=32"`
+
+	CanonicalEnvelopeHash []byte                    `wire:"15,bytes,len=32"`
+	EnvelopeDigest        []byte                    `wire:"16,bytes,len=32"`
+	PayloadHash           []byte                    `wire:"17,bytes,len=32"`
+	DeliveryPolicy        SignAttemptDeliveryPolicy `wire:"18,record"`
+	IntentDigest          []byte                    `wire:"19,bytes,len=32"`
+	Certificate           *tss.BroadcastCertificate `wire:"20,nested,max_bytes=envelope"`
+	VerificationKey       []byte                    `wire:"21,bytes,max_bytes=point"`
+}
+
+type signAttemptCompletion struct {
+	RecordVersion uint16 `wire:"1,u16"`
+	IntentDigest  []byte `wire:"2,bytes,len=32"`
+	SignatureR    []byte `wire:"3,bytes,max_bytes=scalar"`
+	SignatureS    []byte `wire:"4,bytes,max_bytes=scalar"`
+	RecoveryID    uint8  `wire:"5,u8"`
+}
+
+// WireType returns the canonical wire type for an exact sign outbox.
+func (signAttemptOutbox) WireType() string { return signAttemptOutboxWireType }
+
+// WireVersion returns the canonical wire version for an exact sign outbox.
+func (signAttemptOutbox) WireVersion() uint16 { return signAttemptOutboxVersion }
+
+// WireType returns the canonical wire type for sign delivery evidence.
+func (signAttemptDelivery) WireType() string { return signAttemptDeliveryWireType }
+
+// WireVersion returns the canonical wire version for sign delivery evidence.
+func (signAttemptDelivery) WireVersion() uint16 { return signAttemptDeliveryVersion }
+
+// WireType returns the canonical wire type for a sign completion record.
+func (signAttemptCompletion) WireType() string { return signAttemptCompletionWireType }
+
+// WireVersion returns the canonical wire version for a sign completion record.
+func (signAttemptCompletion) WireVersion() uint16 { return signAttemptCompletionVersion }
+
+// WireType returns the canonical wire type for public presign recovery state.
+func (signAttemptPublicContext) WireType() string { return signAttemptMetadataWireType }
+
+// WireVersion returns the canonical wire version for public presign recovery state.
+func (signAttemptPublicContext) WireVersion() uint16 { return signAttemptMetadataVersion }
+
+func signAttemptPublicContextFromPresign(presign *Presign) signAttemptPublicContext {
+	presignSlot, _ := PresignSlotID(presign.state.PresignID)
+	context := signAttemptPublicContext{
+		RecordVersion:     signAttemptMetadataVersion,
+		Party:             presign.state.Party,
+		Threshold:         presign.state.Threshold,
+		Signers:           presign.state.Signers.Clone(),
+		ProtocolPresignID: bytes.Clone(presign.state.PresignID),
+		EpochID:           bytes.Clone(presign.state.EpochID),
+		Gamma:             secp.Clone(presign.state.Gamma),
+		LittleR:           presign.state.LittleR,
+		Commitments:       make([]normalizedPresignCommitment, len(presign.state.Commitments)),
+		TranscriptHash:    bytes.Clone(presign.state.TranscriptHash),
+		ContextHash:       bytes.Clone(presign.state.ContextHash),
+		VerificationKey:   presign.verificationKey(),
+		KeyID:             presign.state.Context.KeyID,
+		Derivation:        presign.state.Derivation.Clone(),
+		Epoch:             presign.state.Epoch.Clone(),
+		PresignSlot:       presignSlot,
 	}
-}
-
-// Equal reports whether s and other contain the same durable delivery state.
-func (s SignAttemptDeliveryState) Equal(other SignAttemptDeliveryState) bool {
-	if s.DeliveryComplete != other.DeliveryComplete || len(s.Acks) != len(other.Acks) {
-		return false
+	for i := range presign.state.Commitments {
+		context.Commitments[i] = presign.state.Commitments[i].clone()
 	}
-	for i := range s.Acks {
-		if !s.Acks[i].Equal(other.Acks[i]) {
-			return false
-		}
-	}
-	return s.Certificate.Equal(other.Certificate)
+	return context
 }
 
-// SignAttemptDeliveryUpdate records one durable outbox delivery progress update.
-type SignAttemptDeliveryUpdate struct {
-	PresignContentID []byte
-	AttemptHash      []byte
-	Ack              *tss.BroadcastAck
-	Certificate      *tss.BroadcastCertificate
-	// AckVerifier verifies Ack and Certificate signatures before they are made
-	// durable. Ack and Certificate updates require a non-nil verifier.
-	AckVerifier tss.BroadcastAckVerifier
-
-	ackVerified         bool
-	certificateVerified bool
-}
-
-// SignAttemptBurn is a durable tombstone for a presign that must not be used.
-type SignAttemptBurn struct {
-	PresignContentID []byte
-	Reason           string
-}
-
-func validateSignAttemptBurn(burn SignAttemptBurn) error {
-	if len(burn.PresignContentID) != sha256.Size {
-		return errors.New("invalid burn presign content ID")
-	}
-	if burn.Reason == "" {
-		return errors.New("empty burn reason")
-	}
-	if len(burn.Reason) > 256 || !utf8.ValidString(burn.Reason) {
-		return errors.New("invalid burn reason")
-	}
-	for _, r := range burn.Reason {
-		if r < 0x20 || r == 0x7f {
-			return errors.New("burn reason contains control characters")
-		}
-	}
-	return nil
-}
-
-// SignAttemptRecord is the canonical durable binding between one presign and
-// one online signing intent. CanonicalBaseEnvelopeBytes contains a confidential
-// partial signature and must be encrypted at rest. PresignContentID is
-// secret-tainted and must not be logged or used directly as a public storage key.
-type SignAttemptRecord struct {
-	RecordVersion    uint16         `wire:"1,u16"`
-	Protocol         tss.ProtocolID `wire:"2,string,max_bytes=protocol_name"`
-	ProtocolVersion  uint16         `wire:"3,u16"`
-	PresignContentID []byte         `wire:"4,bytes,len=32"` // Secret-derived presign content commitment.
-	AttemptHash      []byte         `wire:"5,bytes,len=32"`
-	IntentHash       []byte         `wire:"6,bytes,len=32"`
-
-	SessionID     tss.SessionID `wire:"7,bytes,len=32"`
-	Party         tss.PartyID   `wire:"8,u32"`
-	SignerSetHash []byte        `wire:"9,bytes,len=32"`
-	SignPlanHash  []byte        `wire:"10,bytes,len=32"`
-
-	ContextHash       []byte `wire:"11,bytes,len=32"`
-	Digest            []byte `wire:"12,bytes,len=32"`
-	DigestBindingHash []byte `wire:"13,bytes,len=32"`
-
-	CanonicalBaseEnvelopeBytes []byte `wire:"14,bytes,max_bytes=envelope"`
-	CanonicalBaseEnvelopeHash  []byte `wire:"15,bytes,len=32"`
-	EnvelopeDigest             []byte `wire:"16,bytes,len=32"`
-	PayloadHash                []byte `wire:"17,bytes,len=32"`
-
-	DeliveryPolicy SignAttemptDeliveryPolicy `wire:"18,record"`
-	DeliveryState  SignAttemptDeliveryState  `wire:"19,record"`
-
-	Completed           bool   `wire:"20,bool"`
-	SignatureR          []byte `wire:"21,bytes,max_bytes=scalar"`
-	SignatureS          []byte `wire:"22,bytes,max_bytes=scalar"`
-	SignatureRecoveryID uint8  `wire:"23,u8"`
-}
-
-const signAttemptRecordRedacted = "<cggmp21.secp256k1.SignAttemptRecord:redacted>"
-
-// String returns a redacted representation.
-func (r *SignAttemptRecord) String() string {
-	return signAttemptRecordRedacted
-}
-
-// GoString returns a redacted representation.
-func (r *SignAttemptRecord) GoString() string {
-	return signAttemptRecordRedacted
-}
-
-// Format writes a redacted representation for all fmt verbs.
-func (r SignAttemptRecord) Format(state fmt.State, verb rune) {
-	_, _ = fmt.Fprint(state, signAttemptRecordRedacted)
-}
-
-// Clone returns an independent copy of the sign-attempt record.
-func (r SignAttemptRecord) Clone() SignAttemptRecord {
-	return SignAttemptRecord{
-		RecordVersion:              r.RecordVersion,
-		Protocol:                   r.Protocol,
-		ProtocolVersion:            r.ProtocolVersion,
-		PresignContentID:           slices.Clone(r.PresignContentID),
-		AttemptHash:                slices.Clone(r.AttemptHash),
-		IntentHash:                 slices.Clone(r.IntentHash),
-		SessionID:                  r.SessionID,
-		Party:                      r.Party,
-		SignerSetHash:              slices.Clone(r.SignerSetHash),
-		SignPlanHash:               slices.Clone(r.SignPlanHash),
-		ContextHash:                slices.Clone(r.ContextHash),
-		Digest:                     slices.Clone(r.Digest),
-		DigestBindingHash:          slices.Clone(r.DigestBindingHash),
-		CanonicalBaseEnvelopeBytes: slices.Clone(r.CanonicalBaseEnvelopeBytes),
-		CanonicalBaseEnvelopeHash:  slices.Clone(r.CanonicalBaseEnvelopeHash),
-		EnvelopeDigest:             slices.Clone(r.EnvelopeDigest),
-		PayloadHash:                slices.Clone(r.PayloadHash),
-		DeliveryPolicy:             r.DeliveryPolicy.Clone(),
-		DeliveryState:              r.DeliveryState.Clone(),
-		Completed:                  r.Completed,
-		SignatureR:                 slices.Clone(r.SignatureR),
-		SignatureS:                 slices.Clone(r.SignatureS),
-		SignatureRecoveryID:        r.SignatureRecoveryID,
-	}
-}
-
-// Equal reports whether r and other contain the same canonical durable record,
-// including delivery and completion state. It compares fields directly and does
-// not validate either record.
-func (r SignAttemptRecord) Equal(other SignAttemptRecord) bool {
-	return r.SameBaseAttempt(other) &&
-		r.DeliveryState.Equal(other.DeliveryState) &&
-		r.Completed == other.Completed &&
-		bytes.Equal(r.SignatureR, other.SignatureR) &&
-		bytes.Equal(r.SignatureS, other.SignatureS) &&
-		r.SignatureRecoveryID == other.SignatureRecoveryID
-}
-
-// Descriptor returns a non-secret recovery descriptor for r.
-func (r SignAttemptRecord) Descriptor() SignAttemptDescriptor {
-	return SignAttemptDescriptor{
-		SessionID:         r.SessionID,
-		Party:             r.Party,
-		SignerSetHash:     slices.Clone(r.SignerSetHash),
-		SignPlanHash:      slices.Clone(r.SignPlanHash),
-		ContextHash:       slices.Clone(r.ContextHash),
-		DigestBindingHash: slices.Clone(r.DigestBindingHash),
-		AttemptHash:       slices.Clone(r.AttemptHash),
-	}
-}
-
-// Metadata returns non-secret recovery and lifecycle metadata for r.
-func (r SignAttemptRecord) Metadata() SignAttemptMetadata {
-	return SignAttemptMetadata{
-		Descriptor:       r.Descriptor(),
-		DeliveryComplete: r.DeliveryState.DeliveryComplete,
-		Completed:        r.Completed,
-	}
-}
-
-// SameAttempt reports whether r and other identify the same committed attempt.
-// It compares the presign, intent, and attempt hashes only.
-func (r SignAttemptRecord) SameAttempt(other SignAttemptRecord) bool {
-	return bytes.Equal(r.PresignContentID, other.PresignContentID) &&
-		bytes.Equal(r.IntentHash, other.IntentHash) &&
-		bytes.Equal(r.AttemptHash, other.AttemptHash)
-}
-
-// SameBaseAttempt reports whether r and other contain the same immutable base
-// attempt, excluding delivery progress and completion state.
-func (r SignAttemptRecord) SameBaseAttempt(other SignAttemptRecord) bool {
-	return r.RecordVersion == other.RecordVersion &&
-		r.Protocol == other.Protocol &&
-		r.ProtocolVersion == other.ProtocolVersion &&
-		r.SessionID == other.SessionID &&
-		r.Party == other.Party &&
-		bytes.Equal(r.PresignContentID, other.PresignContentID) &&
-		bytes.Equal(r.AttemptHash, other.AttemptHash) &&
-		bytes.Equal(r.IntentHash, other.IntentHash) &&
-		bytes.Equal(r.SignerSetHash, other.SignerSetHash) &&
-		bytes.Equal(r.SignPlanHash, other.SignPlanHash) &&
-		bytes.Equal(r.ContextHash, other.ContextHash) &&
-		bytes.Equal(r.Digest, other.Digest) &&
-		bytes.Equal(r.DigestBindingHash, other.DigestBindingHash) &&
-		bytes.Equal(r.CanonicalBaseEnvelopeBytes, other.CanonicalBaseEnvelopeBytes) &&
-		bytes.Equal(r.CanonicalBaseEnvelopeHash, other.CanonicalBaseEnvelopeHash) &&
-		bytes.Equal(r.EnvelopeDigest, other.EnvelopeDigest) &&
-		bytes.Equal(r.PayloadHash, other.PayloadHash) &&
-		r.DeliveryPolicy.Equal(other.DeliveryPolicy)
-}
-
-// MarshalJSON rejects JSON encoding of confidential sign-attempt records.
-func (r SignAttemptRecord) MarshalJSON() ([]byte, error) {
-	return nil, errors.New("cggmp21 secp256k1 sign attempt contains a confidential partial; use MarshalBinary")
-}
-
-// UnmarshalJSON rejects JSON decoding of confidential sign-attempt records.
-func (r *SignAttemptRecord) UnmarshalJSON([]byte) error {
-	return errors.New("cggmp21 secp256k1 sign attempt requires canonical binary decoding")
-}
-
-// MarshalBinary encodes the sign-attempt record using canonical TLV.
-func (r SignAttemptRecord) MarshalBinary() ([]byte, error) {
-	return r.MarshalBinaryWithLimits(DefaultLimits())
-}
-
-// MarshalBinaryWithLimits encodes the sign-attempt record using explicit local
-// resource limits.
-func (r SignAttemptRecord) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
-	if err := validateSignAttemptRecordWithLimits(r, limits); err != nil {
+func marshalSignAttemptPublicContext(context signAttemptPublicContext, limits Limits) ([]byte, error) {
+	if err := validateSignAttemptPublicContext(context, limits); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(r, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return wire.Marshal(context, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-// UnmarshalBinary decodes and validates a canonical sign-attempt record.
-func (r *SignAttemptRecord) UnmarshalBinary(in []byte) error {
-	return r.UnmarshalBinaryWithLimits(in, DefaultLimits())
-}
-
-// UnmarshalBinaryWithLimits decodes a canonical sign-attempt record into the
-// receiver using explicit local resource limits.
-func (r *SignAttemptRecord) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
-	if r == nil {
-		return errors.New("nil sign attempt")
+func unmarshalSignAttemptPublicContext(raw []byte, limits Limits) (signAttemptPublicContext, error) {
+	if len(raw) == 0 || len(raw) > limits.State.MaxSerializedSignAttemptBytes {
+		return signAttemptPublicContext{}, fmt.Errorf("%w: invalid sign public context size", ErrSignAttemptCorrupt)
 	}
-	if len(in) == 0 {
-		return errors.New("empty sign attempt")
-	}
-	if len(in) > limits.State.MaxSerializedSignAttemptBytes {
-		return fmt.Errorf("sign attempt too large: %d > %d", len(in), limits.State.MaxSerializedSignAttemptBytes)
-	}
-	var decoded SignAttemptRecord
-	if err := wire.Unmarshal(in, &decoded,
+	var context signAttemptPublicContext
+	if err := wire.Unmarshal(raw, &context,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedSignAttemptBytes)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err != nil {
+		return signAttemptPublicContext{}, fmt.Errorf("%w: decode sign public context: %w", ErrSignAttemptCorrupt, err)
+	}
+	if err := validateSignAttemptPublicContext(context, limits); err != nil {
+		context.destroy()
+		return signAttemptPublicContext{}, err
+	}
+	canonical, err := wire.Marshal(context, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	if err != nil || !bytes.Equal(raw, canonical) {
+		context.destroy()
+		return signAttemptPublicContext{}, fmt.Errorf("%w: non-canonical sign public context", ErrSignAttemptCorrupt)
+	}
+	return context, nil
+}
+
+func (o signAttemptOutbox) binding() (tssrun.GenerationBinding, error) {
+	epochID, err := tssrun.NewEpochID(o.EpochID)
+	if err != nil {
+		return tssrun.GenerationBinding{}, err
+	}
+	binding := tssrun.GenerationBinding{
+		KeyID:         o.KeyID,
+		KeyGeneration: tssrun.KeyGeneration(o.KeyGeneration),
+		EpochID:       epochID,
+	}
+	if err := binding.Validate(); err != nil {
+		return tssrun.GenerationBinding{}, err
+	}
+	return binding, nil
+}
+
+func (d signAttemptDelivery) outboxIdentity() signAttemptOutbox {
+	return signAttemptOutbox{
+		RecordVersion:         signAttemptOutboxVersion,
+		Protocol:              tss.ProtocolCGGMP21Secp256k1,
+		ProtocolVersion:       tss.ProtocolVersion,
+		KeyID:                 d.KeyID,
+		KeyGeneration:         d.KeyGeneration,
+		EpochID:               bytes.Clone(d.EpochID),
+		PresignID:             d.PresignID,
+		AttemptID:             d.AttemptID,
+		ProtocolPresignID:     bytes.Clone(d.ProtocolPresignID),
+		SessionID:             d.SessionID,
+		Party:                 d.Party,
+		SignerSetHash:         bytes.Clone(d.SignerSetHash),
+		SignPlanHash:          bytes.Clone(d.SignPlanHash),
+		ContextHash:           bytes.Clone(d.ContextHash),
+		Digest:                bytes.Clone(d.Digest),
+		DigestBindingHash:     bytes.Clone(d.DigestBindingHash),
+		CanonicalEnvelopeHash: bytes.Clone(d.CanonicalEnvelopeHash),
+		EnvelopeDigest:        bytes.Clone(d.EnvelopeDigest),
+		PayloadHash:           bytes.Clone(d.PayloadHash),
+		DeliveryPolicy:        d.DeliveryPolicy.Clone(),
+		IntentDigest:          bytes.Clone(d.IntentDigest),
+		VerificationKey:       bytes.Clone(d.VerificationKey),
+	}
+}
+
+func deliveryForOutbox(outbox signAttemptOutbox, certificate *tss.BroadcastCertificate) signAttemptDelivery {
+	return signAttemptDelivery{
+		RecordVersion:         signAttemptDeliveryVersion,
+		KeyID:                 outbox.KeyID,
+		KeyGeneration:         outbox.KeyGeneration,
+		EpochID:               bytes.Clone(outbox.EpochID),
+		PresignID:             outbox.PresignID,
+		AttemptID:             outbox.AttemptID,
+		ProtocolPresignID:     bytes.Clone(outbox.ProtocolPresignID),
+		SessionID:             outbox.SessionID,
+		Party:                 outbox.Party,
+		SignerSetHash:         bytes.Clone(outbox.SignerSetHash),
+		SignPlanHash:          bytes.Clone(outbox.SignPlanHash),
+		ContextHash:           bytes.Clone(outbox.ContextHash),
+		Digest:                bytes.Clone(outbox.Digest),
+		DigestBindingHash:     bytes.Clone(outbox.DigestBindingHash),
+		CanonicalEnvelopeHash: bytes.Clone(outbox.CanonicalEnvelopeHash),
+		EnvelopeDigest:        bytes.Clone(outbox.EnvelopeDigest),
+		PayloadHash:           bytes.Clone(outbox.PayloadHash),
+		DeliveryPolicy:        outbox.DeliveryPolicy.Clone(),
+		IntentDigest:          bytes.Clone(outbox.IntentDigest),
+		Certificate:           certificate.Clone(),
+		VerificationKey:       bytes.Clone(outbox.VerificationKey),
+	}
+}
+
+func marshalSignAttemptOutbox(outbox signAttemptOutbox, limits Limits) ([]byte, error) {
+	if err := validateSignAttemptOutbox(outbox, limits); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(outbox, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+}
+
+func unmarshalSignAttemptOutbox(raw []byte, limits Limits) (signAttemptOutbox, error) {
+	if len(raw) == 0 || len(raw) > limits.State.MaxSerializedSignAttemptBytes {
+		return signAttemptOutbox{}, fmt.Errorf("%w: invalid sign outbox size", ErrSignAttemptCorrupt)
+	}
+	var outbox signAttemptOutbox
+	if err := wire.Unmarshal(raw, &outbox,
+		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedSignAttemptBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
+		return signAttemptOutbox{}, fmt.Errorf("%w: decode sign outbox: %w", ErrSignAttemptCorrupt, err)
+	}
+	if err := validateSignAttemptOutbox(outbox, limits); err != nil {
+		return signAttemptOutbox{}, err
+	}
+	canonical, err := wire.Marshal(outbox, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	if err != nil || !bytes.Equal(raw, canonical) {
+		return signAttemptOutbox{}, fmt.Errorf("%w: non-canonical sign outbox", ErrSignAttemptCorrupt)
+	}
+	return outbox, nil
+}
+
+func marshalSignAttemptDelivery(delivery signAttemptDelivery, limits Limits, verifier tss.BroadcastAckVerifier) ([]byte, error) {
+	if err := validateSignAttemptDelivery(delivery, verifier); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(delivery, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+}
+
+func unmarshalSignAttemptDelivery(raw []byte, limits Limits, verifier tss.BroadcastAckVerifier) (signAttemptDelivery, error) {
+	if len(raw) == 0 || len(raw) > limits.State.MaxSerializedSignAttemptBytes {
+		return signAttemptDelivery{}, fmt.Errorf("%w: invalid sign delivery size", ErrSignAttemptCorrupt)
+	}
+	var delivery signAttemptDelivery
+	if err := wire.Unmarshal(raw, &delivery,
+		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedSignAttemptBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
+		return signAttemptDelivery{}, fmt.Errorf("%w: decode sign delivery: %w", ErrSignAttemptCorrupt, err)
+	}
+	if err := validateSignAttemptDelivery(delivery, verifier); err != nil {
+		return signAttemptDelivery{}, err
+	}
+	canonical, err := wire.Marshal(delivery, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	if err != nil || !bytes.Equal(raw, canonical) {
+		return signAttemptDelivery{}, fmt.Errorf("%w: non-canonical sign delivery", ErrSignAttemptCorrupt)
+	}
+	return delivery, nil
+}
+
+func marshalSignAttemptCompletion(intentDigest []byte, signature Signature, limits Limits) ([]byte, error) {
+	completion := signAttemptCompletion{
+		RecordVersion: signAttemptCompletionVersion,
+		IntentDigest:  bytes.Clone(intentDigest),
+		SignatureR:    bytes.Clone(signature.R),
+		SignatureS:    bytes.Clone(signature.S),
+		RecoveryID:    signature.RecoveryID,
+	}
+	if err := validateSignAttemptCompletion(completion); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(completion, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+}
+
+func unmarshalSignAttemptCompletion(raw []byte, limits Limits) (signAttemptCompletion, error) {
+	if len(raw) == 0 || len(raw) > limits.State.MaxSerializedSignAttemptBytes {
+		return signAttemptCompletion{}, fmt.Errorf("%w: invalid sign completion size", ErrSignAttemptCorrupt)
+	}
+	var completion signAttemptCompletion
+	if err := wire.Unmarshal(raw, &completion,
+		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedSignAttemptBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
+		return signAttemptCompletion{}, fmt.Errorf("%w: decode sign completion: %w", ErrSignAttemptCorrupt, err)
+	}
+	if err := validateSignAttemptCompletion(completion); err != nil {
+		return signAttemptCompletion{}, err
+	}
+	canonical, err := wire.Marshal(completion, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	if err != nil || !bytes.Equal(raw, canonical) {
+		return signAttemptCompletion{}, fmt.Errorf("%w: non-canonical sign completion", ErrSignAttemptCorrupt)
+	}
+	return completion, nil
+}
+
+func validateSignAttemptOutbox(outbox signAttemptOutbox, limits Limits) error {
+	if outbox.RecordVersion != signAttemptOutboxVersion ||
+		outbox.Protocol != tss.ProtocolCGGMP21Secp256k1 ||
+		outbox.ProtocolVersion != tss.ProtocolVersion {
+		return fmt.Errorf("%w: invalid sign outbox version or protocol", ErrSignAttemptCorrupt)
+	}
+	if _, err := outbox.binding(); err != nil ||
+		validateSignLifecycleIdentifier(outbox.PresignID) != nil ||
+		validateSignLifecycleIdentifier(outbox.AttemptID) != nil {
+		return fmt.Errorf("%w: invalid sign outbox lifecycle binding", ErrSignAttemptCorrupt)
+	}
+	if len(outbox.ProtocolPresignID) != sha256.Size ||
+		!outbox.SessionID.Valid() || outbox.Party == tss.BroadcastPartyId ||
+		len(outbox.SignerSetHash) != sha256.Size ||
+		len(outbox.SignPlanHash) != sha256.Size ||
+		len(outbox.ContextHash) != sha256.Size ||
+		len(outbox.Digest) != sha256.Size ||
+		len(outbox.DigestBindingHash) != sha256.Size ||
+		len(outbox.CanonicalEnvelopeHash) != sha256.Size ||
+		len(outbox.EnvelopeDigest) != sha256.Size ||
+		len(outbox.PayloadHash) != sha256.Size ||
+		len(outbox.IntentDigest) != sha256.Size ||
+		len(outbox.VerificationKey) == 0 {
+		return fmt.Errorf("%w: invalid sign outbox fixed-width field", ErrSignAttemptCorrupt)
+	}
+	if err := validateCanonicalPresignSlot(outbox.PresignID, outbox.ProtocolPresignID); err != nil {
 		return err
 	}
-	if err := validateSignAttemptRecordWithLimits(decoded, limits); err != nil {
-		return err
-	}
-	*r = decoded
-	return nil
-}
-
-// WireType returns the canonical sign-attempt wire type.
-func (SignAttemptRecord) WireType() string { return signAttemptWireType }
-
-// WireVersion returns the sign-attempt wire version.
-func (SignAttemptRecord) WireVersion() uint16 { return signAttemptWireVersion }
-
-// Validate checks the sign-attempt record against default local limits.
-func (r SignAttemptRecord) Validate() error {
-	return validateSignAttemptRecordWithLimits(r, DefaultLimits())
-}
-
-// ValidateWithLimits checks the sign-attempt record against explicit local
-// resource limits.
-func (r SignAttemptRecord) ValidateWithLimits(limits Limits) error {
-	return validateSignAttemptRecordWithLimits(r, limits)
-}
-
-// SignAttemptResult supplies the final signature for an existing durable attempt.
-type SignAttemptResult struct {
-	PresignContentID []byte
-	AttemptHash      []byte
-	Signature        Signature
-}
-
-// Validate checks structural invariants for a SignAttemptResult.
-func (r SignAttemptResult) Validate() error {
-	if len(r.PresignContentID) != sha256.Size {
-		return errors.New("invalid result presign content ID")
-	}
-	if len(r.AttemptHash) != sha256.Size {
-		return errors.New("invalid result attempt hash")
-	}
-	if _, err := secp.ScalarFromBytes(r.Signature.R); err != nil {
-		return fmt.Errorf("invalid result signature r: %w", err)
-	}
-	s, err := secp.ScalarFromBytes(r.Signature.S)
+	env, payload, err := decodeSignAttemptEnvelopeWithLimits(outbox.CanonicalEnvelope, limits)
 	if err != nil {
-		return fmt.Errorf("invalid result signature s: %w", err)
+		return fmt.Errorf("%w: invalid sign outbox envelope: %w", ErrSignAttemptCorrupt, err)
 	}
-	if !secp.IsLowS(s) {
-		return errors.New("invalid result signature s: high-S signatures are not canonical")
-	}
-	if r.Signature.RecoveryID > 3 {
-		return errors.New("invalid result signature recovery id")
-	}
-	return nil
-}
-
-func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) error {
-	if r.RecordVersion != signAttemptRecordVersion {
-		return fmt.Errorf("%w: unexpected sign attempt record version %d", ErrSignAttemptCorrupt, r.RecordVersion)
-	}
-	if r.Protocol != tss.ProtocolCGGMP21Secp256k1 {
-		return fmt.Errorf("%w: unexpected protocol %q", ErrSignAttemptCorrupt, r.Protocol)
-	}
-	if r.ProtocolVersion != tss.ProtocolVersion {
-		return fmt.Errorf("%w: unexpected protocol version %d", ErrSignAttemptCorrupt, r.ProtocolVersion)
-	}
-	if len(r.PresignContentID) != sha256.Size || len(r.AttemptHash) != sha256.Size ||
-		len(r.IntentHash) != sha256.Size || len(r.SignerSetHash) != sha256.Size ||
-		len(r.SignPlanHash) != sha256.Size ||
-		len(r.ContextHash) != sha256.Size || len(r.Digest) != sha256.Size ||
-		len(r.DigestBindingHash) != sha256.Size || len(r.CanonicalBaseEnvelopeHash) != sha256.Size ||
-		len(r.EnvelopeDigest) != sha256.Size || len(r.PayloadHash) != sha256.Size {
-		return fmt.Errorf("%w: invalid fixed-length field", ErrSignAttemptCorrupt)
-	}
-	if !r.SessionID.Valid() || r.Party == tss.BroadcastPartyId {
-		return fmt.Errorf("%w: invalid session or party", ErrSignAttemptCorrupt)
-	}
-	env, payload, err := decodeSignAttemptEnvelopeWithLimits(r.CanonicalBaseEnvelopeBytes, limits)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
-	}
-	envelopeHash := sha256.Sum256(r.CanonicalBaseEnvelopeBytes)
-	if !bytes.Equal(r.CanonicalBaseEnvelopeHash, envelopeHash[:]) {
-		return fmt.Errorf("%w: envelope hash mismatch", ErrSignAttemptCorrupt)
-	}
+	defer payload.S.Destroy()
+	envelopeHash := sha256.Sum256(outbox.CanonicalEnvelope)
 	payloadHash := tss.PayloadHashFromEnvelope(env)
-	if !bytes.Equal(r.PayloadHash, payloadHash[:]) {
-		return fmt.Errorf("%w: payload hash mismatch", ErrSignAttemptCorrupt)
-	}
 	envelopeDigest := env.Digest()
-	if !bytes.Equal(r.EnvelopeDigest, envelopeDigest[:]) {
-		return fmt.Errorf("%w: envelope digest mismatch", ErrSignAttemptCorrupt)
+	if !bytes.Equal(outbox.CanonicalEnvelopeHash, envelopeHash[:]) ||
+		!bytes.Equal(outbox.PayloadHash, payloadHash[:]) ||
+		!bytes.Equal(outbox.EnvelopeDigest, envelopeDigest[:]) {
+		return fmt.Errorf("%w: sign outbox envelope hash mismatch", ErrSignAttemptCorrupt)
 	}
-	if env.Protocol != r.Protocol || env.SessionID != r.SessionID ||
-		env.Round != signStartRound || env.From != r.Party || env.To != tss.BroadcastPartyId || env.PayloadType != payloadSignPartial {
-		return fmt.Errorf("%w: envelope binding mismatch", ErrSignAttemptCorrupt)
+	if env.Protocol != outbox.Protocol || env.SessionID != outbox.SessionID ||
+		env.Round != signStartRound || env.From != outbox.Party ||
+		env.To != tss.BroadcastPartyId || env.PayloadType != payloadSignPartial {
+		return fmt.Errorf("%w: sign outbox envelope binding mismatch", ErrSignAttemptCorrupt)
 	}
-	expectedDigestBinding := digestHash(r.Digest, r.ContextHash)
-	if !bytes.Equal(r.DigestBindingHash, expectedDigestBinding) || !bytes.Equal(payload.DigestHash, r.DigestBindingHash) {
-		return fmt.Errorf("%w: digest binding hash mismatch", ErrSignAttemptCorrupt)
+	if !bytes.Equal(payload.PresignID, outbox.ProtocolPresignID) ||
+		!bytes.Equal(payload.EpochID, outbox.EpochID) ||
+		!bytes.Equal(payload.PresignContext, outbox.ContextHash) ||
+		!bytes.Equal(payload.PlanHash, outbox.SignPlanHash) {
+		return fmt.Errorf("%w: sign outbox payload binding mismatch", ErrSignAttemptCorrupt)
 	}
-	if !bytes.Equal(payload.PresignContext, r.ContextHash) {
-		return fmt.Errorf("%w: payload context hash mismatch", ErrSignAttemptCorrupt)
+	expectedDigestBinding := digestHash(outbox.Digest, outbox.ContextHash)
+	if !bytes.Equal(outbox.DigestBindingHash, expectedDigestBinding) ||
+		!bytes.Equal(payload.DigestHash, expectedDigestBinding) {
+		return fmt.Errorf("%w: sign outbox digest binding mismatch", ErrSignAttemptCorrupt)
 	}
-	if !bytes.Equal(payload.PlanHash, r.SignPlanHash) {
-		return fmt.Errorf("%w: payload sign plan hash mismatch", ErrSignAttemptCorrupt)
-	}
-	if err := validateSignAttemptDeliveryPolicy(r, env); err != nil {
+	if err := validateSignAttemptDeliveryPolicy(outbox.DeliveryPolicy, outbox.Protocol, env, outbox.SignerSetHash); err != nil {
 		return err
 	}
-	if err := validateSignAttemptDeliveryState(r, env); err != nil {
+	if !bytes.Equal(outbox.IntentDigest, signAttemptIntentDigest(outbox)) {
+		return fmt.Errorf("%w: sign attempt intent digest mismatch", ErrSignAttemptCorrupt)
+	}
+	return nil
+}
+
+func validateSignAttemptDelivery(delivery signAttemptDelivery, verifier tss.BroadcastAckVerifier) error {
+	if delivery.RecordVersion != signAttemptDeliveryVersion || delivery.Certificate == nil {
+		return fmt.Errorf("%w: invalid sign delivery record", ErrSignAttemptCorrupt)
+	}
+	identity := delivery.outboxIdentity()
+	if _, err := identity.binding(); err != nil ||
+		validateSignLifecycleIdentifier(identity.PresignID) != nil ||
+		validateSignLifecycleIdentifier(identity.AttemptID) != nil {
+		return fmt.Errorf("%w: invalid sign delivery lifecycle binding", ErrSignAttemptCorrupt)
+	}
+	if len(identity.ProtocolPresignID) != sha256.Size ||
+		!identity.SessionID.Valid() || identity.Party == tss.BroadcastPartyId ||
+		len(identity.SignerSetHash) != sha256.Size ||
+		len(identity.SignPlanHash) != sha256.Size ||
+		len(identity.ContextHash) != sha256.Size ||
+		len(identity.Digest) != sha256.Size ||
+		len(identity.DigestBindingHash) != sha256.Size ||
+		len(identity.CanonicalEnvelopeHash) != sha256.Size ||
+		len(identity.EnvelopeDigest) != sha256.Size ||
+		len(identity.PayloadHash) != sha256.Size ||
+		len(identity.IntentDigest) != sha256.Size ||
+		len(identity.VerificationKey) == 0 {
+		return fmt.Errorf("%w: invalid sign delivery fixed-width field", ErrSignAttemptCorrupt)
+	}
+	if err := validateCanonicalPresignSlot(identity.PresignID, identity.ProtocolPresignID); err != nil {
 		return err
 	}
-	expectedIntent := signAttemptIntentHash(r)
-	if !bytes.Equal(r.IntentHash, expectedIntent) {
-		return fmt.Errorf("%w: intent hash mismatch", ErrSignAttemptCorrupt)
+	if !bytes.Equal(identity.DigestBindingHash, digestHash(identity.Digest, identity.ContextHash)) ||
+		!bytes.Equal(identity.IntentDigest, signAttemptIntentDigest(identity)) {
+		return fmt.Errorf("%w: invalid sign delivery intent binding", ErrSignAttemptCorrupt)
 	}
-	expectedAttempt := signAttemptHash(r)
-	if !bytes.Equal(r.AttemptHash, expectedAttempt) {
-		return fmt.Errorf("%w: attempt hash mismatch", ErrSignAttemptCorrupt)
-	}
-	if r.Completed {
-		if _, err := secp.ScalarFromBytes(r.SignatureR); err != nil {
-			return fmt.Errorf("%w: invalid signature r", ErrSignAttemptCorrupt)
-		}
-		s, err := secp.ScalarFromBytes(r.SignatureS)
-		if err != nil {
-			return fmt.Errorf("%w: invalid signature s", ErrSignAttemptCorrupt)
-		}
-		if !secp.IsLowS(s) {
-			return fmt.Errorf("%w: high-S signature is not canonical", ErrSignAttemptCorrupt)
-		}
-		if r.SignatureRecoveryID > 3 {
-			return fmt.Errorf("%w: invalid signature recovery id", ErrSignAttemptCorrupt)
-		}
-	} else if len(r.SignatureR) != 0 || len(r.SignatureS) != 0 || r.SignatureRecoveryID != 0 {
-		return fmt.Errorf("%w: incomplete record contains signature", ErrSignAttemptCorrupt)
-	}
-	return nil
-}
-
-func validateSignAttemptCandidate(r SignAttemptRecord) error {
-	if err := r.Validate(); err != nil {
+	if err := validateSignAttemptDeliveryPolicy(identity.DeliveryPolicy, tss.ProtocolCGGMP21Secp256k1, tss.Envelope{
+		Protocol: tss.ProtocolCGGMP21Secp256k1, Round: signStartRound, PayloadType: payloadSignPartial,
+	}, identity.SignerSetHash); err != nil {
 		return err
 	}
-	if r.Completed {
-		return errors.New("sign attempt commit candidate is already completed")
-	}
-	if len(r.DeliveryState.Acks) != 0 || r.DeliveryState.Certificate != nil || r.DeliveryState.DeliveryComplete {
-		return errors.New("sign attempt commit candidate contains delivery state")
-	}
-	return nil
-}
-
-func validateSignAttemptDeliveryPolicy(r SignAttemptRecord, env tss.Envelope) error {
-	policy, err := CGGMP21Policies().Match(r.Protocol, env.Round, env.PayloadType)
-	if err != nil {
-		return fmt.Errorf("%w: sign attempt delivery policy lookup: %w", ErrSignAttemptCorrupt, err)
-	}
-	if r.DeliveryPolicy.Mode != policy.Mode ||
-		r.DeliveryPolicy.Confidentiality != policy.Confidentiality ||
-		r.DeliveryPolicy.BroadcastConsistency != policy.BroadcastConsistency {
-		return fmt.Errorf("%w: delivery policy snapshot mismatch", ErrSignAttemptCorrupt)
-	}
-	if len(r.DeliveryPolicy.Recipients) == 0 {
-		return fmt.Errorf("%w: empty delivery recipients", ErrSignAttemptCorrupt)
-	}
-	if err := wire.ValidateStrictSortedIDs(r.DeliveryPolicy.Recipients); err != nil {
-		return fmt.Errorf("%w: invalid delivery recipients: %w", ErrSignAttemptCorrupt, err)
-	}
-	if !bytes.Equal(r.SignerSetHash, signAttemptSignerSetHash(r.DeliveryPolicy.Recipients)) {
-		return fmt.Errorf("%w: delivery recipients do not match signer set", ErrSignAttemptCorrupt)
-	}
-	return nil
-}
-
-func validateSignAttemptDeliveryState(r SignAttemptRecord, env tss.Envelope) error {
-	recipients := r.DeliveryPolicy.Recipients
-	seen := make(map[tss.PartyID]struct{}, len(r.DeliveryState.Acks))
-	order := signAttemptRecipientOrder(r.DeliveryPolicy.Recipients)
-	prev := -1
-	for _, ack := range r.DeliveryState.Acks {
-		if err := validateSignAttemptDeliveryAck(ack, env, recipients); err != nil {
-			return err
-		}
-		index := order[ack.Party]
-		if index <= prev {
-			return fmt.Errorf("%w: non-canonical delivery ack order", ErrSignAttemptCorrupt)
-		}
-		prev = index
-		if _, ok := seen[ack.Party]; ok {
-			return fmt.Errorf("%w: duplicate delivery ack", ErrSignAttemptCorrupt)
-		}
-		seen[ack.Party] = struct{}{}
-	}
-	if r.DeliveryState.Certificate != nil {
-		if err := r.DeliveryState.Certificate.VerifyStructure(env, recipients); err != nil {
-			return fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, err)
-		}
-		if err := wire.ValidateStrictSortedIDs(r.DeliveryState.Certificate.Recipients); err != nil ||
-			!slices.Equal(r.DeliveryState.Certificate.Recipients, r.DeliveryPolicy.Recipients) {
-			return fmt.Errorf("%w: non-canonical delivery certificate recipients: %w", ErrSignAttemptCorrupt, err)
-		}
-		prev := -1
-		for _, ack := range r.DeliveryState.Certificate.Acks {
-			index := order[ack.Party]
-			if index <= prev {
-				return fmt.Errorf("%w: non-canonical delivery certificate ack order", ErrSignAttemptCorrupt)
-			}
-			prev = index
-		}
-		if _, err := r.DeliveryState.Certificate.MarshalBinary(); err != nil {
-			return fmt.Errorf("%w: delivery certificate encoding: %w", ErrSignAttemptCorrupt, err)
-		}
-	}
-	if r.DeliveryState.DeliveryComplete {
-		if r.DeliveryState.Certificate == nil {
-			return fmt.Errorf("%w: complete delivery without certificate", ErrSignAttemptCorrupt)
-		}
-		if len(r.DeliveryState.Acks) != len(r.DeliveryPolicy.Recipients) {
-			return fmt.Errorf("%w: complete delivery without all acks", ErrSignAttemptCorrupt)
-		}
-	}
-	return nil
-}
-
-// validateSignAttemptDeliveryAuthentication replays ACK authentication at the
-// recovery boundary. Structural validation alone is insufficient for records
-// returned by caller-supplied durable stores.
-func validateSignAttemptDeliveryAuthentication(r SignAttemptRecord, verifier tss.BroadcastAckVerifier) error {
-	if len(r.DeliveryState.Acks) == 0 && r.DeliveryState.Certificate == nil {
-		return nil
+	cert := delivery.Certificate
+	var payloadHash [sha256.Size]byte
+	var envelopeDigest tss.EnvelopeDigest
+	copy(payloadHash[:], identity.PayloadHash)
+	copy(envelopeDigest[:], identity.EnvelopeDigest)
+	if cert.Protocol != tss.ProtocolCGGMP21Secp256k1 ||
+		cert.SessionID != identity.SessionID ||
+		cert.Round != signStartRound ||
+		cert.From != identity.Party ||
+		cert.PayloadType != payloadSignPartial ||
+		cert.PayloadHash != payloadHash ||
+		cert.EnvelopeDigest != envelopeDigest ||
+		!slices.Equal(cert.Recipients, identity.DeliveryPolicy.Recipients) ||
+		len(cert.Acks) != len(cert.Recipients) {
+		return fmt.Errorf("%w: delivery certificate binding mismatch", ErrSignAttemptCorrupt)
 	}
 	if verifier == nil {
-		return fmt.Errorf("%w: delivery authentication: %w", ErrSignAttemptCorrupt, tss.ErrMissingAckVerifier)
+		return fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, tss.ErrMissingAckVerifier)
 	}
-	env, _, err := decodeSignAttemptEnvelope(r.CanonicalBaseEnvelopeBytes)
+	if err := wire.ValidateStrictSortedIDs(cert.Recipients); err != nil {
+		return fmt.Errorf("%w: invalid delivery certificate recipients: %w", ErrSignAttemptCorrupt, err)
+	}
+	order := signAttemptRecipientOrder(cert.Recipients)
+	previous := -1
+	for _, ack := range cert.Acks {
+		index, ok := order[ack.Party]
+		if !ok || index <= previous ||
+			ack.PayloadHash != cert.PayloadHash ||
+			ack.EnvelopeDigest != cert.EnvelopeDigest {
+			return fmt.Errorf("%w: invalid delivery certificate acknowledgements", ErrSignAttemptCorrupt)
+		}
+		previous = index
+		digest := tss.AckDigest(cert.Protocol, cert.SessionID, cert.Round, cert.From, cert.PayloadType, cert.PayloadHash, cert.EnvelopeDigest)
+		if err := verifier.VerifyAck(ack.Party, digest, ack.Signature); err != nil {
+			return fmt.Errorf("%w: delivery certificate party %d: %w", ErrSignAttemptCorrupt, ack.Party, err)
+		}
+	}
+	return nil
+}
+
+func validateSignAttemptCompletion(completion signAttemptCompletion) error {
+	if completion.RecordVersion != signAttemptCompletionVersion ||
+		len(completion.IntentDigest) != sha256.Size {
+		return fmt.Errorf("%w: invalid sign completion record", ErrSignAttemptCorrupt)
+	}
+	if _, err := secp.ScalarFromBytes(completion.SignatureR); err != nil {
+		return fmt.Errorf("%w: invalid sign completion r: %w", ErrSignAttemptCorrupt, err)
+	}
+	s, err := secp.ScalarFromBytes(completion.SignatureS)
 	if err != nil {
-		return fmt.Errorf("%w: delivery authentication envelope: %w", ErrSignAttemptCorrupt, err)
+		return fmt.Errorf("%w: invalid sign completion s: %w", ErrSignAttemptCorrupt, err)
 	}
-	for _, ack := range r.DeliveryState.Acks {
-		if err := tss.VerifyBroadcastAck(env, ack, verifier); err != nil {
-			return fmt.Errorf("%w: delivery ack authentication: %w: %w", ErrSignAttemptCorrupt, tss.ErrInvalidBroadcastCertificate, err)
-		}
+	if !secp.IsLowS(s) {
+		return fmt.Errorf("%w: high-S sign completion", ErrSignAttemptCorrupt)
 	}
-	if r.DeliveryState.Certificate != nil {
-		if err := r.DeliveryState.Certificate.VerifyFull(env, r.DeliveryPolicy.Recipients, verifier); err != nil {
-			return fmt.Errorf("%w: delivery certificate authentication: %w", ErrSignAttemptCorrupt, err)
-		}
+	if completion.RecoveryID > 3 {
+		return fmt.Errorf("%w: invalid sign completion recovery id", ErrSignAttemptCorrupt)
 	}
 	return nil
 }
 
-func validateSignAttemptDeliveryAck(ack tss.BroadcastAck, env tss.Envelope, recipients tss.PartySet) error {
-	if !recipients.Contains(ack.Party) {
-		return fmt.Errorf("%w: delivery ack from non-recipient", ErrSignAttemptCorrupt)
+func validateSignAttemptPublicContext(context signAttemptPublicContext, limits Limits) error {
+	if context.RecordVersion != signAttemptMetadataVersion ||
+		context.Party == tss.BroadcastPartyId ||
+		context.Threshold <= 0 || context.Threshold > len(context.Signers) ||
+		len(context.Signers) > limits.Threshold.MaxSigners ||
+		len(context.ProtocolPresignID) != sha256.Size ||
+		len(context.EpochID) != sha256.Size ||
+		len(context.TranscriptHash) != sha256.Size ||
+		len(context.ContextHash) != sha256.Size ||
+		len(context.VerificationKey) == 0 ||
+		validateSignLifecycleIdentifier(context.KeyID) != nil ||
+		context.Derivation == nil || context.Epoch == nil || context.PresignSlot == "" ||
+		len(context.Commitments) != len(context.Signers) {
+		return fmt.Errorf("%w: invalid sign public context", ErrSignAttemptCorrupt)
 	}
-	if ack.PayloadHash != tss.PayloadHashFromEnvelope(env) || ack.EnvelopeDigest != env.Digest() {
-		return fmt.Errorf("%w: delivery ack binding mismatch", ErrSignAttemptCorrupt)
+	if err := limits.Threshold.ValidateThreshold(context.Threshold, len(context.Signers)); err != nil {
+		return fmt.Errorf("%w: invalid sign public threshold: %w", ErrSignAttemptCorrupt, err)
 	}
-	return nil
-}
-
-func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
-	if err := record.Validate(); err != nil {
-		return SignAttemptRecord{}, err
+	if err := wire.ValidateStrictSortedIDs(context.Signers); err != nil || !context.Signers.Contains(context.Party) {
+		return fmt.Errorf("%w: invalid sign public signer set", ErrSignAttemptCorrupt)
 	}
-	if len(update.PresignContentID) != sha256.Size || len(update.AttemptHash) != sha256.Size {
-		return SignAttemptRecord{}, errors.New("invalid delivery update identity")
+	if _, err := secp.PointBytes(context.Gamma); err != nil {
+		return fmt.Errorf("%w: invalid sign public Gamma: %w", ErrSignAttemptCorrupt, err)
 	}
-	if !bytes.Equal(update.PresignContentID, record.PresignContentID) || !bytes.Equal(update.AttemptHash, record.AttemptHash) {
-		return SignAttemptRecord{}, ErrSignAttemptConflict
+	if context.LittleR.IsZero() || !context.LittleR.Equal(secp.ScalarFromFieldElement(context.Gamma.X)) {
+		return fmt.Errorf("%w: invalid sign public little r", ErrSignAttemptCorrupt)
 	}
-	if update.Ack == nil && update.Certificate == nil {
-		return record.Clone(), nil
-	}
-	env, _, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
+	publicKey, err := secp.PointFromBytes(context.VerificationKey)
 	if err != nil {
-		return SignAttemptRecord{}, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
+		return fmt.Errorf("%w: invalid sign verification key: %w", ErrSignAttemptCorrupt, err)
 	}
-	recipients := record.DeliveryPolicy.Recipients
-	updated := record.Clone()
-	if update.Ack != nil {
-		if !update.ackVerified {
-			if update.AckVerifier == nil {
-				return SignAttemptRecord{}, fmt.Errorf("%w: delivery ack: %w", ErrSignAttemptCorrupt, tss.ErrMissingAckVerifier)
-			}
-			if err := tss.VerifyBroadcastAck(env, *update.Ack, update.AckVerifier); err != nil {
-				return SignAttemptRecord{}, fmt.Errorf("%w: delivery ack: %w: %w", ErrSignAttemptCorrupt, tss.ErrInvalidBroadcastCertificate, err)
-			}
-		}
-		if err := addSignAttemptDeliveryAck(&updated, update.Ack.Clone(), env, recipients); err != nil {
-			return SignAttemptRecord{}, err
-		}
+	if err := validateDerivationResult(context.Derivation); err != nil {
+		return fmt.Errorf("%w: invalid sign generation derivation: %w", ErrSignAttemptCorrupt, err)
 	}
-	if update.Certificate != nil {
-		cert := update.Certificate.Clone()
-		if update.certificateVerified {
-			if err := cert.VerifyStructure(env, recipients); err != nil {
-				return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, err)
-			}
-		} else {
-			if err := cert.VerifyFull(env, recipients, update.AckVerifier); err != nil {
-				return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, err)
-			}
-		}
-		cert.Recipients = updated.DeliveryPolicy.Recipients.Clone()
-		orderSignAttemptCertificateAcks(cert, updated.DeliveryPolicy.Recipients)
-		if _, err := cert.MarshalBinary(); err != nil {
-			return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate encoding: %w", ErrSignAttemptCorrupt, err)
-		}
-		updated.DeliveryState.Acks = nil
-		for _, ack := range cert.Acks {
-			if err := addSignAttemptDeliveryAck(&updated, ack.Clone(), env, recipients); err != nil {
-				return SignAttemptRecord{}, err
-			}
-		}
-		updated.DeliveryState.Certificate = cert
-		updated.DeliveryState.DeliveryComplete = true
+	shift, err := secp.ScalarFromBytesAllowZero(context.Derivation.AdditiveShift)
+	if err != nil || !shift.IsZero() || len(context.Derivation.RequestedPath) != 0 || len(context.Derivation.ResolvedPath) != 0 ||
+		!bytes.Equal(context.Derivation.ChildPublicKey, context.VerificationKey) {
+		return fmt.Errorf("%w: sign derivation is not the current generation binding", ErrSignAttemptCorrupt)
 	}
-	orderSignAttemptDeliveryAcks(&updated)
-	if err := updated.Validate(); err != nil {
-		return SignAttemptRecord{}, err
+	if err := context.Epoch.ValidateWithLimits(limits); err != nil {
+		return fmt.Errorf("%w: invalid sign epoch context: %w", ErrSignAttemptCorrupt, err)
 	}
-	return updated, nil
-}
-
-func addSignAttemptDeliveryAck(record *SignAttemptRecord, ack tss.BroadcastAck, env tss.Envelope, recipients tss.PartySet) error {
-	if err := validateSignAttemptDeliveryAck(ack, env, recipients); err != nil {
-		return err
+	if !bytes.Equal(context.EpochID, context.Epoch.EpochID) || context.Epoch.Threshold != context.Threshold {
+		return fmt.Errorf("%w: sign epoch identity or threshold mismatch", ErrSignAttemptCorrupt)
 	}
-	for _, existing := range record.DeliveryState.Acks {
-		if existing.Party == ack.Party {
-			return nil
+	wantSlot, err := PresignSlotID(context.ProtocolPresignID)
+	if err != nil || context.PresignSlot != wantSlot {
+		return fmt.Errorf("%w: sign presign slot mismatch", ErrSignAttemptCorrupt)
+	}
+	epochPublicKey, epochParties, err := epochContextGroupPublicKey(context.Epoch)
+	if err != nil || !secp.Equal(epochPublicKey, publicKey) {
+		return fmt.Errorf("%w: sign epoch public-key binding mismatch", ErrSignAttemptCorrupt)
+	}
+	if !epochParties.Contains(context.Party) {
+		return fmt.Errorf("%w: sign party is outside epoch", ErrSignAttemptCorrupt)
+	}
+	for _, signer := range context.Signers {
+		if !epochParties.Contains(signer) {
+			return fmt.Errorf("%w: sign signer %d is outside epoch", ErrSignAttemptCorrupt, signer)
 		}
 	}
-	record.DeliveryState.Acks = append(record.DeliveryState.Acks, ack.Clone())
+	deltaPoints := make([]*secp.Point, 0, len(context.Commitments))
+	sPoints := make([]*secp.Point, 0, len(context.Commitments))
+	for i := range context.Commitments {
+		commitment := context.Commitments[i]
+		if commitment.Party != context.Signers[i] {
+			return fmt.Errorf("%w: sign public commitment order mismatch", ErrSignAttemptCorrupt)
+		}
+		delta, err := decodePresignGroupElement(commitment.DeltaTilde)
+		if err != nil {
+			return fmt.Errorf("%w: invalid DeltaTilde for party %d: %w", ErrSignAttemptCorrupt, commitment.Party, err)
+		}
+		sPoint, err := decodePresignGroupElement(commitment.STilde)
+		if err != nil {
+			return fmt.Errorf("%w: invalid STilde for party %d: %w", ErrSignAttemptCorrupt, commitment.Party, err)
+		}
+		deltaPoints = append(deltaPoints, delta)
+		sPoints = append(sPoints, sPoint)
+	}
+	if !secp.Equal(secp.AddPoints(deltaPoints...), secp.G) ||
+		!secp.Equal(secp.AddPoints(sPoints...), publicKey) {
+		return fmt.Errorf("%w: sign public commitments do not aggregate", ErrSignAttemptCorrupt)
+	}
 	return nil
 }
 
-func orderSignAttemptDeliveryAcks(record *SignAttemptRecord) {
-	if len(record.DeliveryState.Acks) <= 1 {
-		return
+func signAttemptPublicContextMatchesPresign(context signAttemptPublicContext, presign *Presign) bool {
+	if presign == nil || presign.state == nil {
+		return false
 	}
-	order := signAttemptRecipientOrder(record.DeliveryPolicy.Recipients)
-	slices.SortStableFunc(record.DeliveryState.Acks, func(a, b tss.BroadcastAck) int {
-		return order[a.Party] - order[b.Party]
-	})
+	wantSlot, err := PresignSlotID(presign.state.PresignID)
+	if err != nil {
+		return false
+	}
+	if context.Party != presign.state.Party ||
+		context.Threshold != presign.state.Threshold ||
+		!slices.Equal(context.Signers, presign.state.Signers) ||
+		!bytes.Equal(context.ProtocolPresignID, presign.state.PresignID) ||
+		!bytes.Equal(context.EpochID, presign.state.EpochID) ||
+		!secp.Equal(context.Gamma, presign.state.Gamma) ||
+		!context.LittleR.Equal(presign.state.LittleR) ||
+		!bytes.Equal(context.TranscriptHash, presign.state.TranscriptHash) ||
+		!bytes.Equal(context.ContextHash, presign.state.ContextHash) ||
+		!bytes.Equal(context.VerificationKey, presign.verificationKey()) ||
+		context.KeyID != presign.state.Context.KeyID ||
+		context.Derivation == nil || !context.Derivation.Equal(presign.state.Derivation) ||
+		context.Epoch == nil || presign.state.Epoch == nil || !bytes.Equal(context.Epoch.EpochID, presign.state.Epoch.EpochID) ||
+		context.PresignSlot != wantSlot ||
+		len(context.Commitments) != len(presign.state.Commitments) {
+		return false
+	}
+	for i := range context.Commitments {
+		if context.Commitments[i].Party != presign.state.Commitments[i].Party ||
+			!bytes.Equal(context.Commitments[i].DeltaTilde, presign.state.Commitments[i].DeltaTilde) ||
+			!bytes.Equal(context.Commitments[i].STilde, presign.state.Commitments[i].STilde) {
+			return false
+		}
+	}
+	return true
 }
 
-func orderSignAttemptCertificateAcks(cert *tss.BroadcastCertificate, recipients tss.PartySet) {
-	if cert == nil || len(cert.Acks) <= 1 {
-		return
+func normalizedCommitmentForPublicContext(context *signAttemptPublicContext, party tss.PartyID) (normalizedPresignCommitment, bool) {
+	if context == nil {
+		return normalizedPresignCommitment{}, false
 	}
-	order := signAttemptRecipientOrder(recipients)
-	slices.SortStableFunc(cert.Acks, func(a, b tss.BroadcastAck) int {
-		return order[a.Party] - order[b.Party]
-	})
+	for i := range context.Commitments {
+		if context.Commitments[i].Party == party {
+			return context.Commitments[i].clone(), true
+		}
+	}
+	return normalizedPresignCommitment{}, false
+}
+
+func validateSignAttemptDeliveryPolicy(policy SignAttemptDeliveryPolicy, protocol tss.ProtocolID, env tss.Envelope, signerSetHash []byte) error {
+	expected, err := CGGMP21Policies().Match(protocol, env.Round, env.PayloadType)
+	if err != nil {
+		return fmt.Errorf("%w: sign delivery policy lookup: %w", ErrSignAttemptCorrupt, err)
+	}
+	if policy.Mode != expected.Mode ||
+		policy.Confidentiality != expected.Confidentiality ||
+		policy.BroadcastConsistency != expected.BroadcastConsistency ||
+		len(policy.Recipients) == 0 {
+		return fmt.Errorf("%w: sign delivery policy mismatch", ErrSignAttemptCorrupt)
+	}
+	if err := wire.ValidateStrictSortedIDs(policy.Recipients); err != nil {
+		return fmt.Errorf("%w: invalid sign delivery recipients: %w", ErrSignAttemptCorrupt, err)
+	}
+	if !bytes.Equal(signerSetHash, signAttemptSignerSetHash(policy.Recipients)) {
+		return fmt.Errorf("%w: sign delivery recipients do not match signer set", ErrSignAttemptCorrupt)
+	}
+	return nil
+}
+
+func signAttemptIntentDigest(outbox signAttemptOutbox) []byte {
+	t := transcript.New(signAttemptIntentLabel)
+	t.AppendUint16("record_version", outbox.RecordVersion)
+	t.AppendString("protocol", string(outbox.Protocol))
+	t.AppendUint16("protocol_version", outbox.ProtocolVersion)
+	t.AppendString("key_id", outbox.KeyID)
+	t.AppendString("key_generation", outbox.KeyGeneration)
+	t.AppendBytes("epoch_id", outbox.EpochID)
+	t.AppendString("presign_id", outbox.PresignID)
+	t.AppendString("attempt_id", outbox.AttemptID)
+	t.AppendBytes("protocol_presign_id", outbox.ProtocolPresignID)
+	t.AppendBytes("session_id", outbox.SessionID[:])
+	t.AppendUint32("party", outbox.Party)
+	t.AppendBytes("signer_set_hash", outbox.SignerSetHash)
+	t.AppendBytes("sign_plan_hash", outbox.SignPlanHash)
+	t.AppendBytes("context_hash", outbox.ContextHash)
+	t.AppendBytes("digest", outbox.Digest)
+	t.AppendBytes("digest_binding_hash", outbox.DigestBindingHash)
+	t.AppendBytes("canonical_envelope_hash", outbox.CanonicalEnvelopeHash)
+	t.AppendBytes("envelope_digest", outbox.EnvelopeDigest)
+	t.AppendBytes("payload_hash", outbox.PayloadHash)
+	t.AppendBytes("delivery_policy_hash", signAttemptDeliveryPolicyHash(outbox.DeliveryPolicy))
+	t.AppendBytes("verification_key", outbox.VerificationKey)
+	return t.Sum()
+}
+
+func signAttemptDeliveryPolicyHash(policy SignAttemptDeliveryPolicy) []byte {
+	t := transcript.New(signAttemptDeliveryPolicyLabel)
+	t.AppendUint8("mode", uint8(policy.Mode))
+	t.AppendUint8("confidentiality", uint8(policy.Confidentiality))
+	t.AppendUint8("broadcast_consistency", uint8(policy.BroadcastConsistency))
+	t.AppendUint32List("recipients", policy.Recipients)
+	return t.Sum()
+}
+
+func signAttemptSignerSetHash(signers tss.PartySet) []byte {
+	return tss.PartySetHash(signers, signAttemptSignerSetLabel)
 }
 
 func signAttemptRecipientOrder(recipients tss.PartySet) map[tss.PartyID]int {
 	order := make(map[tss.PartyID]int, len(recipients))
-	for i, id := range recipients {
-		order[id] = i
+	for index, party := range recipients {
+		order[party] = index
 	}
 	return order
-}
-
-func decodeSignAttemptEnvelope(raw []byte) (tss.Envelope, signPartialPayload, error) {
-	return decodeSignAttemptEnvelopeWithLimits(raw, DefaultLimits())
 }
 
 func decodeSignAttemptEnvelopeWithLimits(raw []byte, limits Limits) (tss.Envelope, signPartialPayload, error) {
@@ -784,50 +807,46 @@ func decodeSignAttemptEnvelopeWithLimits(raw []byte, limits Limits) (tss.Envelop
 		return tss.Envelope{}, signPartialPayload{}, err
 	}
 	if !bytes.Equal(raw, canonical) {
-		return tss.Envelope{}, signPartialPayload{}, errors.New("non-canonical envelope")
+		return tss.Envelope{}, signPartialPayload{}, errors.New("non-canonical sign envelope")
 	}
 	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
 	if err != nil {
-		return tss.Envelope{}, payload, err
+		return tss.Envelope{}, signPartialPayload{}, err
 	}
 	return env, payload, nil
 }
 
-func signAttemptIntentHash(r SignAttemptRecord) []byte {
-	t := transcript.New(signAttemptIntentLabel)
-	t.AppendUint16("record_version", r.RecordVersion)
-	t.AppendString("protocol", string(r.Protocol))
-	t.AppendUint16("protocol_version", r.ProtocolVersion)
-	t.AppendBytes("presign_content_id", r.PresignContentID)
-	t.AppendBytes("session_id", r.SessionID[:])
-	t.AppendUint32("party", r.Party)
-	t.AppendBytes("signer_set_hash", r.SignerSetHash)
-	t.AppendBytes("sign_plan_hash", r.SignPlanHash)
-	t.AppendBytes("context_hash", r.ContextHash)
-	t.AppendBytes("digest", r.Digest)
-	t.AppendBytes("digest_binding_hash", r.DigestBindingHash)
-	return t.Sum()
+func validateSignLifecycleIdentifier(value string) error {
+	if value == "" || len(value) > maxSignLifecycleIdentifier || !utf8.ValidString(value) {
+		return errors.New("invalid lifecycle identifier")
+	}
+	for _, r := range value {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("lifecycle identifier contains control characters")
+		}
+	}
+	return nil
 }
 
-func signAttemptHash(r SignAttemptRecord) []byte {
-	t := transcript.New(signAttemptHashLabel)
-	t.AppendBytes("intent_hash", r.IntentHash)
-	t.AppendBytes("canonical_base_envelope_hash", r.CanonicalBaseEnvelopeHash)
-	t.AppendBytes("envelope_digest", r.EnvelopeDigest)
-	t.AppendBytes("payload_hash", r.PayloadHash)
-	t.AppendBytes("delivery_policy_hash", signAttemptDeliveryPolicyHash(r.DeliveryPolicy))
-	return t.Sum()
-}
-
-func signAttemptDeliveryPolicyHash(p SignAttemptDeliveryPolicy) []byte {
-	t := transcript.New(signAttemptDeliveryPolicyLabel)
-	t.AppendUint8("mode", uint8(p.Mode))
-	t.AppendUint8("confidentiality", uint8(p.Confidentiality))
-	t.AppendUint8("broadcast_consistency", uint8(p.BroadcastConsistency))
-	t.AppendUint32List("recipients", p.Recipients)
-	return t.Sum()
-}
-
-func signAttemptSignerSetHash(signers tss.PartySet) []byte {
-	return tss.PartySetHash(signers, signAttemptSignerSetLabel)
+func clearSignAttemptOutbox(outbox *signAttemptOutbox) {
+	if outbox == nil {
+		return
+	}
+	clear(outbox.EpochID)
+	clear(outbox.ProtocolPresignID)
+	clear(outbox.SignerSetHash)
+	clear(outbox.SignPlanHash)
+	clear(outbox.ContextHash)
+	clear(outbox.Digest)
+	clear(outbox.DigestBindingHash)
+	clear(outbox.CanonicalEnvelope)
+	clear(outbox.CanonicalEnvelopeHash)
+	clear(outbox.EnvelopeDigest)
+	clear(outbox.PayloadHash)
+	clear(outbox.IntentDigest)
+	clear(outbox.VerificationKey)
+	for i := range outbox.DeliveryPolicy.Recipients {
+		outbox.DeliveryPolicy.Recipients[i] = 0
+	}
+	*outbox = signAttemptOutbox{}
 }

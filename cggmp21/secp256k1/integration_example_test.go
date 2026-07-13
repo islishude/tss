@@ -4,10 +4,12 @@ package secp256k1_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"github.com/islishude/tss"
 	cggmp "github.com/islishude/tss/cggmp21/secp256k1"
+	"github.com/islishude/tss/tssrun"
 )
 
 // Example_full_lifecycle demonstrates keygen, persistence, presign, and signing.
@@ -27,16 +29,15 @@ func Example_full_lifecycle() {
 	}
 
 	ctx := examplePresignContext()
-	presigns, err := runExampleCGGMPPresign(shares, parties, ctx)
-	if err != nil {
-		panic(err)
-	}
-
-	store, cleanup, err := newExampleFileSignAttemptStore()
+	store, cleanup, err := newExampleFileLifecycleStores(parties)
 	if err != nil {
 		panic(err)
 	}
 	defer cleanup()
+	presigns, err := runExampleCGGMPPresign(shares, parties, ctx, store)
+	if err != nil {
+		panic(err)
+	}
 	request := cggmp.SignRequest{
 		Context: ctx,
 		Message: []byte("example full lifecycle"),
@@ -59,15 +60,15 @@ func Example_multiParty() {
 	}
 	signers := tss.NewPartySet(1, 3)
 	ctx := examplePresignContext()
-	presigns, err := runExampleCGGMPPresign(shares, signers, ctx)
-	if err != nil {
-		panic(err)
-	}
-	store, cleanup, err := newExampleFileSignAttemptStore()
+	store, cleanup, err := newExampleFileLifecycleStores(signers)
 	if err != nil {
 		panic(err)
 	}
 	defer cleanup()
+	presigns, err := runExampleCGGMPPresign(shares, signers, ctx, store)
+	if err != nil {
+		panic(err)
+	}
 	request := cggmp.SignRequest{
 		Context: ctx,
 		Message: []byte("multi-party threshold signature"),
@@ -96,6 +97,11 @@ func ExampleStartRefresh() {
 		panic(err)
 	}
 	security := newExampleCGGMPSecurity(partySet)
+	refreshStores, cleanupRefreshStores, err := newExampleFileLifecycleStores(parties)
+	if err != nil {
+		panic(err)
+	}
+	defer cleanupRefreshStores()
 	sessions := make(map[tss.PartyID]*cggmp.RefreshSession, len(parties))
 	queue := make([]tss.Envelope, 0)
 	// Production refresh is started from one refresh job. Each party
@@ -114,7 +120,17 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartRefresh(shares[id], plan, tss.LocalConfig{Self: id, EnvelopeSigner: signer}, guard)
+		binding, err := installExampleGeneration(refreshStores[id], shares[id], "refresh-example-key")
+		if err != nil {
+			panic(err)
+		}
+		session, out, err := cggmp.StartRefresh(plan, cggmp.RefreshRuntime{
+			Local:               tss.LocalConfig{Self: id, EnvelopeSigner: signer},
+			Guard:               guard,
+			LifecycleStore:      refreshStores[id],
+			Binding:             binding,
+			TargetKeyGeneration: tssrun.KeyGeneration("refresh-example-target"),
+		})
 		if err != nil {
 			panic(err)
 		}
@@ -140,15 +156,15 @@ func ExampleStartRefresh() {
 	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, exampleKeyShareMetadata(refreshed[1]).PublicKey))
 
 	ctx := examplePresignContext()
-	presigns, err := runExampleCGGMPPresign(refreshed, parties, ctx)
-	if err != nil {
-		panic(err)
-	}
-	store, cleanup, err := newExampleFileSignAttemptStore()
+	store, cleanup, err := newExampleFileLifecycleStores(parties)
 	if err != nil {
 		panic(err)
 	}
 	defer cleanup()
+	presigns, err := runExampleCGGMPPresign(refreshed, parties, ctx, store)
+	if err != nil {
+		panic(err)
+	}
 	request := cggmp.SignRequest{
 		Context: ctx,
 		Message: []byte("post-refresh signing"),
@@ -185,6 +201,15 @@ func ExampleStartReshareDealer() {
 		panic(err)
 	}
 	security := newExampleCGGMPSecurity(allParties)
+	reshareStores, cleanupReshareStores, err := newExampleFileLifecycleStores(allParties)
+	if err != nil {
+		panic(err)
+	}
+	defer cleanupReshareStores()
+	sourceBinding, err := exampleGenerationBinding(shares[1], "reshare-example-key")
+	if err != nil {
+		panic(err)
+	}
 	sessions := make(map[tss.PartyID]*cggmp.ReshareSession, len(allParties))
 	queue := make([]tss.Envelope, 0)
 	// Production reshare assigns roles from the same reshare job. Old dealers
@@ -198,7 +223,20 @@ func ExampleStartReshareDealer() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartReshareDealer(shares[id], plan, tss.LocalConfig{Self: id, EnvelopeSigner: signer}, guard)
+		binding, err := installExampleGeneration(reshareStores[id], shares[id], sourceBinding.KeyID)
+		if err != nil {
+			panic(err)
+		}
+		if binding != sourceBinding {
+			panic("old reshare parties derived different lifecycle bindings")
+		}
+		session, out, err := cggmp.StartReshareDealer(plan, cggmp.ReshareRuntime{
+			Local:               tss.LocalConfig{Self: id, EnvelopeSigner: signer},
+			Guard:               guard,
+			LifecycleStore:      reshareStores[id],
+			Binding:             sourceBinding,
+			TargetKeyGeneration: tssrun.KeyGeneration("reshare-example-target"),
+		})
 		if err != nil {
 			panic(err)
 		}
@@ -214,7 +252,13 @@ func ExampleStartReshareDealer() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartReshareReceiver(plan, tss.LocalConfig{Self: id, EnvelopeSigner: signer}, guard)
+		session, out, err := cggmp.StartReshareReceiver(plan, cggmp.ReshareRuntime{
+			Local:               tss.LocalConfig{Self: id, EnvelopeSigner: signer},
+			Guard:               guard,
+			LifecycleStore:      reshareStores[id],
+			Binding:             sourceBinding,
+			TargetKeyGeneration: tssrun.KeyGeneration("reshare-example-target"),
+		})
 		if err != nil {
 			panic(err)
 		}
@@ -243,15 +287,15 @@ func ExampleStartReshareDealer() {
 	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, exampleKeyShareMetadata(reshared[3]).PublicKey))
 
 	ctx := examplePresignContext()
-	presigns, err := runExampleCGGMPPresign(reshared, newParties, ctx)
-	if err != nil {
-		panic(err)
-	}
-	store, cleanup, err := newExampleFileSignAttemptStore()
+	store, cleanup, err := newExampleFileLifecycleStores(newParties)
 	if err != nil {
 		panic(err)
 	}
 	defer cleanup()
+	presigns, err := runExampleCGGMPPresign(reshared, newParties, ctx, store)
+	if err != nil {
+		panic(err)
+	}
 	request := cggmp.SignRequest{
 		Context: ctx,
 		Message: []byte("post-reshare signing"),
@@ -266,7 +310,7 @@ func ExampleStartReshareDealer() {
 	// true
 }
 
-// ExampleDeriveNonHardenedBIP32 demonstrates child-key threshold signing.
+// ExampleDeriveNonHardenedBIP32 demonstrates public non-hardened derivation.
 func ExampleDeriveNonHardenedBIP32() {
 	parties := tss.NewPartySet(1, 2)
 	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
@@ -280,33 +324,19 @@ func ExampleDeriveNonHardenedBIP32() {
 		panic(err)
 	}
 
-	ctx := examplePresignContext()
-	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
-	presigns, err := runExampleCGGMPPresign(shares, parties, ctx)
+	fromShare, err := shares[1].Derive(tss.DerivationPath(path))
 	if err != nil {
 		panic(err)
 	}
-	store, cleanup, err := newExampleFileSignAttemptStore()
-	if err != nil {
-		panic(err)
-	}
-	defer cleanup()
-	request := cggmp.SignRequest{
-		Context: ctx,
-		Message: []byte("bip32 derived signing"),
-	}
-	_, signature, err := runExampleCGGMPSign(shares, presigns, parties, request, store)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(cggmp.VerifySignature(derived.ChildPublicKey, request, signature))
-	fmt.Println(cggmp.VerifySignature(shareMetadata.PublicKey, request, signature))
+	fmt.Println(bytes.Equal(derived.ChildPublicKey, fromShare.ChildPublicKey))
+	fmt.Println(!bytes.Equal(derived.ChildPublicKey, shareMetadata.PublicKey))
 	// Output:
 	// true
-	// false
+	// true
 }
 
-// Example_serialization demonstrates key-share round trips and consumed presign snapshots.
+// Example_serialization demonstrates canonical key-share and available-presign
+// artifact round trips. Durable availability remains owned by LifecycleStore.
 func Example_serialization() {
 	parties := tss.NewPartySet(1, 2)
 	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
@@ -324,20 +354,36 @@ func Example_serialization() {
 	fmt.Println("key share round-trip:", bytes.Equal(exampleKeyShareMetadata(restoredShare).PublicKey, exampleKeyShareMetadata(shares[1]).PublicKey))
 
 	ctx := examplePresignContext()
-	presigns, err := runExampleCGGMPPresign(shares, parties, ctx)
+	store, cleanup, err := newExampleFileLifecycleStores(parties)
 	if err != nil {
 		panic(err)
 	}
-	rawPresign, err := presigns[1].MarshalBinary()
+	defer cleanup()
+	presigns, err := runExampleCGGMPPresign(shares, parties, ctx, store)
 	if err != nil {
 		panic(err)
 	}
-	restoredPresign, err := tss.DecodeBinary[cggmp.Presign](rawPresign)
+	binding, err := exampleGenerationBinding(shares[1], ctx.KeyID)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("presign restored usable:", !cggmp.IsPresignConsumed(restoredPresign))
+	candidate, err := store[1].PreparePresignCandidate(context.Background(), binding, presigns[1].SlotID())
+	if err != nil {
+		panic(err)
+	}
+	defer clear(candidate.Blob)
+	defer clear(candidate.Metadata)
+	restoredPresign, err := tss.DecodeBinary[cggmp.Presign](candidate.Blob)
+	if err != nil {
+		panic(err)
+	}
+	restoredPresignRaw, err := restoredPresign.MarshalBinary()
+	if err != nil {
+		panic(err)
+	}
+	defer clear(restoredPresignRaw)
+	fmt.Println("presign artifact round-trip:", bytes.Equal(candidate.Blob, restoredPresignRaw))
 	// Output:
 	// key share round-trip: true
-	// presign restored usable: false
+	// presign artifact round-trip: true
 }

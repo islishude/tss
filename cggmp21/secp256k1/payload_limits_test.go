@@ -14,7 +14,7 @@ func TestPayloadDecodersEnforceMessageFrameLimit(t *testing.T) {
 
 	for name, decode := range map[string]func([]byte) error{
 		"protocol payload": func(in []byte) error {
-			var payload keygenSharePayload
+			var payload figure6CommitmentPayload
 			return payload.UnmarshalBinaryWithLimits(in, limits)
 		},
 		"keygen confirmation": func(in []byte) error {

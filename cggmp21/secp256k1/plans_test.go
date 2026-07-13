@@ -104,7 +104,7 @@ func TestCGGMP21KeygenPlanZeroValueIsInvalid(t *testing.T) {
 func TestCGGMP21RefreshPlanDigestBindsSourceGeneration(t *testing.T) {
 	t.Parallel()
 
-	newPlan := func(oldSession, oldTranscript, oldPlan, oldCommitments byte) *RefreshPlan {
+	newPlan := func(oldSession, oldTranscript, oldPlan, oldCommitments, sourceEpoch byte) *RefreshPlan {
 		return &RefreshPlan{
 			state: &refreshPlanState{
 				sessionID:               cggmpPlanTestSession(0x50),
@@ -117,20 +117,123 @@ func TestCGGMP21RefreshPlanDigestBindsSourceGeneration(t *testing.T) {
 				oldKeygenTranscriptHash: bytes.Repeat([]byte{oldTranscript}, 32),
 				oldPlanHash:             bytes.Repeat([]byte{oldPlan}, 32),
 				oldCommitmentsHash:      bytes.Repeat([]byte{oldCommitments}, 32),
+				sourceEpochID:           bytes.Repeat([]byte{sourceEpoch}, 32),
 			},
 			securityParams: DefaultSecurityParams(),
 		}
 	}
 
-	base := newPlan(0x11, 0x12, 0x13, 0x14)
-	assertSameCGGMPPlanDigest(t, base, newPlan(0x11, 0x12, 0x13, 0x14))
+	base := newPlan(0x11, 0x12, 0x13, 0x14, 0x15)
+	assertSameCGGMPPlanDigest(t, base, newPlan(0x11, 0x12, 0x13, 0x14, 0x15))
 	for name, other := range map[string]*RefreshPlan{
-		"old Paillier proof session": newPlan(0x21, 0x12, 0x13, 0x14),
-		"old keygen transcript":      newPlan(0x11, 0x22, 0x13, 0x14),
-		"old lifecycle plan":         newPlan(0x11, 0x12, 0x23, 0x14),
-		"old commitments":            newPlan(0x11, 0x12, 0x13, 0x24),
+		"old Paillier proof session": newPlan(0x21, 0x12, 0x13, 0x14, 0x15),
+		"old keygen transcript":      newPlan(0x11, 0x22, 0x13, 0x14, 0x15),
+		"old lifecycle plan":         newPlan(0x11, 0x12, 0x23, 0x14, 0x15),
+		"old commitments":            newPlan(0x11, 0x12, 0x13, 0x24, 0x15),
+		"source epoch":               newPlan(0x11, 0x12, 0x13, 0x14, 0x25),
 	} {
 		assertDifferentCGGMPPlanDigest(t, name, base, other)
+	}
+	for name, sourceEpochID := range map[string][]byte{
+		"missing source epoch": nil,
+		"zero source epoch":    make([]byte, 32),
+	} {
+		invalid := newPlan(0x11, 0x12, 0x13, 0x14, 0x15)
+		invalid.state.sourceEpochID = sourceEpochID
+		if _, err := invalid.Digest(); err == nil {
+			t.Fatalf("refresh plan accepted %s", name)
+		}
+	}
+}
+
+func TestCGGMP21PresignPlanDigestBindsPresignAndEpochIDs(t *testing.T) {
+	t.Parallel()
+
+	newPlan := func(presignID, epochID byte) *PresignPlan {
+		return &PresignPlan{
+			state: &presignPlanState{
+				sessionID:   cggmpPlanTestSession(0x5a),
+				presignID:   bytes.Repeat([]byte{presignID}, 32),
+				threshold:   2,
+				parties:     tss.NewPartySet(1, 2, 3),
+				publicKey:   []byte{0x02, 0x01},
+				keygenHash:  bytes.Repeat([]byte{0x31}, 32),
+				signers:     tss.NewPartySet(1, 2),
+				contextHash: bytes.Repeat([]byte{0x32}, 32),
+				epochID:     bytes.Repeat([]byte{epochID}, 32),
+			},
+			securityParams: DefaultSecurityParams(),
+		}
+	}
+
+	base := newPlan(0x41, 0x42)
+	assertSameCGGMPPlanDigest(t, base, newPlan(0x41, 0x42))
+	assertDifferentCGGMPPlanDigest(t, "presign id", base, newPlan(0x51, 0x42))
+	assertDifferentCGGMPPlanDigest(t, "epoch id", base, newPlan(0x41, 0x52))
+
+	for name, plan := range map[string]*PresignPlan{
+		"missing presign id": newPlan(0x41, 0x42),
+		"zero presign id":    newPlan(0x41, 0x42),
+		"missing epoch id":   newPlan(0x41, 0x42),
+		"zero epoch id":      newPlan(0x41, 0x42),
+	} {
+		switch name {
+		case "missing presign id":
+			plan.state.presignID = nil
+		case "zero presign id":
+			plan.state.presignID = make([]byte, 32)
+		case "missing epoch id":
+			plan.state.epochID = nil
+		case "zero epoch id":
+			plan.state.epochID = make([]byte, 32)
+		}
+		if _, err := plan.Digest(); err == nil {
+			t.Fatalf("presign plan accepted %s", name)
+		}
+	}
+}
+
+func TestCGGMP21NewPresignPlanRejectsInventoryIDAndRequestTimeHD(t *testing.T) {
+	t.Parallel()
+
+	key := minimalKeyShare()
+	key.state.Party = 1
+	sessionID := cggmpPlanTestSession(0x5b)
+	validPresignID := bytes.Repeat([]byte{0x61}, 32)
+	baseContext := testPresignContext()
+	for _, tc := range []struct {
+		name      string
+		presignID []byte
+		context   tss.SigningContext
+	}{
+		{name: "missing presign id", context: baseContext},
+		{name: "short presign id", presignID: validPresignID[:31], context: baseContext},
+		{name: "zero presign id", presignID: make([]byte, 32), context: baseContext},
+		{name: "requested derivation path", presignID: validPresignID, context: func() tss.SigningContext {
+			ctx := baseContext.Clone()
+			ctx.Derivation.Path = tss.DerivationPath{1}
+			return ctx
+		}()},
+		{name: "resolved derivation path", presignID: validPresignID, context: func() tss.SigningContext {
+			ctx := baseContext.Clone()
+			ctx.Derivation.ResolvedPath = tss.DerivationPath{1}
+			return ctx
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewPresignPlan(PresignPlanOption{
+				Key:       key,
+				SessionID: sessionID,
+				PresignID: tc.presignID,
+				Signers:   tss.NewPartySet(1),
+				Context:   tc.context,
+			})
+			if err == nil {
+				t.Fatal("invalid presign plan input accepted")
+			}
+			_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+		})
 	}
 }
 
@@ -140,8 +243,13 @@ func TestCGGMP21SignPlanDigestExcludesRuntimeDependencies(t *testing.T) {
 	newPlan := func(signers tss.PartySet) *SignPlan {
 		return &SignPlan{state: &signPlanState{
 			sessionID:         cggmpPlanTestSession(0x54),
+			protocolPresignID: bytes.Repeat([]byte{0x10}, 32),
+			epochID:           bytes.Repeat([]byte{0x12}, 32),
+			gamma:             bytes.Repeat([]byte{0x13}, 33),
 			presignTranscript: bytes.Repeat([]byte{0x11}, 32),
 			contextHash:       bytes.Repeat([]byte{0x22}, 32),
+			verificationKey:   bytes.Repeat([]byte{0x23}, 33),
+			presignPlanHash:   bytes.Repeat([]byte{0x24}, 32),
 			signers:           signers.Clone(),
 			digest:            bytes.Repeat([]byte{0x33}, 32),
 		}}
@@ -154,20 +262,7 @@ func TestCGGMP21SignPlanDigestExcludesRuntimeDependencies(t *testing.T) {
 func TestCGGMP21SignPlanMismatchDoesNotAbortSession(t *testing.T) {
 	t.Parallel()
 
-	s := &SignSession{
-		presign: &Presign{state: &presignState{
-
-			Signers:        tss.NewPartySet(1, 2),
-			TranscriptHash: bytes.Repeat([]byte{0x41}, 32),
-			ContextHash:    bytes.Repeat([]byte{0x42}, 32),
-		}},
-		planHash: bytes.Repeat([]byte{0x43}, 32),
-	}
-	_, err := s.verifySignPartial(2, signPartialPayload{
-		PresignTranscript: bytes.Repeat([]byte{0x41}, 32),
-		PresignContext:    bytes.Repeat([]byte{0x42}, 32),
-		PlanHash:          bytes.Repeat([]byte{0x44}, 32),
-	})
+	err := requirePlanHash("sign", bytes.Repeat([]byte{0x44}, 32), bytes.Repeat([]byte{0x43}, 32))
 	if !errors.Is(err, errPlanHashMismatch) {
 		t.Fatalf("verifySignPartial() error = %v, want plan mismatch sentinel", err)
 	}
@@ -191,28 +286,41 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		CommitmentsHash: bytes.Repeat([]byte{0x73}, 32),
 		ChainCode:       bytes.Repeat([]byte{0x75}, 32),
 		PlanHash:        bytes.Repeat([]byte{0x74}, 32),
+		EpochID:         bytes.Repeat([]byte{0x76}, 32),
 	}
 	payload, err := confirmation.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &KeygenSession{
-		cfg:           tss.ThresholdConfig{SessionID: sessionID},
-		limits:        testLimits(),
-		planHash:      wantPlanHash,
-		round1:        newKeygenRound1Inbox(tss.NewPartySet(confirmation.Sender)),
-		confirmations: newKeygenConfirmationInbox(tss.NewPartySet(confirmation.Sender)),
+		cfg: tss.ThresholdConfig{
+			SessionID: sessionID,
+			Self:      1,
+			Parties:   confirmation.Parties.Clone(),
+			Threshold: confirmation.Threshold,
+		},
+		limits:             testLimits(),
+		planHash:           wantPlanHash,
+		figure6:            &figure6State{result: &figure6Result{publicKey: bytes.Clone(confirmation.PublicKey)}},
+		auxInfo:            new(auxInfoState),
+		paperConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
+		paperAccepted:      make(map[paperKeygenMessageKey]struct{}),
 	}
-	_, err = s.buildAcceptCGGMPKeygenConfirmationTx(tss.Envelope{
-		Round:   keygenConfirmationRound,
-		From:    confirmation.Sender,
-		Payload: payload,
-	})
+	env := tss.Envelope{
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
+		SessionID:   sessionID,
+		Round:       keygenPaperConfirmationRound,
+		From:        confirmation.Sender,
+		To:          tss.BroadcastPartyId,
+		PayloadType: payloadKeygenConfirmation,
+		Payload:     payload,
+	}
+	_, err = s.handlePaperKeygenConfirmationLocked(testutil.DeliverEnvelope(env), newPaperKeygenMessageKey(env))
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
 		t.Fatalf("confirmation error = %v, want plan mismatch sentinel", protocolErr.Err)
 	}
-	if len(s.confirmations.slots) != 0 || len(s.confirmations.reveals) != 0 {
+	if len(s.paperConfirmations) != 0 || len(s.paperAccepted) != 0 {
 		t.Fatal("early confirmation plan mismatch mutated keygen state")
 	}
 	if shouldAbortSession(err) {
@@ -234,6 +342,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		oldKeygenTranscriptHash: []byte{0x05, 0x06},
 		oldPlanHash:             []byte{0x07, 0x08},
 		oldCommitmentsHash:      []byte{0x09, 0x0a},
+		sourceEpochID:           []byte{0x0b, 0x0c},
 	}}
 	refreshSnapshot, ok := refresh.Snapshot()
 	if !ok {
@@ -246,8 +355,10 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	refreshClone.OldKeygenTranscriptHash[0] ^= 0xff
 	refreshClone.OldPlanHash[0] ^= 0xff
 	refreshClone.OldCommitmentsHash[0] ^= 0xff
+	refreshClone.SourceEpochID[0] ^= 0xff
 	if refreshSnapshot.Parties[0] != 1 || refreshSnapshot.PublicKey[0] != 0x02 || refreshSnapshot.ChainCode[0] != 0x03 ||
-		refreshSnapshot.OldKeygenTranscriptHash[0] != 0x05 || refreshSnapshot.OldPlanHash[0] != 0x07 || refreshSnapshot.OldCommitmentsHash[0] != 0x09 {
+		refreshSnapshot.OldKeygenTranscriptHash[0] != 0x05 || refreshSnapshot.OldPlanHash[0] != 0x07 || refreshSnapshot.OldCommitmentsHash[0] != 0x09 ||
+		refreshSnapshot.SourceEpochID[0] != 0x0b {
 		t.Fatal("refresh plan snapshot clone aliases source")
 	}
 	refreshSnapshot.Parties[0] = 99
@@ -256,17 +367,26 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	refreshSnapshot.OldKeygenTranscriptHash[0] ^= 0xff
 	refreshSnapshot.OldPlanHash[0] ^= 0xff
 	refreshSnapshot.OldCommitmentsHash[0] ^= 0xff
+	refreshSnapshot.SourceEpochID[0] ^= 0xff
 	if refresh.state.parties[0] != 1 || refresh.state.publicKey[0] != 0x02 || refresh.state.chainCode[0] != 0x03 ||
-		refresh.state.oldKeygenTranscriptHash[0] != 0x05 || refresh.state.oldPlanHash[0] != 0x07 || refresh.state.oldCommitmentsHash[0] != 0x09 {
+		refresh.state.oldKeygenTranscriptHash[0] != 0x05 || refresh.state.oldPlanHash[0] != 0x07 || refresh.state.oldCommitmentsHash[0] != 0x09 ||
+		refresh.state.sourceEpochID[0] != 0x0b {
 		t.Fatal("refresh plan snapshot aliases internal state")
+	}
+	refreshEpochID := refresh.SourceEpochID()
+	refreshEpochID[0] ^= 0xff
+	if refresh.state.sourceEpochID[0] != 0x0b {
+		t.Fatal("refresh source epoch accessor aliases internal state")
 	}
 
 	presign := &PresignPlan{state: &presignPlanState{
 		sessionID:  cggmpPlanTestSession(0x52),
+		presignID:  []byte{0x0e, 0x0f},
 		threshold:  2,
 		parties:    tss.NewPartySet(1, 2, 3),
 		publicKey:  []byte{0x02, 0x02},
 		keygenHash: []byte{0x10, 0x11},
+		epochID:    []byte{0x12, 0x13},
 		signers:    tss.NewPartySet(1, 2),
 		context: tss.SigningContext{KeyID: "key", ChainID: "chain", Derivation: tss.DerivationRequest{
 			Scheme:       tss.DerivationSchemeBIP32Secp256k1,
@@ -288,6 +408,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		t.Fatal("missing presign plan snapshot")
 	}
 	presignSnapshot.Parties[0] = 99
+	presignSnapshot.PresignID[0] ^= 0xff
 	presignSnapshot.PublicKey[0] ^= 0xff
 	presignSnapshot.KeygenTranscriptHash[0] ^= 0xff
 	presignSnapshot.Signers[0] = 99
@@ -295,9 +416,12 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	presignSnapshot.ContextHash[0] ^= 0xff
 	presignSnapshot.Derivation.AdditiveShift[0] ^= 0xff
 	presignSnapshot.VerificationKey[0] ^= 0xff
+	presignSnapshot.EpochID[0] ^= 0xff
 	if presign.state.parties[0] != 1 ||
+		presign.state.presignID[0] != 0x0e ||
 		presign.state.publicKey[0] != 0x02 ||
 		presign.state.keygenHash[0] != 0x10 ||
+		presign.state.epochID[0] != 0x12 ||
 		presign.state.signers[0] != 1 ||
 		presign.state.context.Derivation.Path[0] != 1 ||
 		presign.state.contextHash[0] != 0x20 ||
@@ -305,12 +429,15 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		presign.state.derivation.ChildPublicKey[0] != 0x02 {
 		t.Fatal("presign plan snapshot aliases internal state")
 	}
-
 	sign := &SignPlan{state: &signPlanState{
 		sessionID:         cggmpPlanTestSession(0x53),
-		presignContentID:  []byte{0x40, 0x41},
+		protocolPresignID: []byte{0x40, 0x41},
+		epochID:           []byte{0x42, 0x43},
+		gamma:             []byte{0x44, 0x45},
 		presignTranscript: []byte{0x45, 0x46},
 		contextHash:       []byte{0x50, 0x51},
+		verificationKey:   []byte{0x52, 0x53},
+		presignPlanHash:   []byte{0x54, 0x55},
 		digest:            []byte{0x60, 0x61},
 		signers:           tss.NewPartySet(1, 2),
 		intent: SignIntent{
@@ -328,15 +455,24 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	if !ok {
 		t.Fatal("missing sign plan snapshot")
 	}
+	signSnapshot.ProtocolPresignID[0] ^= 0xff
+	signSnapshot.EpochID[0] ^= 0xff
+	signSnapshot.Gamma[0] ^= 0xff
 	signSnapshot.PresignTranscriptHash[0] ^= 0xff
 	signSnapshot.ContextHash[0] ^= 0xff
+	signSnapshot.VerificationKey[0] ^= 0xff
+	signSnapshot.PresignPlanHash[0] ^= 0xff
 	signSnapshot.MessageDigest[0] ^= 0xff
 	signSnapshot.Intent.Message[0] ^= 0xff
 	signSnapshot.Intent.Context.Derivation.Path[0] = 99
 	signSnapshot.Intent.Signers[0] = 99
-	if sign.state.presignContentID[0] != 0x40 ||
+	if sign.state.protocolPresignID[0] != 0x40 ||
+		sign.state.epochID[0] != 0x42 ||
+		sign.state.gamma[0] != 0x44 ||
 		sign.state.presignTranscript[0] != 0x45 ||
 		sign.state.contextHash[0] != 0x50 ||
+		sign.state.verificationKey[0] != 0x52 ||
+		sign.state.presignPlanHash[0] != 0x54 ||
 		sign.state.digest[0] != 0x60 ||
 		sign.state.intent.Message[0] != 'm' ||
 		sign.state.intent.Context.Derivation.Path[0] != 3 ||
