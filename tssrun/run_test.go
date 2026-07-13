@@ -69,7 +69,7 @@ func TestMemoryRunStoreCompletionIsScopedToLocalParty(t *testing.T) {
 		t.Fatalf("CreateRun: %v", err)
 	}
 	digest := run.PlanDigest
-	for _, party := range []tss.PartyID{1, 2} {
+	for _, party := range tss.NewPartySet(1, 2) {
 		if err := store.AcceptPlan(ctx, run.RunID, party, digest); err != nil {
 			t.Fatalf("AcceptPlan party %d: %v", party, err)
 		}

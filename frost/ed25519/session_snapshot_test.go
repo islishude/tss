@@ -6,8 +6,8 @@ type frostSignSnapshot struct {
 	Completed bool
 	Aborted   bool
 
-	CommitmentSenders []tss.PartyID
-	PartialSenders    []tss.PartyID
+	CommitmentSenders tss.PartySet
+	PartialSenders    tss.PartySet
 
 	PartialSent  bool
 	HasDNonce    bool
@@ -23,9 +23,9 @@ type frostKeygenSnapshot struct {
 	HasPending  bool
 	HasKeyShare bool
 
-	CommitmentSenders   []tss.PartyID
-	ShareSenders        []tss.PartyID
-	ConfirmationSenders []tss.PartyID
+	CommitmentSenders   tss.PartySet
+	ShareSenders        tss.PartySet
+	ConfirmationSenders tss.PartySet
 
 	OwnPolyLen     int
 	OwnMessagesLen int
@@ -41,10 +41,10 @@ type frostReshareSnapshot struct {
 	IsRecipient            bool
 	RefreshMode            bool
 
-	CommitSenders              []tss.PartyID
-	ShareSenders               []tss.PartyID
-	ConfirmationSenders        []tss.PartyID
-	PendingConfirmationSenders []tss.PartyID
+	CommitSenders              tss.PartySet
+	ShareSenders               tss.PartySet
+	ConfirmationSenders        tss.PartySet
+	PendingConfirmationSenders tss.PartySet
 }
 
 func snapshotFROSTSignSession(s *SignSession) frostSignSnapshot {
@@ -96,9 +96,9 @@ func snapshotFROSTKeygenSession(s *KeygenSession) frostKeygenSnapshot {
 			snap.ConfirmationSenders = append(snap.ConfirmationSenders, id)
 		}
 	}
-	snap.CommitmentSenders = tss.PartySet(snap.CommitmentSenders).Sorted()
-	snap.ShareSenders = tss.PartySet(snap.ShareSenders).Sorted()
-	snap.ConfirmationSenders = tss.PartySet(snap.ConfirmationSenders).Sorted()
+	snap.CommitmentSenders = snap.CommitmentSenders.Sorted()
+	snap.ShareSenders = snap.ShareSenders.Sorted()
+	snap.ConfirmationSenders = snap.ConfirmationSenders.Sorted()
 	return snap
 }
 
@@ -123,7 +123,7 @@ func snapshotFROSTReshareSession(s *ReshareSession) frostReshareSnapshot {
 	}
 }
 
-func frostSnapshotMapKeys[V any](m map[tss.PartyID]V) []tss.PartyID {
+func frostSnapshotMapKeys[V any](m map[tss.PartyID]V) tss.PartySet {
 	if len(m) == 0 {
 		return nil
 	}

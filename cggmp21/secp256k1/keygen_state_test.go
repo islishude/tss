@@ -56,7 +56,7 @@ func TestKeygenRound1SnapshotCompleteIsCallerOwned(t *testing.T) {
 func TestKeygenConfirmationSnapshotOrdersByParty(t *testing.T) {
 	t.Parallel()
 	in := newKeygenConfirmationInbox(tss.NewPartySet(1, 2, 3))
-	for _, id := range []tss.PartyID{3, 1, 2} {
+	for _, id := range tss.NewPartySet(3, 1, 2) {
 		if err := in.record(id, &KeygenConfirmation{
 			Sender:    id,
 			ChainCode: bytes.Repeat([]byte{byte(id)}, bip32util.ChainCodeSize),

@@ -11,26 +11,26 @@ type cggmpKeygenSnapshot struct {
 	HasKeyShare bool
 	HasPaillier bool
 
-	CommitmentSenders   []tss.PartyID
-	ShareSenders        []tss.PartyID
-	ConfirmationSenders []tss.PartyID
+	CommitmentSenders   tss.PartySet
+	ShareSenders        tss.PartySet
+	ConfirmationSenders tss.PartySet
 }
 
 type cggmpPresignSnapshot struct {
 	Completed bool
 	Aborted   bool
 
-	Round1PayloadSenders  []tss.PartyID
-	Round1ProofSenders    []tss.PartyID
-	Round1VerifiedSenders []tss.PartyID
+	Round1PayloadSenders  tss.PartySet
+	Round1ProofSenders    tss.PartySet
+	Round1VerifiedSenders tss.PartySet
 
-	Round2Senders           []tss.PartyID
-	AlphaDeltaSenders       []tss.PartyID
-	AlphaSigmaSenders       []tss.PartyID
-	BetaDeltaSenders        []tss.PartyID
-	BetaSigmaSenders        []tss.PartyID
-	Round3DeltaSenders      []tss.PartyID
-	Round3VerifyShareSender []tss.PartyID
+	Round2Senders           tss.PartySet
+	AlphaDeltaSenders       tss.PartySet
+	AlphaSigmaSenders       tss.PartySet
+	BetaDeltaSenders        tss.PartySet
+	BetaSigmaSenders        tss.PartySet
+	Round3DeltaSenders      tss.PartySet
+	Round3VerifyShareSender tss.PartySet
 
 	Round2Sent bool
 	Round3Sent bool
@@ -48,7 +48,7 @@ type cggmpSignSnapshot struct {
 	Aborted   bool
 
 	HasSignature   bool
-	PartialSenders []tss.PartyID
+	PartialSenders tss.PartySet
 	HasAttempt     bool
 	HasCoordinator bool
 }
@@ -87,9 +87,9 @@ func snapshotCGGMPKeygenSession(s *KeygenSession) cggmpKeygenSnapshot {
 			}
 		}
 	}
-	snap.CommitmentSenders = tss.PartySet(snap.CommitmentSenders).Sorted()
-	snap.ShareSenders = tss.PartySet(snap.ShareSenders).Sorted()
-	snap.ConfirmationSenders = tss.PartySet(snap.ConfirmationSenders).Sorted()
+	snap.CommitmentSenders = snap.CommitmentSenders.Sorted()
+	snap.ShareSenders = snap.ShareSenders.Sorted()
+	snap.ConfirmationSenders = snap.ConfirmationSenders.Sorted()
 	return snap
 }
 
@@ -143,16 +143,16 @@ func snapshotCGGMPPresignSession(s *PresignSession) cggmpPresignSnapshot {
 			snap.Round3VerifyShareSender = append(snap.Round3VerifyShareSender, state.id)
 		}
 	}
-	snap.Round1PayloadSenders = tss.PartySet(snap.Round1PayloadSenders).Sorted()
-	snap.Round1ProofSenders = tss.PartySet(snap.Round1ProofSenders).Sorted()
-	snap.Round1VerifiedSenders = tss.PartySet(snap.Round1VerifiedSenders).Sorted()
-	snap.Round2Senders = tss.PartySet(snap.Round2Senders).Sorted()
-	snap.AlphaDeltaSenders = tss.PartySet(snap.AlphaDeltaSenders).Sorted()
-	snap.AlphaSigmaSenders = tss.PartySet(snap.AlphaSigmaSenders).Sorted()
-	snap.BetaDeltaSenders = tss.PartySet(snap.BetaDeltaSenders).Sorted()
-	snap.BetaSigmaSenders = tss.PartySet(snap.BetaSigmaSenders).Sorted()
-	snap.Round3DeltaSenders = tss.PartySet(snap.Round3DeltaSenders).Sorted()
-	snap.Round3VerifyShareSender = tss.PartySet(snap.Round3VerifyShareSender).Sorted()
+	snap.Round1PayloadSenders = snap.Round1PayloadSenders.Sorted()
+	snap.Round1ProofSenders = snap.Round1ProofSenders.Sorted()
+	snap.Round1VerifiedSenders = snap.Round1VerifiedSenders.Sorted()
+	snap.Round2Senders = snap.Round2Senders.Sorted()
+	snap.AlphaDeltaSenders = snap.AlphaDeltaSenders.Sorted()
+	snap.AlphaSigmaSenders = snap.AlphaSigmaSenders.Sorted()
+	snap.BetaDeltaSenders = snap.BetaDeltaSenders.Sorted()
+	snap.BetaSigmaSenders = snap.BetaSigmaSenders.Sorted()
+	snap.Round3DeltaSenders = snap.Round3DeltaSenders.Sorted()
+	snap.Round3VerifyShareSender = snap.Round3VerifyShareSender.Sorted()
 	return snap
 }
 
@@ -172,7 +172,7 @@ func snapshotCGGMPSignSession(s *SignSession) cggmpSignSnapshot {
 	}
 }
 
-func cggmpSnapshotMapKeys[V any](m map[tss.PartyID]V) []tss.PartyID {
+func cggmpSnapshotMapKeys[V any](m map[tss.PartyID]V) tss.PartySet {
 	if len(m) == 0 {
 		return nil
 	}

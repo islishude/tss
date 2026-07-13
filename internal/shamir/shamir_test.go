@@ -262,7 +262,7 @@ func TestFeldmanCommitmentsMatchEvaluatedShares(t *testing.T) {
 		commitments[i] = secp.ScalarBaseMult(coeff)
 	}
 
-	for _, id := range []tss.PartyID{1, 2, 3, 5} {
+	for _, id := range tss.NewPartySet(1, 2, 3, 5) {
 		t.Run("valid share", func(t *testing.T) {
 			t.Parallel()
 
