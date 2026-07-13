@@ -93,6 +93,9 @@ func (s *KeygenSession) preparePendingKeyMaterial(snap *frostKeygenRound1Snapsho
 	if err != nil {
 		return nil, err
 	}
+	if s.importPlan != nil && !group.PublicKey().Equal(s.importPlan.state.PublicKey) {
+		return nil, errors.New("trusted-dealer import produced the wrong group public key")
+	}
 	partyData, verificationShares, err := deriveFROSTVerificationShares(s.cfg.Parties, group)
 	if err != nil {
 		return nil, err

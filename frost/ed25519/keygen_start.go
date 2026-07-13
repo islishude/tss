@@ -20,7 +20,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	session, err := newFROSTKeygenSession(cfg, limits, planHash, guard, material)
+	session, err := newFROSTKeygenSession(cfg, limits, planHash, guard, material, nil)
 	if err != nil {
 		material.Destroy()
 		return nil, nil, err
@@ -61,6 +61,10 @@ func resolveFROSTKeygenStart(plan *KeygenPlan, local tss.LocalConfig, guard *tss
 }
 
 func generateFROSTKeygenLocalMaterial(cfg tss.ThresholdConfig) (*frostKeygenLocalMaterial, error) {
+	return generateFROSTKeygenLocalMaterialWithContribution(cfg, nil, nil)
+}
+
+func generateFROSTKeygenLocalMaterialWithContribution(cfg tss.ThresholdConfig, constant *fed.Scalar, chainCode []byte) (*frostKeygenLocalMaterial, error) {
 	material := new(frostKeygenLocalMaterial)
 	ok := false
 	defer func() {
@@ -68,7 +72,7 @@ func generateFROSTKeygenLocalMaterial(cfg tss.ThresholdConfig) (*frostKeygenLoca
 			material.Destroy()
 		}
 	}()
-	poly, err := randomScalarPolynomial(cfg.Reader(), cfg.Threshold, nil)
+	poly, err := randomScalarPolynomial(cfg.Reader(), cfg.Threshold, constant)
 	if err != nil {
 		return nil, err
 	}
@@ -82,9 +86,16 @@ func generateFROSTKeygenLocalMaterial(cfg tss.ThresholdConfig) (*frostKeygenLoca
 		return nil, err
 	}
 	material.commitments = &commitments
-	material.chainCode = make([]byte, 32)
-	if _, err := io.ReadFull(cfg.Reader(), material.chainCode); err != nil {
-		return nil, err
+	if chainCode == nil {
+		material.chainCode = make([]byte, 32)
+		if _, err := io.ReadFull(cfg.Reader(), material.chainCode); err != nil {
+			return nil, err
+		}
+	} else {
+		if len(chainCode) != 32 {
+			return nil, errors.New("trusted-dealer chain code contribution must be 32 bytes")
+		}
+		material.chainCode = bytes.Clone(chainCode)
 	}
 	material.chainCodeCommit = bip32util.ChainCodeCommitment(
 		frostChainCodeCommitLabel,
@@ -102,7 +113,7 @@ func generateFROSTKeygenLocalMaterial(cfg tss.ThresholdConfig) (*frostKeygenLoca
 	return material, nil
 }
 
-func newFROSTKeygenSession(cfg tss.ThresholdConfig, limits Limits, planHash []byte, guard *tss.EnvelopeGuard, local *frostKeygenLocalMaterial) (*KeygenSession, error) {
+func newFROSTKeygenSession(cfg tss.ThresholdConfig, limits Limits, planHash []byte, guard *tss.EnvelopeGuard, local *frostKeygenLocalMaterial, importPlan *TrustedDealerImportPlan) (*KeygenSession, error) {
 	if local == nil || local.commitments == nil || local.localShare == nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, cfg.Self, errMissingKeygenLocalMaterial)
 	}
@@ -114,6 +125,7 @@ func newFROSTKeygenSession(cfg tss.ThresholdConfig, limits Limits, planHash []by
 		cfg:                  cfg,
 		limits:               limits,
 		planHash:             bytes.Clone(planHash),
+		importPlan:           cloneFROSTTrustedDealerPlan(importPlan),
 		guard:                guard,
 		local:                local,
 		round1:               round1,

@@ -8,12 +8,18 @@ import (
 	"github.com/islishude/tss"
 )
 
-func TestFROSTKeyShareHasNoExportedFields(t *testing.T) {
+func TestFROSTLongLivedStateTypesHaveNoExportedFields(t *testing.T) {
 	t.Parallel()
-	typ := reflect.TypeFor[KeyShare]()
-	for field := range typ.Fields() {
-		if field.IsExported() {
-			t.Errorf("KeyShare has exported field %s", field.Name)
+	for _, typ := range []reflect.Type{
+		reflect.TypeFor[KeyShare](),
+		reflect.TypeFor[SecretKey](),
+		reflect.TypeFor[TrustedDealerImportPlan](),
+		reflect.TypeFor[TrustedDealerContribution](),
+	} {
+		for field := range typ.Fields() {
+			if field.IsExported() {
+				t.Errorf("%s has exported field %s", typ.Name(), field.Name)
+			}
 		}
 	}
 }

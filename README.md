@@ -9,9 +9,9 @@ Go threshold-signature building blocks.
 
 ## Status
 
-`frost/ed25519` implements a usable FROST flow: dealerless DKG, two-round signing, partial verification, Ed25519-compatible aggregation, resharing, and BIP32-Ed25519 HD derivation.
+`frost/ed25519` implements a usable FROST flow: dealerless DKG, trusted-dealer key import, explicit threshold reconstruction, two-round signing, partial verification, Ed25519-compatible aggregation, resharing, and BIP32-Ed25519 HD derivation.
 
-`cggmp21/secp256k1` implements dealerless DKG, offline presigning, single-round online signing, proactive refresh, resharing, BIP32 HD derivation, and blame attribution. Paillier proof layer uses CGGMP24 Πmod and Ring-Pedersen Πprm semantics.
+`cggmp21/secp256k1` implements dealerless DKG, trusted-dealer key import, explicit threshold reconstruction, offline presigning, single-round online signing, proactive refresh, resharing, BIP32 HD derivation, and blame attribution. Paillier proof layer uses CGGMP24 Πmod and Ring-Pedersen Πprm semantics.
 
 `DefaultLimits` always returns production fail-closed local policy. Tests that
 need relaxed bounds pass explicit `Limits` through plan options or `WithLimits`

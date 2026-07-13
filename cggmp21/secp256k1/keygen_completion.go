@@ -130,6 +130,9 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 	if err != nil {
 		return nil, err
 	}
+	if s.importPlan != nil && !bytes.Equal(publicKey, s.importPlan.state.PublicKey) {
+		return nil, errors.New("trusted-dealer import produced the wrong group public key")
+	}
 	verificationShares, err := deriveVerificationShareSet(snap.parties, groupCommitments)
 	if err != nil {
 		return nil, err

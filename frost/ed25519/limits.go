@@ -14,7 +14,9 @@ const (
 
 // StateLimits caps serialized FROST key material.
 type StateLimits struct {
-	MaxSerializedKeyShareBytes int
+	MaxSerializedKeyShareBytes                  int
+	MaxSerializedTrustedDealerPlanBytes         int
+	MaxSerializedTrustedDealerContributionBytes int
 }
 
 // PayloadLimits caps FROST payload sizes.
@@ -52,7 +54,9 @@ func DefaultLimits() Limits {
 			AllowOversizedSignerSet: false,
 		},
 		State: StateLimits{
-			MaxSerializedKeyShareBytes: tss.DefaultMaxSerializedKeyShareBytes,
+			MaxSerializedKeyShareBytes:                  tss.DefaultMaxSerializedKeyShareBytes,
+			MaxSerializedTrustedDealerPlanBytes:         tss.DefaultMaxSerializedTrustedDealerPlanBytes,
+			MaxSerializedTrustedDealerContributionBytes: tss.DefaultMaxSerializedTrustedDealerContributionBytes,
 		},
 		Payload: PayloadLimits{
 			MaxMessageBytes:           65536,

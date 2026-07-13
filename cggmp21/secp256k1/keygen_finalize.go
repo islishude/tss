@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -76,6 +77,10 @@ func (s *KeygenSession) buildFinalKeyShare(snap *keygenConfirmationSnapshot) (*p
 	chainCode, err := bip32util.AggregateChainCode(s.cfg.Parties, snap.chainCodes)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	if s.importPlan != nil && !bytes.Equal(chainCode, s.importPlan.state.ChainCode) {
+		clear(chainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, errors.New("trusted-dealer import chain code mismatch"))
 	}
 	finalShare := cloneKeyShareValue(s.pending)
 	finalShare.state.ChainCode = chainCode

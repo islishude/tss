@@ -43,7 +43,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	s, err := newKeygenSession(config, limits, securityParams, planHash, guard, localMaterial)
+	s, err := newKeygenSession(config, limits, securityParams, planHash, guard, localMaterial, nil)
 	if err != nil {
 		localMaterial.Destroy()
 		return nil, nil, err
@@ -103,13 +103,30 @@ func generateKeygenLocalMaterial(
 	securityParams SecurityParams,
 	planHash []byte,
 ) (*keygenLocalMaterial, error) {
-	chainCode := make([]byte, bip32util.ChainCodeSize)
-	defer clear(chainCode)
-	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
-		return nil, err
+	return generateKeygenLocalMaterialWithContribution(config, limits, securityParams, planHash, nil, nil, int(securityParams.MinPaillierBits))
+}
+
+func generateKeygenLocalMaterialWithContribution(
+	config tss.ThresholdConfig,
+	limits Limits,
+	securityParams SecurityParams,
+	planHash []byte,
+	constant *secp.Scalar,
+	chainContribution []byte,
+	paillierBits int,
+) (*keygenLocalMaterial, error) {
+	chainCode := bytes.Clone(chainContribution)
+	if chainCode == nil {
+		chainCode = make([]byte, bip32util.ChainCodeSize)
+		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
+			return nil, err
+		}
+	} else if len(chainCode) != bip32util.ChainCodeSize {
+		return nil, errors.New("trusted-dealer chain code contribution must be 32 bytes")
 	}
+	defer clear(chainCode)
 	chainCodeCommit := bip32util.ChainCodeCommitment(cggmpChainCodeCommitLabel, config.SessionID, config.Self, chainCode)
-	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), int(securityParams.MinPaillierBits))
+	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), paillierBits)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +161,7 @@ func generateKeygenLocalMaterial(
 	if err != nil {
 		return nil, err
 	}
-	poly, err := shamir.RandomPolynomial(config.Reader(), config.Threshold, nil)
+	poly, err := shamir.RandomPolynomial(config.Reader(), config.Threshold, constant)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +209,7 @@ func newKeygenSession(
 	planHash []byte,
 	guard *tss.EnvelopeGuard,
 	local *keygenLocalMaterial,
+	importPlan *TrustedDealerImportPlan,
 ) (*KeygenSession, error) {
 	round1 := newKeygenRound1Inbox(config.Parties)
 	if err := round1.recordLocal(config.Self, local); err != nil {
@@ -202,6 +220,7 @@ func newKeygenSession(
 		limits:               limits,
 		securityParams:       securityParams,
 		planHash:             bytes.Clone(planHash),
+		importPlan:           cloneCGGMPTrustedDealerPlan(importPlan),
 		local:                local,
 		round1:               round1,
 		confirmations:        newKeygenConfirmationInbox(config.Parties),
@@ -353,6 +372,19 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 			rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
 		)
+	}
+	if s.importPlan != nil {
+		expected, ok := s.importPlan.commitmentFor(env.From)
+		if !ok || len(p.Commitments) == 0 || !bytes.Equal(p.Commitments[0], expected.ConstantCommitment) || !bytes.Equal(p.ChainCodeCommit, expected.ChainCodeCommit) {
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenCommitment,
+				"keygen commitment does not match trusted-dealer import plan",
+				tss.NewPartySet(env.From),
+				errors.New("trusted-dealer import commitment mismatch"),
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			)
+		}
 	}
 	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
 	if err != nil {

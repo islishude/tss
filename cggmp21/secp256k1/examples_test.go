@@ -9,6 +9,36 @@ import (
 	cggmp "github.com/islishude/tss/cggmp21/secp256k1"
 )
 
+// ExampleNewTrustedDealerImport demonstrates creation of a public import plan
+// and one confidential contribution per participant. The contributions must be
+// provisioned through a caller-managed confidential channel.
+func ExampleNewTrustedDealerImport() {
+	encoded := make([]byte, 32)
+	encoded[31] = 7
+	secretKey, err := cggmp.ParseSecretKey(encoded)
+	if err != nil {
+		panic(err)
+	}
+	defer secretKey.Destroy()
+	var sessionID tss.SessionID
+	sessionID[31] = 2
+	plan, contributions, err := cggmp.NewTrustedDealerImport(secretKey, cggmp.TrustedDealerImportOption{
+		SessionID: sessionID,
+		Parties:   tss.NewPartySet(1, 2),
+		Threshold: 2,
+		ChainCode: bytes.Repeat([]byte{0x45}, 32),
+	}, nil)
+	if err != nil {
+		panic(err)
+	}
+	for _, contribution := range contributions {
+		defer contribution.Destroy()
+	}
+	snapshot, _ := plan.Snapshot()
+	fmt.Println(snapshot.Threshold, len(contributions))
+	// Output: 2 2
+}
+
 // ExampleVerifyDigest verifies a fixed public CGGMP21 protocol vector.
 func ExampleVerifyDigest() {
 	publicKey, err := hex.DecodeString("0232b6a8d851397f9564a05f7a1d2a873266471d3ee513b8fd977244ceef056a38")

@@ -41,6 +41,8 @@ var manifest = []target{
 			"wire/v1/frost/KeygenSharePayload.golden",
 			"wire/v1/frost/NonceCommitmentPayload.golden",
 			"wire/v1/frost/SignPartialPayload.golden",
+			"wire/v1/frost/TrustedDealerImportPlan.golden",
+			"wire/v1/frost/TrustedDealerContribution.golden",
 		},
 	},
 	{
@@ -81,6 +83,8 @@ var manifest = []target{
 			"wire/v1/cggmp21/SignAttemptRecord.golden",
 			"wire/v1/cggmp21/PresignRound3Payload.golden",
 			"wire/v1/cggmp21/ResharePlan.golden",
+			"wire/v1/cggmp21/TrustedDealerImportPlan.golden",
+			"wire/v1/cggmp21/TrustedDealerContribution.golden",
 		},
 	},
 	{

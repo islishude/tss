@@ -95,6 +95,30 @@ must keep old-only dealer sessions registered through the confirmation round;
 new-holder completion itself does not depend on every removed dealer observing
 that final round.
 
+## Trusted-Dealer Import and Secret Reconstruction
+
+`NewTrustedDealerImport` splits an existing group secret into non-zero additive
+contributions, one per participant. The public `TrustedDealerImportPlan` binds
+the target public key and chain code, the session, party set, threshold, each
+constant-term commitment, and each chain-code commitment. Contributions are
+secret-bearing canonical records and must be provisioned to exactly one party
+through a confidential caller-managed channel.
+
+Each party calls `StartTrustedDealerImport`. From round 1 onward this is the
+ordinary keygen state machine and the existing keygen payload shapes. Every
+degree-zero polynomial commitment must match the plan before state mutation;
+completion rechecks the target public key and XOR-aggregated chain code.
+`GenerateTrustedDealerKeyShares` runs those same sessions through an
+authenticated in-memory router for centralized provisioning and returns
+caller-owned `KeyShare` values that must be encrypted before distribution.
+
+`ReconstructSecretKey` accepts at least the threshold number of unique shares,
+requires every share to belong to the exact same lifecycle generation, and
+interpolates the secret at zero without consuming the inputs. The returned
+`SecretKey` exports a canonical 32-byte little-endian group scalar. It is not an
+RFC 8032 seed: `NewSecretKeyFromSeed` is one-way and reconstruction cannot
+recover the original seed.
+
 ## KeyShare API and Ownership
 
 `KeyShare` is an opaque handle. Public metadata cannot be changed through struct
@@ -450,7 +474,8 @@ crypto/ed25519.Verify(plan.VerificationKeyBytes(), message, sig) // true
 
 ### Differences from RFC 9591
 
-- Key generation is dealerless DKG rather than the RFC Appendix C trusted dealer.
+- Dealerless DKG remains the default; trusted-dealer import is an explicit
+  alternative whose plan and contributions are bound into the normal DKG.
 - Wire envelopes are this library's transport-neutral TLV messages, not an RFC wire format.
 - `Signature()` returns a plain `[]byte` rather than a structured `(R, z)` tuple — the caller can split on the 32-byte boundary if needed.
 

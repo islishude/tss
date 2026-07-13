@@ -12,7 +12,7 @@ import (
 
 func TestFast_LongLivedStateTypesHaveNoExportedFields(t *testing.T) {
 	t.Parallel()
-	for _, value := range []any{KeyShare{}, Presign{}, ResharePlan{}} {
+	for _, value := range []any{KeyShare{}, Presign{}, ResharePlan{}, SecretKey{}, TrustedDealerImportPlan{}, TrustedDealerContribution{}} {
 		typ := reflect.TypeOf(value)
 		for field := range typ.Fields() {
 			if field.IsExported() {

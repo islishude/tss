@@ -82,7 +82,29 @@ if !ok {
 }
 ```
 
-### 2. Persistence
+### 2. Trusted-Dealer Import and Export Ceremonies
+
+For interactive import, the control plane persists the canonical public
+`TrustedDealerImportPlan` and its digest, then sends each serialized
+`TrustedDealerContribution` only to its bound party through an authenticated
+KMS-backed secret channel. The party reconstructs the plan, accepts its digest
+in the run store, calls `StartTrustedDealerImport`, and destroys the
+contribution after startup succeeds. Protocol envelopes then follow the normal
+keygen routing and persistence boundary.
+
+If a 32-byte chain code is supplied, import preserves the existing HD identity;
+otherwise the dealer creates a new random chain code. Centralized
+`GenerateTrustedDealerKeyShares` returns plaintext in-memory `KeyShare` objects,
+not encrypted bundles. Marshal and encrypt each result for its destination
+before leaving the ceremony process.
+
+Secret reconstruction requires an explicit export authorization ceremony.
+Load and fully validate at least the threshold number of shares in an isolated
+process, call `ReconstructSecretKey`, export only to the intended KMS/HSM or
+destination, then clear the returned bytes and destroy the reconstructed key.
+The library does not retire the source shares automatically.
+
+### 3. Persistence
 
 Persist accepted protocol runs and their plan hashes separately from key shares
 and presigns. This allows the application to reject duplicate session IDs,
@@ -107,7 +129,7 @@ encrypted, _ := tss.EncryptPresignWithPassphrase(raw, passphrase, "presign-1", n
 
 The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` helpers use ChaCha20-Poly1305 with Argon2id key derivation from a passphrase. These are **reference/demo implementations**. Production deployments should prefer a KMS or HSM.
 
-### 3. Loading
+### 4. Loading
 
 On process restart, load and decrypt the key share:
 
@@ -147,7 +169,7 @@ request or `ResumeSign`. Implementations should run
 `secp256k1test.RunSignAttemptStoreSuite` and add backend-specific crash,
 encryption, and transaction tests.
 
-### 4. Signing
+### 5. Signing
 
 **FROST Ed25519:**
 
@@ -289,7 +311,7 @@ kind/binding data through the passphrase-encryption AAD. Production systems
 should normally implement the interface with a transactional database and
 KMS/HSM encryption.
 
-### 5. Destruction
+### 6. Destruction
 
 Call `Destroy()` on sessions and key shares when they are no longer needed. Go zeroisation is best-effort; use short-lived processes for stronger guarantees.
 

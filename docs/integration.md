@@ -248,6 +248,25 @@ and `ResumeSign`.
 
 ## Per-Flow Recipes
 
+### TrustedDealerImportRun
+
+Public run metadata consists of the canonical `TrustedDealerImportPlan`, its
+digest, and the normal keygen session ID. The plan binds the target public key,
+chain code, party set, threshold, and per-party contribution commitments.
+CGGMP21 plans additionally bind Paillier size and security parameters.
+
+The dealer sends each secret `TrustedDealerContribution` out of band to only
+its named party. Each participant accepts the plan digest in the run store and
+calls `StartTrustedDealerImport`; the returned `KeygenSession` is registered and
+routed exactly like ordinary keygen. There is no dealer envelope sender or
+setup round. A contribution restored in another process does not bypass the
+control plane's single-run/session acceptance rule.
+
+Centralized provisioning may call `GenerateTrustedDealerKeyShares`, which runs
+the same sessions in one process and returns both the public plan and the
+completed share map. This mode is a total-trust boundary and is not a transport
+simulation for production distributed operation.
+
 ### FROST Ed25519 Keygen
 
 Public metadata includes a fresh keygen session ID, parties, threshold, and any

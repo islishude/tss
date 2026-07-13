@@ -117,6 +117,32 @@ monitoring.
 
 ## Secret-Material Lifecycle
 
+### Trusted import and explicit export
+
+Trusted-dealer import and secret reconstruction deliberately cross the normal
+threshold boundary. Applications must authorize them as separate key
+ceremonies; possession of the Go API is not an authorization policy.
+
+`TrustedDealerContribution` records contain a secret scalar contribution and
+must be encrypted in transit and at rest, never logged, and destroyed after a
+successful party start. They are bound to one session, party, and plan. The
+application run store must still reject duplicate starts across restored copies
+or processes. The public plan commits to every contribution's public point and
+chain-code commitment, so a substituted local contribution or round-1 constant
+term fails closed.
+
+`SecretKey.MarshalBinary` is an explicit exfiltration boundary. It returns a
+caller-owned fixed 32-byte secret that the caller must clear. Reconstruction
+does not destroy or revoke the original shares. Once the scalar is exported,
+threshold confidentiality no longer applies until every exported copy is
+destroyed. FROST exports the canonical group scalar, not the original Ed25519
+seed.
+
+Centralized `GenerateTrustedDealerKeyShares` places every generated share in
+one process. For CGGMP21 this includes every Paillier private key. Use the
+interactive contribution flow when the dealer should not retain or generate
+participant auxiliary private material.
+
 Secret-bearing records reject default JSON marshaling. Persist `KeyShare` and
 CGGMP21 `Presign` values only through their explicit binary encoders, then store
 the resulting bytes under caller-managed encryption.

@@ -1,12 +1,47 @@
 package ed25519_test
 
 import (
+	"bytes"
 	stded25519 "crypto/ed25519"
 	"fmt"
 
 	"github.com/islishude/tss"
 	frost "github.com/islishude/tss/frost/ed25519"
 )
+
+// ExampleGenerateTrustedDealerKeyShares demonstrates centralized share
+// generation followed by explicit threshold reconstruction. Production callers
+// must encrypt every returned key share before distribution or persistence.
+func ExampleGenerateTrustedDealerKeyShares() {
+	seed := bytes.Repeat([]byte{0x2a}, 32)
+	secretKey, err := frost.NewSecretKeyFromSeed(seed)
+	if err != nil {
+		panic(err)
+	}
+	defer secretKey.Destroy()
+	var sessionID tss.SessionID
+	sessionID[31] = 1
+	_, shares, err := frost.GenerateTrustedDealerKeyShares(secretKey, frost.TrustedDealerImportOption{
+		SessionID: sessionID,
+		Parties:   tss.NewPartySet(1, 2),
+		Threshold: 2,
+		ChainCode: bytes.Repeat([]byte{0x44}, 32),
+	}, nil)
+	if err != nil {
+		panic(err)
+	}
+	defer shares[1].Destroy()
+	defer shares[2].Destroy()
+	reconstructed, err := frost.ReconstructSecretKey(shares[1], shares[2])
+	if err != nil {
+		panic(err)
+	}
+	defer reconstructed.Destroy()
+	want, _ := secretKey.PublicKey()
+	got, _ := reconstructed.PublicKey()
+	fmt.Println(got.Equal(want))
+	// Output: true
+}
 
 // ExampleSign demonstrates production-shaped FROST key generation and signing.
 func ExampleSign() {

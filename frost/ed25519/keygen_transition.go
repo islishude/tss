@@ -142,6 +142,19 @@ func (s *KeygenSession) buildAcceptKeygenCommitmentsTx(base tss.Envelope) (*acce
 	if err := payload.Commitments.ValidateThreshold(s.cfg.Threshold); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
+	if s.importPlan != nil {
+		expected, ok := s.importPlan.commitmentFor(base.From)
+		if !ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("missing trusted-dealer commitment constraint"))
+		}
+		constant, pointErr := payload.Commitments.PointAt(0)
+		if pointErr != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, pointErr)
+		}
+		if !pointEqual(constant, expected.ConstantCommitment.Point()) || !bytes.Equal(payload.ChainCodeCommit, expected.ChainCodeCommit) {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("keygen commitments do not match trusted-dealer import plan"))
+		}
+	}
 	slot, err := s.round1.slot(base.From)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)

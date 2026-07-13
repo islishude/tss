@@ -34,10 +34,12 @@ const (
 
 // StateLimits caps serialized CGGMP21 key material.
 type StateLimits struct {
-	MaxSerializedKeyShareBytes    int
-	MaxSerializedPresignBytes     int
-	MaxSerializedResharePlanBytes int
-	MaxSerializedSignAttemptBytes int
+	MaxSerializedKeyShareBytes                  int
+	MaxSerializedPresignBytes                   int
+	MaxSerializedResharePlanBytes               int
+	MaxSerializedSignAttemptBytes               int
+	MaxSerializedTrustedDealerPlanBytes         int
+	MaxSerializedTrustedDealerContributionBytes int
 }
 
 // PayloadLimits caps CGGMP21 payload sizes.
@@ -103,10 +105,12 @@ func DefaultLimits() Limits {
 			AllowOversizedSignerSet: false,
 		},
 		State: StateLimits{
-			MaxSerializedKeyShareBytes:    tss.DefaultMaxSerializedKeyShareBytes,
-			MaxSerializedPresignBytes:     maxSerializedPresignWithIdentificationBytes,
-			MaxSerializedResharePlanBytes: tss.DefaultMaxSerializedResharePlanBytes,
-			MaxSerializedSignAttemptBytes: tss.DefaultMaxEnvelopeBytes + 4096,
+			MaxSerializedKeyShareBytes:                  tss.DefaultMaxSerializedKeyShareBytes,
+			MaxSerializedPresignBytes:                   maxSerializedPresignWithIdentificationBytes,
+			MaxSerializedResharePlanBytes:               tss.DefaultMaxSerializedResharePlanBytes,
+			MaxSerializedSignAttemptBytes:               tss.DefaultMaxEnvelopeBytes + 4096,
+			MaxSerializedTrustedDealerPlanBytes:         tss.DefaultMaxSerializedTrustedDealerPlanBytes,
+			MaxSerializedTrustedDealerContributionBytes: tss.DefaultMaxSerializedTrustedDealerContributionBytes,
 		},
 		Payload: PayloadLimits{
 			MaxMessageBytes: tss.DefaultMaxEnvelopePayloadBytes,

@@ -149,6 +149,30 @@ New receiver parties persist the new `KeyShare` returned by
 control plane retires the old key generation only after the required
 new-generation commit condition is satisfied.
 
+## Trusted-Dealer Import and Secret Reconstruction
+
+`NewTrustedDealerImport` splits an existing secp256k1 private scalar into
+non-zero additive contributions. Its public plan binds the target public key
+and chain code, session, parties, threshold, ordered contribution commitments,
+Paillier size, and cryptographic security profile. Secret contributions are
+canonical records for confidential out-of-band provisioning; the external
+dealer is not a new protocol sender or round.
+
+`StartTrustedDealerImport` uses the contribution only as the local Shamir
+polynomial constant and chain-code share. Every participant still generates its
+own Paillier private key, Ring-Pedersen parameters, and proofs locally. Existing
+keygen payloads and confirmation rounds are unchanged. Incoming degree-zero and
+chain-code commitments are checked against the plan before acceptance, and
+completion rechecks the target public key and chain code.
+
+`GenerateTrustedDealerKeyShares` is the centralized alternative. It executes
+the same party state machines through an authenticated in-memory router and
+therefore temporarily holds every TSS share and Paillier private key in one
+process. `ReconstructSecretKey` validates at least `threshold` unique shares
+from one exact lifecycle generation, interpolates the private key, and leaves
+the original shares usable. `ReconstructSecretKeyWithLimits` is the equivalent
+entry point for explicitly selected cryptographic profiles.
+
 ## KeyShare API and Ownership
 
 `KeyShare` is an opaque handle. All protocol state, including public metadata,

@@ -33,6 +33,7 @@ type KeygenSession struct {
 	limits               Limits                              // Local fail-closed resource policy.
 	securityParams       SecurityParams                      // Cryptographic profile for Paillier and proof material.
 	planHash             []byte                              // Digest every keygen payload must echo.
+	importPlan           *TrustedDealerImportPlan            // Optional public constraints for trusted-dealer import.
 	local                *keygenLocalMaterial                // Locally generated material before pending-share commit.
 	round1               *keygenRound1Inbox                  // Accepted round-1 material keyed by dealer.
 	confirmations        *keygenConfirmationInbox            // Accepted confirmation material keyed by sender.

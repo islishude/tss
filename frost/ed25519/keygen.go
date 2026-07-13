@@ -17,12 +17,14 @@ const (
 	keygenAborted
 )
 
-// KeygenSession tracks dealerless FROST DKG state for one local party.
+// KeygenSession tracks dealerless or trusted-dealer-seeded FROST keygen state
+// for one local party.
 type KeygenSession struct {
 	mu                   sync.Mutex
 	cfg                  tss.ThresholdConfig
 	limits               Limits
 	planHash             []byte
+	importPlan           *TrustedDealerImportPlan
 	guard                *tss.EnvelopeGuard
 	local                *frostKeygenLocalMaterial
 	round1               *frostKeygenRound1Inbox

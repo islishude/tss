@@ -363,6 +363,19 @@ and vector regeneration. RFC-defined hashes and plain content hashes such as
 
 ## Current Records
 
+### Trusted-dealer import records
+
+Both protocol packages define independent v1 records for
+`TrustedDealerImportPlan` and `TrustedDealerContribution`. Plans contain only
+public intent and ordered contribution commitments. Contributions contain a
+fixed 32-byte secret scalar, a 32-byte chain-code contribution, the bound party
+and session, and the plan hash. JSON encoding is forbidden for contributions.
+
+Plan and contribution decoders enforce total-size limits, exact field sets,
+canonical tag order, canonical sorted parties, record ordering, point/scalar
+validity, and no trailing bytes. Their addition does not change existing
+keygen payload or `KeyShare` wire layouts.
+
 - `tss.BlameEvidence` (direct struct encoding; `PublicInputs` as `[]EvidenceField` record list)
 - `tss.BroadcastAck`
 - `tss.BroadcastCertificate` (`Acks` as a canonical `BroadcastAck` record list)

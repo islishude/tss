@@ -56,6 +56,10 @@ func (s *KeygenSession) buildFinalKeyShare(snap *frostKeygenConfirmationSnapshot
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
+	if s.importPlan != nil && !bytes.Equal(chainCode, s.importPlan.state.ChainCode) {
+		clear(chainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, errors.New("trusted-dealer import chain code mismatch"))
+	}
 	partyData := make(map[tss.PartyID]keySharePartyData, len(s.pending.partyData))
 	for id, data := range s.pending.partyData {
 		partyData[id] = data.Clone()

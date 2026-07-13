@@ -51,6 +51,10 @@ const (
 	DefaultMaxSerializedPresignBytes = 2 << 20
 	// DefaultMaxSerializedResharePlanBytes caps serialized public reshare plans (1 MiB).
 	DefaultMaxSerializedResharePlanBytes = 1 << 20
+	// DefaultMaxSerializedTrustedDealerPlanBytes caps serialized trusted-dealer import plans (1 MiB).
+	DefaultMaxSerializedTrustedDealerPlanBytes = 1 << 20
+	// DefaultMaxSerializedTrustedDealerContributionBytes caps one serialized secret contribution (64 KiB).
+	DefaultMaxSerializedTrustedDealerContributionBytes = 64 << 10
 )
 
 const (

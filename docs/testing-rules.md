@@ -422,6 +422,28 @@ Do not claim memory-forensic zeroization. Go may copy or retain stack, heap,
 `big.Int`, and slice storage. Tests should verify that destroyed objects cannot be
 used through the API, not that no secret bytes remain anywhere in process memory.
 
+### 10. Trusted Import and Secret Reconstruction
+
+Trusted-dealer import tests must bind the target public key, chain code,
+session, parties, threshold, ordered constant-term commitments, and security
+profile. Wrong-party, wrong-session, wrong-plan, substituted contribution,
+changed degree-zero commitment, changed chain-code commitment, replayed local
+claim, and malformed canonical records must fail before unsafe state mutation or
+outbound effects.
+
+CGGMP21 interactive import must prove that each participant generates and
+retains only its own Paillier private material. Centralized import must execute
+the same protocol state machines and destroy every partial share, contribution,
+session, and ephemeral transport key on failure.
+
+Reconstruction requires at least the threshold number of unique shares from one
+exact lifecycle generation. Tests cover insufficient and duplicate shares,
+mixed lifecycle sessions, equal-public-key but different generation metadata,
+destroyed or malformed shares, reconstruction from threshold and larger
+subsets, final public-key verification, redaction, and non-consumption of input
+shares. Failure messages and fuzz artifacts must never contain reconstructed
+scalars or contribution bytes.
+
 ## Fuzzing
 
 Prioritize decoders and reject paths:
