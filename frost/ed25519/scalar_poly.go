@@ -16,6 +16,12 @@ func randomScalarPolynomial(reader io.Reader, threshold int, constant *fed.Scala
 		return nil, errors.New("threshold must be positive")
 	}
 	coeffs := make([]*fed.Scalar, threshold)
+	committed := false
+	defer func() {
+		if !committed {
+			clearScalars(coeffs)
+		}
+	}()
 	if constant != nil {
 		coeffs[0] = fed.NewScalar().Set(constant)
 	} else {
@@ -32,6 +38,7 @@ func randomScalarPolynomial(reader io.Reader, threshold int, constant *fed.Scala
 		}
 		coeffs[i] = x
 	}
+	committed = true
 	return coeffs, nil
 }
 

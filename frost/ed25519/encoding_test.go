@@ -134,6 +134,67 @@ func TestFROSTKeyShareFailedDecodeDoesNotMutateReceiver(t *testing.T) {
 	}
 }
 
+func TestFROSTKeyShareSuccessfulDecodeDestroysSupersededReceiverState(t *testing.T) {
+	shares := frostKeygenInner(t, 2, 3)
+	for _, share := range shares {
+		defer share.Destroy()
+	}
+	raw, err := shares[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(raw)
+
+	tests := []struct {
+		name   string
+		decode func(*KeyShare, []byte) error
+	}{
+		{
+			name: "UnmarshalBinary",
+			decode: func(receiver *KeyShare, in []byte) error {
+				return receiver.UnmarshalBinary(in)
+			},
+		},
+		{
+			name: "UnmarshalWireMessage",
+			decode: func(receiver *KeyShare, in []byte) error {
+				limits := testLimits()
+				return receiver.UnmarshalWireMessage(
+					in,
+					wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
+					wire.WithFieldLimits(limits.fieldLimits()),
+				)
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			receiver := cloneKeyShareValue(shares[2])
+			defer receiver.Destroy()
+			oldAlias := *receiver
+			oldSecret := receiver.state.Secret
+			oldChainCode := receiver.state.ChainCode
+
+			if err := tc.decode(receiver, raw); err != nil {
+				t.Fatal(err)
+			}
+			if !testutil.IsZeroBytes(oldSecret.FixedBytes()) {
+				t.Fatal("successful decode did not clear the superseded receiver secret")
+			}
+			testutil.AssertBytesCleared(t, oldChainCode)
+			if err := oldAlias.ValidateConsistency(); err == nil {
+				t.Fatal("successful decode left a shallow alias to the superseded generation usable")
+			}
+			if receiver.PartyID() != shares[1].PartyID() {
+				t.Fatal("successful decode did not install the replacement key share")
+			}
+			if err := receiver.ValidateConsistency(); err != nil {
+				t.Fatalf("replacement key share is invalid: %v", err)
+			}
+		})
+	}
+}
+
 func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) {
 	t.Parallel()
 

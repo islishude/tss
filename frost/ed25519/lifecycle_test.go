@@ -89,6 +89,44 @@ func TestFROSTKeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestFROSTSessionCompletedStatusDoesNotCloneOutputs(t *testing.T) {
+	shares := frostKeygen(t, 1, 1)
+	share := shares[1]
+	defer share.Destroy()
+
+	keygen := &KeygenSession{completed: true, keyShare: share}
+	reshare := &ReshareSession{completed: true, newShare: share}
+	sign := &SignSession{completed: true, signature: bytes.Repeat([]byte{0x42}, 64)}
+
+	tests := []struct {
+		name      string
+		completed func() bool
+	}{
+		{name: "keygen", completed: keygen.Completed},
+		{name: "reshare holder", completed: reshare.Completed},
+		{name: "sign", completed: sign.Completed},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var completed bool
+			allocations := testing.AllocsPerRun(100, func() {
+				completed = tc.completed()
+			})
+			if !completed {
+				t.Fatal("completed session reported incomplete")
+			}
+			if allocations != 0 {
+				t.Fatalf("Completed allocated %.2f objects per status query", allocations)
+			}
+		})
+	}
+
+	dealerOnly := &ReshareSession{completed: true}
+	if !dealerOnly.Completed() {
+		t.Fatal("completed dealer-only reshare reported incomplete without a new share")
+	}
+}
+
 func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)

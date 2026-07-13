@@ -91,7 +91,12 @@ func (s *KeygenSession) preparePendingKeyMaterial(snap *frostKeygenRound1Snapsho
 	}()
 	group, err := aggregateFROSTKeygenCommitments(s.cfg.Parties, s.cfg.Threshold, snap.commitments)
 	if err != nil {
-		return nil, err
+		return nil, tss.NewProtocolError(
+			tss.ErrCodeVerification,
+			keygenStartRound,
+			tss.BroadcastPartyId,
+			fmt.Errorf("invalid aggregate keygen commitments: %w", err),
+		)
 	}
 	if s.importPlan != nil && !group.PublicKey().Equal(s.importPlan.state.PublicKey) {
 		return nil, errors.New("trusted-dealer import produced the wrong group public key")
@@ -193,7 +198,7 @@ func aggregateFROSTKeygenSecret(parties tss.PartySet, shares map[tss.PartyID]*se
 		total.Add(total, share)
 		share.Set(fed.NewScalar())
 	}
-	out, err := newEdSecretScalar(total.Bytes())
+	out, err := newEdSecretScalarFromFed(total)
 	total.Set(fed.NewScalar())
 	return out, err
 }

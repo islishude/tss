@@ -179,6 +179,15 @@ until its round-2 partial payload is constructed; successful partial generation
 and attributable signing failures clear those bytes immediately. `Destroy`
 should still be called after completion or abort to clear message copies,
 partials, additive-shift scalars, and any remaining session-owned material.
+Round-1 nonce commitment points must use canonical, non-identity prime-order
+encodings. Failure to decode an authenticated signer's commitment is an
+attributable terminal error, not a recoverable malformed-message rejection.
+
+FROST `KeyShare.Derive` validates the complete lifecycle confirmation and
+secret/public consistency before using derivation metadata. Destroyed shares and
+shares whose public metadata no longer matches their lifecycle state cannot
+derive child keys; public-only derivation requires a separately validated
+metadata snapshot.
 
 FROST resharing share envelopes carry confidential scalar shares.
 Transports must authenticate the sender and encrypt these point-to-point

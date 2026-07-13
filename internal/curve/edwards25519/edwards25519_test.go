@@ -148,3 +148,17 @@ func TestPointFromBytesRejectsTorsionComponent(t *testing.T) {
 		t.Fatal("point with torsion component should be rejected even when identity is allowed")
 	}
 }
+
+func TestPointFromBytesAllowIdentityRejectsNonCanonicalIdentity(t *testing.T) {
+	t.Parallel()
+	canonical := fed.NewIdentityPoint().Bytes()
+	if _, err := PointFromBytesAllowIdentity(canonical); err != nil {
+		t.Fatalf("canonical identity rejected: %v", err)
+	}
+
+	nonCanonical := append([]byte(nil), canonical...)
+	nonCanonical[len(nonCanonical)-1] |= 0x80
+	if _, err := PointFromBytesAllowIdentity(nonCanonical); err == nil {
+		t.Fatal("non-canonical identity encoding was accepted")
+	}
+}

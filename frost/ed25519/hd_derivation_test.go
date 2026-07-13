@@ -45,3 +45,25 @@ func TestDeriveNonHardenedBIP32HardenedPathRejected(t *testing.T) {
 		t.Fatalf("expected hardened path rejection, got %v", err)
 	}
 }
+
+func TestKeyShareDeriveRejectsDestroyedOrInconsistentShare(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygenHD(t, 1, 1)
+
+	t.Run("destroyed", func(t *testing.T) {
+		share := cloneKeyShareValue(shares[1])
+		share.Destroy()
+		if _, err := share.Derive(tss.DerivationPath{0}); err == nil {
+			t.Fatal("destroyed key share derived a child key")
+		}
+	})
+
+	t.Run("inconsistent chain code", func(t *testing.T) {
+		share := cloneKeyShareValue(shares[1])
+		defer share.Destroy()
+		share.state.ChainCode[0] ^= 0xff
+		if _, err := share.Derive(tss.DerivationPath{0}); err == nil {
+			t.Fatal("inconsistent key share derived a child key")
+		}
+	})
+}

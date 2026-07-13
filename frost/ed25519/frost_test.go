@@ -583,7 +583,12 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		env := out2[0]
 		env.Payload = []byte("malformed")
 		_, err = sign.Handle(testutil.DeliverEnvelope(env))
-		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
+		protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+		if protocolErr.Blame == nil || !sign.aborted {
+			t.Fatal("malformed nonce commitment did not cause an attributable terminal abort")
+		}
+		_, err = sign.Handle(testutil.DeliverEnvelope(out2[0]))
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 	})
 
 	t.Run("attributable abort is terminal", func(t *testing.T) {

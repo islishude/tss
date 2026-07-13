@@ -6,6 +6,8 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -168,6 +170,64 @@ func TestFROSTReshareShareApplyRollsBackOnCompletionError(t *testing.T) {
 	tx.cleanupOnReject()
 	if !testutil.IsZeroBytes(staged.FixedBytes()) {
 		t.Fatal("failed reshare transition did not destroy the staged share")
+	}
+}
+
+func TestFROSTReshareMultipleInvalidDealerSharesBlameCanonicalFirst(t *testing.T) {
+	t.Parallel()
+
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitments, err := newReshareCommitmentsFromPoints(
+		[]*fed.Point{fed.NewGeneratorPoint()},
+		1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badScalar := edcurve.ScalarFromUint64(2)
+	defer badScalar.Set(fed.NewScalar())
+	badShare1, err := newEdSecretScalarFromFed(badScalar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badShare1.Destroy()
+	badShare2, err := newEdSecretScalarFromFed(badScalar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer badShare2.Destroy()
+
+	parties := tss.NewPartySet(1, 2)
+	session := &ReshareSession{
+		oldParties: parties,
+		selfID:     3,
+		cfg: tss.ThresholdConfig{
+			Threshold: 1,
+			Parties:   parties,
+			Self:      3,
+			SessionID: sessionID,
+		},
+		// Insert both maps in reverse dealer order. Verification must follow
+		// oldParties, never either map's iteration order.
+		commits: map[tss.PartyID]reshareCommitments{
+			2: commitments.Clone(),
+			1: commitments.Clone(),
+		},
+		shares: map[tss.PartyID]*secret.Scalar{
+			2: badShare2,
+			1: badShare1,
+		},
+	}
+
+	protocolErr := assertFROSTProtocolCode(t, session.verifyReshareDealerShares(), tss.ErrCodeVerification)
+	if protocolErr.Party != 1 {
+		t.Fatalf("blamed dealer %d, want canonical first invalid dealer 1", protocolErr.Party)
+	}
+	if protocolErr.Blame == nil || len(protocolErr.Blame.Parties) != 1 || protocolErr.Blame.Parties[0] != 1 {
+		t.Fatalf("blame parties = %v, want [1]", protocolErr.Blame)
 	}
 }
 
@@ -381,7 +441,7 @@ func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 			}
 		}
 	}
-	if !dealerOnly.completed || dealerOnly.newShare != nil {
+	if !dealerOnly.Completed() || dealerOnly.newShare != nil {
 		t.Fatal("dealer-only session did not complete after all target confirmations")
 	}
 	if _, ok := dealerOnly.KeyShare(); ok {

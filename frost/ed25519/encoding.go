@@ -126,6 +126,7 @@ func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption)
 		decoded.Destroy()
 		return err
 	}
+	k.Destroy()
 	k.state = &state
 	return nil
 }
