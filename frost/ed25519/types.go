@@ -97,7 +97,7 @@ type KeyShare struct {
 }
 
 type keySharePartyData struct {
-	VerificationShare  verificationSharePoint `wire:"1,custom,len=32,max_bytes=point"`
+	VerificationShare  VerificationSharePoint `wire:"1,custom,len=32,max_bytes=point"`
 	KeygenConfirmation *KeygenConfirmation    `wire:"2,record,optional"`
 }
 
@@ -113,7 +113,7 @@ type keyShareState struct {
 	Party                tss.PartyID                       `wire:"1,u32"`                            // Local owner of the secret signing share.
 	Threshold            int                               `wire:"2,u32"`                            // Number of signers required for FROST signing.
 	Parties              tss.PartySet                      `wire:"3,u32list,max_items=parties"`      // Canonical full participant set for the group key.
-	PublicKey            publicKeyPoint                    `wire:"4,custom,len=32,max_bytes=point"`  // Parent group public key before request-time derivation.
+	PublicKey            PublicKeyPoint                    `wire:"4,custom,len=32,max_bytes=point"`  // Parent group public key before request-time derivation.
 	ChainCode            []byte                            `wire:"5,bytes,len=32"`                   // HD chain code paired with PublicKey for non-hardened derivation.
 	Secret               *secret.Scalar                    `wire:"6,custom,len=32,max_bytes=scalar"` // Local Ed25519 signing share; never exposed through accessors.
 	GroupCommitments     groupCommitments                  `wire:"7,custom,max_items=threshold"`     // Public polynomial commitments from keygen/reshare.

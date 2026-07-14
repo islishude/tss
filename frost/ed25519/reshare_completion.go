@@ -43,7 +43,7 @@ type reshareConfirmationBinding struct {
 	sessionID       tss.SessionID
 	threshold       int
 	parties         tss.PartySet
-	publicKey       publicKeyPoint
+	publicKey       PublicKeyPoint
 	transcriptHash  []byte
 	commitmentsHash []byte
 	chainCode       []byte

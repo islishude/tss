@@ -429,18 +429,18 @@ func (c groupCommitments) PointAtAllowIdentity(i int) (*fed.Point, error) {
 }
 
 // PublicKey returns the constant-term group public key.
-func (c groupCommitments) PublicKey() publicKeyPoint {
+func (c groupCommitments) PublicKey() PublicKeyPoint {
 	if len(c.points) == 0 {
-		return publicKeyPoint{}
+		return PublicKeyPoint{}
 	}
-	return publicKeyPoint{p: clonePoint(c.points[0])}
+	return PublicKeyPoint{p: clonePoint(c.points[0])}
 }
 
 // Eval evaluates the group commitment polynomial for a participant.
-func (c groupCommitments) Eval(id tss.PartyID) (verificationSharePoint, error) {
+func (c groupCommitments) Eval(id tss.PartyID) (VerificationSharePoint, error) {
 	point, err := evalCommitmentPoints(c.points, id)
 	if err != nil {
-		return verificationSharePoint{}, err
+		return VerificationSharePoint{}, err
 	}
 	return newVerificationSharePointFromPoint(point)
 }

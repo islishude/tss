@@ -152,7 +152,7 @@ type refreshPlanState struct {
 	sessionID               tss.SessionID  // Refresh protocol session; every refresh envelope is scoped to it.
 	threshold               int            // Existing signing threshold preserved by same-party refresh.
 	parties                 tss.PartySet   // Canonical participant set preserved by same-party refresh.
-	publicKey               publicKeyPoint // Parent group public key that must remain unchanged after refresh.
+	publicKey               PublicKeyPoint // Parent group public key that must remain unchanged after refresh.
 	chainCode               []byte         // HD chain code that must remain unchanged after refresh.
 	oldKeygenSessionID      tss.SessionID  // Lifecycle session that produced the source share generation.
 	oldKeygenTranscriptHash []byte         // Transcript hash that identifies the source share generation.
@@ -303,7 +303,7 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 
 type resharePlanState struct {
 	sessionID               tss.SessionID  // Reshare protocol session; all reshare envelopes are scoped to it.
-	oldPublicKey            publicKeyPoint // Existing parent group public key that resharing must preserve.
+	oldPublicKey            PublicKeyPoint // Existing parent group public key that resharing must preserve.
 	oldChainCode            []byte         // Existing HD chain code preserved across reshare.
 	oldParties              tss.PartySet   // Canonical old dealer set.
 	newParties              tss.PartySet   // Canonical target key-holder set.
@@ -559,7 +559,7 @@ type signPlanState struct {
 	sessionID   tss.SessionID         // Signing session; commitment and partial envelopes are scoped to it.
 	threshold   int                   // Signing threshold inherited from the key share.
 	parties     tss.PartySet          // Canonical full key-share participant set.
-	publicKey   publicKeyPoint        // Parent group public key before request-time HD derivation.
+	publicKey   PublicKeyPoint        // Parent group public key before request-time HD derivation.
 	chainCode   []byte                // HD chain code paired with publicKey for path derivation.
 	keygenHash  []byte                // Transcript hash of the keygen/reshare that produced publicKey.
 	signers     tss.PartySet          // Canonical signer subset participating in this signature.

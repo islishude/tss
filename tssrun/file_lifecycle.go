@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 
@@ -231,8 +232,7 @@ func (s *FileLifecycleStore) CommitSignAttempt(ctx context.Context, binding Gene
 	if err == nil {
 		return commit, nil
 	}
-	var persistErr *fileLifecyclePersistError
-	if !errors.As(err, &persistErr) {
+	if _, ok := errors.AsType[*fileLifecyclePersistError](err); !ok {
 		return AttemptCommit{}, err
 	}
 	return AttemptCommit{}, &AttemptOutcomeUnknownError{
@@ -431,8 +431,8 @@ func (s *FileLifecycleStore) acquireLifecycleLocks(ctx context.Context, keyIDs [
 	sort.Strings(lineages)
 	releases := make([]func(), 0, len(lineages)+1)
 	releaseAll := func() {
-		for i := len(releases) - 1; i >= 0; i-- {
-			releases[i]()
+		for _, release := range slices.Backward(releases) {
+			release()
 		}
 	}
 	for _, lineage := range lineages {

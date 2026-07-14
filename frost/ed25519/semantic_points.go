@@ -27,24 +27,22 @@ type PublicKeyPoint struct {
 	p *fed.Point
 }
 
-type publicKeyPoint = PublicKeyPoint
-
 // NewPublicKeyPoint parses a canonical non-identity Ed25519 public key.
 func NewPublicKeyPoint(in []byte) (PublicKeyPoint, error) {
 	return newPublicKeyPointFromBytes(in)
 }
 
-func newPublicKeyPointFromBytes(in []byte) (publicKeyPoint, error) {
+func newPublicKeyPointFromBytes(in []byte) (PublicKeyPoint, error) {
 	p, err := edcurve.PointFromBytes(in)
 	if err != nil {
-		return publicKeyPoint{}, err
+		return PublicKeyPoint{}, err
 	}
-	return publicKeyPoint{p: clonePoint(p)}, nil
+	return PublicKeyPoint{p: clonePoint(p)}, nil
 }
 
-func newPublicKeyPointFromPoint(p *fed.Point) (publicKeyPoint, error) {
+func newPublicKeyPointFromPoint(p *fed.Point) (PublicKeyPoint, error) {
 	if p == nil {
-		return publicKeyPoint{}, errors.New("nil public key point")
+		return PublicKeyPoint{}, errors.New("nil public key point")
 	}
 	return newPublicKeyPointFromBytes(p.Bytes())
 }
@@ -137,24 +135,22 @@ type VerificationSharePoint struct {
 	p *fed.Point
 }
 
-type verificationSharePoint = VerificationSharePoint
-
 // NewVerificationSharePoint parses a canonical Ed25519 verification share.
 func NewVerificationSharePoint(in []byte) (VerificationSharePoint, error) {
 	return newVerificationSharePointFromBytes(in)
 }
 
-func newVerificationSharePointFromBytes(in []byte) (verificationSharePoint, error) {
+func newVerificationSharePointFromBytes(in []byte) (VerificationSharePoint, error) {
 	p, err := edcurve.PointFromBytes(in)
 	if err != nil {
-		return verificationSharePoint{}, err
+		return VerificationSharePoint{}, err
 	}
-	return verificationSharePoint{p: clonePoint(p)}, nil
+	return VerificationSharePoint{p: clonePoint(p)}, nil
 }
 
-func newVerificationSharePointFromPoint(p *fed.Point) (verificationSharePoint, error) {
+func newVerificationSharePointFromPoint(p *fed.Point) (VerificationSharePoint, error) {
 	if p == nil {
-		return verificationSharePoint{}, errors.New("nil verification share point")
+		return VerificationSharePoint{}, errors.New("nil verification share point")
 	}
 	return newVerificationSharePointFromBytes(p.Bytes())
 }

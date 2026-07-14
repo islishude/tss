@@ -65,8 +65,7 @@ func (c *signAttemptCoordinator) claim(ctx context.Context, outbox signAttemptOu
 		if lifecycleCommitKnownError(err) {
 			return tssrun.AttemptCommit{}, err
 		}
-		var unknown *tssrun.AttemptOutcomeUnknownError
-		if errors.As(err, &unknown) {
+		if _, ok := errors.AsType[*tssrun.AttemptOutcomeUnknownError](err); ok {
 			return tssrun.AttemptCommit{}, err
 		}
 		return tssrun.AttemptCommit{}, &tssrun.AttemptOutcomeUnknownError{

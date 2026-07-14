@@ -251,7 +251,7 @@ func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 		t.Fatal("unsorted party set encoded")
 	}
 	malformed := cloneKeyShareValue(shares[1])
-	malformed.state.PublicKey = publicKeyPoint{p: fed.NewIdentityPoint()}
+	malformed.state.PublicKey = PublicKeyPoint{p: fed.NewIdentityPoint()}
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed public key encoded")
 	}
@@ -343,7 +343,7 @@ func TestFROSTKeyShareRejectsIdentityVerificationShare(t *testing.T) {
 	defer share.Destroy()
 
 	data := share.state.PartyData[1]
-	data.VerificationShare = verificationSharePoint{p: fed.NewIdentityPoint()}
+	data.VerificationShare = VerificationSharePoint{p: fed.NewIdentityPoint()}
 	share.state.PartyData[1] = data
 	if err := share.Validate(); err == nil {
 		t.Fatal("key share validation accepted an identity verification share")
@@ -532,7 +532,7 @@ func minimalFROSTKeyShare() *KeyShare {
 		Party:                1,
 		Threshold:            2,
 		Parties:              tss.NewPartySet(1, 2, 3),
-		PublicKey:            publicKeyPoint{p: fed.NewGeneratorPoint()},
+		PublicKey:            PublicKeyPoint{p: fed.NewGeneratorPoint()},
 		ChainCode:            make([]byte, 32),
 		KeygenSessionID:      tss.SessionID{},
 		KeygenTranscriptHash: []byte{0x01, 0x02},
@@ -589,7 +589,7 @@ func TestFROSTKeySharePartyID(t *testing.T) {
 func TestFROSTKeyShareInternalCloneIsDeepCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.state.PublicKey = publicKeyPoint{p: fed.NewGeneratorPoint()}
+	k.state.PublicKey = PublicKeyPoint{p: fed.NewGeneratorPoint()}
 	original := k.state.PublicKey.Bytes()
 	clone := cloneKeyShareValue(k)
 	clone.state.PublicKey.p.Set(fed.NewIdentityPoint())
@@ -602,7 +602,7 @@ func TestFROSTKeyShareStateRejectsMalformedPublicKey(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	mutated := cloneKeyShareValue(shares[1])
-	mutated.state.PublicKey = publicKeyPoint{}
+	mutated.state.PublicKey = PublicKeyPoint{}
 	if _, err := wire.Marshal(
 		mutated.state,
 		wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),

@@ -22,7 +22,7 @@ const (
 type ReshareSession struct {
 	mu           sync.Mutex
 	oldKey       *KeyShare      // Caller-owned old share for dealers; nil for recipient-only participants.
-	oldPublicKey publicKeyPoint // Existing parent group public key that must be preserved.
+	oldPublicKey PublicKeyPoint // Existing parent group public key that must be preserved.
 	chainCode    []byte         // Existing HD chain code that must be preserved.
 	oldParties   tss.PartySet   // Canonical dealer set of old key holders.
 	newParties   tss.PartySet   // Canonical target key-holder set.

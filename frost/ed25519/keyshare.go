@@ -342,10 +342,10 @@ func (k *KeyShare) partyDataFor(id tss.PartyID) (keySharePartyData, error) {
 	return data, nil
 }
 
-func (k *KeyShare) verificationSharePoint(id tss.PartyID) (verificationSharePoint, bool) {
+func (k *KeyShare) verificationSharePoint(id tss.PartyID) (VerificationSharePoint, bool) {
 	data, err := k.partyDataFor(id)
 	if err != nil || data.VerificationShare.IsZero() {
-		return verificationSharePoint{}, false
+		return VerificationSharePoint{}, false
 	}
 	return data.VerificationShare.Clone(), true
 }

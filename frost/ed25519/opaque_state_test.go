@@ -33,8 +33,8 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 		fed.NewIdentityPoint(),
 	}}
 	k.state.PartyData = map[tss.PartyID]keySharePartyData{
-		1: {VerificationShare: verificationSharePoint{p: fed.NewGeneratorPoint()}, KeygenConfirmation: &KeygenConfirmation{Sender: 1}},
-		2: {VerificationShare: verificationSharePoint{p: fed.NewIdentityPoint()}, KeygenConfirmation: &KeygenConfirmation{Sender: 2}},
+		1: {VerificationShare: VerificationSharePoint{p: fed.NewGeneratorPoint()}, KeygenConfirmation: &KeygenConfirmation{Sender: 1}},
+		2: {VerificationShare: VerificationSharePoint{p: fed.NewIdentityPoint()}, KeygenConfirmation: &KeygenConfirmation{Sender: 2}},
 	}
 	groupBefore := k.state.GroupCommitments.BytesList()
 	shareBefore := k.state.PartyData[1].VerificationShare.Bytes()

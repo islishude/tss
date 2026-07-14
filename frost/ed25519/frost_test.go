@@ -1266,7 +1266,7 @@ func TestFROSTRejectsNonPrimeOrderPoints(t *testing.T) {
 	t.Run("identity rejected as public key in KeyShare", func(t *testing.T) {
 		shares := frostKeygen(t, 2, 3)
 		bad := cloneKeyShareValue(shares[1])
-		bad.state.PublicKey = publicKeyPoint{p: fed.NewIdentityPoint()}
+		bad.state.PublicKey = PublicKeyPoint{p: fed.NewIdentityPoint()}
 		if err := bad.Validate(); err == nil {
 			t.Fatal("identity public key should be rejected")
 		}

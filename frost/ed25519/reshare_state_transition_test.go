@@ -153,7 +153,7 @@ func TestFROSTReshareShareApplyRollsBackOnCompletionError(t *testing.T) {
 	// Force a non-ProtocolError completion failure after the decoded share has
 	// been staged. The transition must remove the staged map entry before its
 	// rejection cleanup destroys the scalar.
-	session1.oldPublicKey = publicKeyPoint{p: fed.NewGeneratorPoint()}
+	session1.oldPublicKey = PublicKeyPoint{p: fed.NewGeneratorPoint()}
 	share := mustFROSTEnvelope(t, out2, payloadReshareShare, session1.selfID)
 	genericTx, err := session1.buildReshareTransition(testutil.DeliverEnvelope(share))
 	if err != nil {
