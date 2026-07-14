@@ -66,35 +66,46 @@ func TestVerificationShareRejectsMalformedAndOversizedFields(t *testing.T) {
 	}
 }
 
-func TestVerificationShareRejectsNonCanonicalIdentityEncoding(t *testing.T) {
+func TestVerificationShareRejectsIdentityEncodings(t *testing.T) {
 	t.Parallel()
 	identity := make([]byte, 32)
 	identity[0] = 1
-	publicKey, err := newVerificationSharePointFromBytes(identity)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := NewVerificationSharePoint(identity); err == nil {
+		t.Fatal("verification-share constructor accepted the identity")
 	}
-	share := VerificationShare{Party: 1, PublicKey: publicKey}
+
+	share := testFROSTVerificationShare(t)
 	raw, err := share.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	nonCanonical := append([]byte(nil), identity...)
-	nonCanonical[len(nonCanonical)-1] |= 0x80
-	mutated, err := testutil.RewriteWireFieldByName(
-		raw,
-		verificationShareWireType,
-		VerificationShare{},
-		"PublicKey",
-		nonCanonical,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var decoded VerificationShare
-	if err := decoded.UnmarshalBinary(mutated); err == nil {
-		t.Fatal("verification-share wire accepted a non-canonical identity encoding")
+	for _, tc := range []struct {
+		name  string
+		point []byte
+	}{
+		{name: "canonical", point: identity},
+		{name: "non-canonical", point: func() []byte {
+			out := append([]byte(nil), identity...)
+			out[len(out)-1] |= 0x80
+			return out
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated, err := testutil.RewriteWireFieldByName(
+				raw,
+				verificationShareWireType,
+				VerificationShare{},
+				"PublicKey",
+				tc.point,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded VerificationShare
+			if err := decoded.UnmarshalBinary(mutated); err == nil {
+				t.Fatalf("verification-share wire accepted the %s identity encoding", tc.name)
+			}
+		})
 	}
 }
 

@@ -336,6 +336,48 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 	})
 }
 
+func TestFROSTKeyShareRejectsIdentityVerificationShare(t *testing.T) {
+	t.Parallel()
+	source := frostKeygen(t, 2, 3)[1]
+	share := cloneKeyShareValue(source)
+	defer share.Destroy()
+
+	data := share.state.PartyData[1]
+	data.VerificationShare = verificationSharePoint{p: fed.NewIdentityPoint()}
+	share.state.PartyData[1] = data
+	if err := share.Validate(); err == nil {
+		t.Fatal("key share validation accepted an identity verification share")
+	}
+	if _, err := share.MarshalBinary(); err == nil {
+		t.Fatal("key share serialization accepted an identity verification share")
+	}
+
+	validRaw, err := source.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := fed.NewIdentityPoint().Bytes()
+	mutated := mutateFirstFROSTPartyDataRecord(t, validRaw, func(t testing.TB, record []byte) []byte {
+		fields, err := wire.UnmarshalRecordFieldsWithLimits(record, wire.DefaultFrameLimits(), "partyData")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range fields {
+			if fields[i].Tag == 1 {
+				fields[i].Value = bytes.Clone(identity)
+			}
+		}
+		out, err := wire.MarshalRecordFields(fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	})
+	if _, err := tss.DecodeBinary[KeyShare](mutated); err == nil {
+		t.Fatal("key share decoding accepted an identity verification share")
+	}
+}
+
 func TestFROSTKeyShareStateRejectsMalformedRawPointAndPartyData(t *testing.T) {
 	t.Parallel()
 

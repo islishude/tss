@@ -153,6 +153,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		sessions[id] = session
 		round1[id] = out[0]
 	}
+	localCommitmentPayload := bytes.Clone(round1[1].Payload)
 
 	round2 := make([]tss.Envelope, 0, 2)
 	for _, receiver := range tss.NewPartySet(2, 3) {
@@ -211,6 +212,15 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 	}
 	if sessions[1].pendingPartials != nil || sessions[1].pendingEnvelopes != nil {
 		t.Fatal("completed signing session retained pending partial state")
+	}
+	if sessions[1].commitments != nil || sessions[1].commitMessage.Payload != nil {
+		t.Fatal("completed signing session retained nonce commitment state")
+	}
+	if got, ok := sessions[1].Signature(); !ok || !bytes.Equal(got, sig) {
+		t.Fatal("completed signing session lost its final signature during cleanup")
+	}
+	if !bytes.Equal(round1[1].Payload, localCommitmentPayload) {
+		t.Fatal("terminal cleanup mutated the caller-owned commitment envelope")
 	}
 }
 

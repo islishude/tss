@@ -131,8 +131,8 @@ func (p *PublicKeyPoint) UnmarshalJSON(in []byte) error {
 
 // VerificationSharePoint is a validated Ed25519 verification-share point.
 //
-// FROST verification shares are allowed to be the identity point, but malformed
-// encodings and non-prime-order torsion points are rejected.
+// FROST verification shares are non-identity prime-order elements. Malformed
+// encodings, the identity, and non-prime-order torsion points are rejected.
 type VerificationSharePoint struct {
 	p *fed.Point
 }
@@ -145,7 +145,7 @@ func NewVerificationSharePoint(in []byte) (VerificationSharePoint, error) {
 }
 
 func newVerificationSharePointFromBytes(in []byte) (verificationSharePoint, error) {
-	p, err := edcurve.PointFromBytesAllowIdentity(in)
+	p, err := edcurve.PointFromBytes(in)
 	if err != nil {
 		return verificationSharePoint{}, err
 	}
@@ -187,12 +187,13 @@ func (p VerificationSharePoint) IsZero() bool {
 	return p.p == nil
 }
 
-// Validate checks that the verification share is in the prime-order subgroup.
+// Validate checks that the verification share is non-identity and in the
+// prime-order subgroup.
 func (p VerificationSharePoint) Validate() error {
 	if p.p == nil {
 		return errors.New("missing verification share point")
 	}
-	_, err := edcurve.PointFromBytesAllowIdentity(p.p.Bytes())
+	_, err := edcurve.PointFromBytes(p.p.Bytes())
 	return err
 }
 

@@ -10,7 +10,7 @@ These categories have different meanings:
 - Fixtures are committed test-only caches used to avoid expensive setup during
   tests.
 
-Current inventory: 37 binary wire golden files, 2 protocol JSON files, and 1
+Current inventory: 40 binary wire golden files, 2 protocol JSON files, and 1
 fixture JSON file.
 
 ## Categories
@@ -30,10 +30,11 @@ wire/v1/
   envelope/   1 file   Envelope.golden
   tss/        5 files  BlameEvidence, IdentificationRecord, SigningContext,
                        BroadcastAck, BroadcastCertificate
-  frost/      8 files  KeyShare, VerificationShare, KeygenCommitmentsPayload,
+  frost/      11 files KeyShare, VerificationShare, KeygenCommitmentsPayload,
                        KeygenSharePayload, NonceCommitmentPayload,
-                       SignPartialPayload, TrustedDealerImportPlan,
-                       TrustedDealerContribution
+                       SignPartialPayload, KeygenConfirmation,
+                       ReshareCommitmentsPayload, ReshareSharePayload,
+                       TrustedDealerImportPlan, TrustedDealerContribution
   cggmp21/    14 files KeyShare, VerificationShare, PaillierPublicShare,
                        RingPedersenPublicShare,
                        Figure6CommitmentPayload, AuxInfoCommitmentPayload,
@@ -59,10 +60,12 @@ protocol/
   cggmp21-secp256k1/cggmp21_secp256k1_vectors.json
 ```
 
-FROST Ed25519 vectors are deterministic for key generation: the stored seed
-reproduces the group public key and key-share encodings. Stored signatures are
-verified for validity; fresh signing uses fresh nonces and may produce different
-signatures.
+FROST Ed25519 vectors are self-generated protocol-format regressions, not
+independent-implementation vectors. Key generation is deterministic: the stored
+seed reproduces the group public key and key-share encodings. Stored signatures
+are verified for validity; fresh signing uses fresh nonces and may produce
+different signatures. RFC 9591 Appendix E.1 provides the independent
+specification vector for the ciphersuite operations.
 
 CGGMP21 secp256k1 vectors are non-deterministic to generate because the protocol
 uses `crypto/rand` for proof nonces. The committed file is a format regression

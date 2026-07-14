@@ -196,33 +196,118 @@ func TestFROSTSignLocalPartialPrepareFailureDoesNotCommit(t *testing.T) {
 	assertFROSTSnapshotUnchanged(t, before, after)
 }
 
-func TestFROSTSignMalformedPartialRejectDoesNotMutate(t *testing.T) {
+func TestFROSTSignMalformedPartialAbortsAndClearsSecrets(t *testing.T) {
 	t.Parallel()
 
-	signers := tss.NewPartySet(1, 2)
-	sessions, round2 := frostSigningRound2(t, 2, 3, signers, []byte("phase-02-malformed-partial"))
-	var partialFrom2 tss.Envelope
-	for _, env := range round2 {
-		if env.From == 2 {
-			partialFrom2 = env
-			break
-		}
-	}
-	if partialFrom2.Payload == nil {
-		t.Fatal("missing partial from party 2")
-	}
-	partialFrom2.Payload = []byte("malformed partial")
+	q := testEd25519ScalarEncodingLE(t, edcurve.Order(), 0)
+	qPlusOne := testEd25519ScalarEncodingLE(t, edcurve.Order(), 1)
+	highBitsSet := make([]byte, edcurve.ScalarSize)
+	highBitsSet[len(highBitsSet)-1] = 0xe0
 
-	before := snapshotFROSTSignSession(sessions[1])
-	out, err := sessions[1].Handle(testutil.DeliverEnvelope(partialFrom2))
-	after := snapshotFROSTSignSession(sessions[1])
-	if err == nil {
-		t.Fatal("expected malformed partial to be rejected")
+	for _, tc := range []struct {
+		name    string
+		payload []byte
+		scalar  []byte
+	}{
+		{name: "malformed payload", payload: []byte("malformed partial")},
+		{name: "z equals q", scalar: q},
+		{name: "z equals q plus one", scalar: qPlusOne},
+		{name: "scalar high three bits set", scalar: highBitsSet},
+		{name: "short scalar", scalar: make([]byte, edcurve.ScalarSize-1)},
+		{name: "long scalar", scalar: make([]byte, edcurve.ScalarSize+1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shares := frostKeygen(t, 2, 3)
+			parties := tss.SortParties(shares[1].state.Parties)
+			signers := tss.NewPartySet(1, 2)
+			sessionID, err := tss.NewSessionID(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sign1, out1, err := startFROSTSign(
+				shares[1], sessionID, signers, []byte("phase-02-malformed-partial"),
+				testFROSTGuard(1, parties, sessionID),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sign2, out2, err := startFROSTSign(
+				shares[2], sessionID, signers, []byte("phase-02-malformed-partial"),
+				testFROSTGuard(2, parties, sessionID),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			round2, err := sign2.Handle(testutil.DeliverEnvelope(out1[0]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(round2) != 1 || round2[0].PayloadType != payloadSignPartial {
+				t.Fatalf("party 2 emitted %d round-2 envelopes", len(round2))
+			}
+
+			bad := round2[0]
+			if tc.scalar != nil {
+				bad.Payload, err = testutil.RewriteWireFieldByName(
+					bad.Payload,
+					signPartialPayloadWireType,
+					signPartialPayload{},
+					"Z",
+					tc.scalar,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				bad.Payload = bytes.Clone(tc.payload)
+			}
+
+			// Party 1 has not received party 2's commitment yet. Its nonces are
+			// still live and it has not produced a local partial signature.
+			dNonce := sign1.dNonce
+			eNonce := sign1.eNonce
+			if dNonce == nil || eNonce == nil || sign1.partialSent {
+				t.Fatal("unexpected precondition before early round-2 delivery")
+			}
+
+			out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
+			protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+			if len(out) != 0 {
+				t.Fatalf("invalid partial produced %d outbound envelopes", len(out))
+			}
+			if protocolErr.Party != 2 || protocolErr.Blame == nil ||
+				len(protocolErr.Blame.Parties) != 1 || protocolErr.Blame.Parties[0] != 2 {
+				t.Fatalf("invalid partial attribution = party %d blame %#v", protocolErr.Party, protocolErr.Blame)
+			}
+			evidence, err := tss.DecodeBinary[tss.BlameEvidence](protocolErr.Blame.Evidence)
+			if err != nil {
+				t.Fatalf("decode partial signature evidence: %v", err)
+			}
+			if evidence.Kind != tss.EvidenceKindFrostPartialSignature || evidence.From != 2 {
+				t.Fatalf("unexpected partial evidence kind=%q from=%d", evidence.Kind, evidence.From)
+			}
+			if !sign1.aborted || sign1.completed {
+				t.Fatal("invalid partial did not leave signing terminally aborted")
+			}
+			if sign1.dNonce != nil || sign1.eNonce != nil || dNonce.FixedLen() != 0 || eNonce.FixedLen() != 0 {
+				t.Fatal("invalid partial retained local signing nonces")
+			}
+			if sign1.partialSent || len(sign1.partials) != 0 || len(sign1.pendingPartials) != 0 {
+				t.Fatal("invalid partial produced or retained partial signature state")
+			}
+			if sign1.derivation != nil || sign1.message != nil {
+				t.Fatal("invalid partial retained signing intent state")
+			}
+			if sign1.commitments != nil || sign1.commitMessage.Payload != nil {
+				t.Fatal("invalid partial retained public nonce commitment state")
+			}
+			if _, ok := sign1.Signature(); ok {
+				t.Fatal("aborted session exposed a signature")
+			}
+			_, err = sign1.Handle(testutil.DeliverEnvelope(out2[0]))
+			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
+		})
 	}
-	if len(out) != 0 {
-		t.Fatalf("rejected partial produced %d outbound envelopes", len(out))
-	}
-	assertFROSTSnapshotUnchanged(t, before, after)
 }
 
 func TestFROSTSignPartialBuildDoesNotMutate(t *testing.T) {

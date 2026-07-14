@@ -42,6 +42,9 @@ var manifest = []target{
 			"wire/v1/frost/KeygenSharePayload.golden",
 			"wire/v1/frost/NonceCommitmentPayload.golden",
 			"wire/v1/frost/SignPartialPayload.golden",
+			"wire/v1/frost/KeygenConfirmation.golden",
+			"wire/v1/frost/ReshareCommitmentsPayload.golden",
+			"wire/v1/frost/ReshareSharePayload.golden",
 			"wire/v1/frost/TrustedDealerImportPlan.golden",
 			"wire/v1/frost/TrustedDealerContribution.golden",
 		},
@@ -107,7 +110,7 @@ var manifest = []target{
 		Tier:     "0",
 		Packages: []string{"./frost/ed25519"},
 		Update:   runSpec{Run: "^TestGenerateVectors$", Tags: []string{"vectorgen"}},
-		Verify:   runSpec{Run: "CrossImplementation"},
+		Verify:   runSpec{Run: "^TestFROSTProtocolFormatRegressionVectors$"},
 		Outputs: []string{
 			"protocol/frost-ed25519/frost_ed25519_vectors.json",
 		},

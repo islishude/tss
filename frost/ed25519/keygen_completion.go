@@ -103,7 +103,12 @@ func (s *KeygenSession) preparePendingKeyMaterial(snap *frostKeygenRound1Snapsho
 	}
 	partyData, verificationShares, err := deriveFROSTVerificationShares(s.cfg.Parties, group)
 	if err != nil {
-		return nil, err
+		return nil, tss.NewProtocolError(
+			tss.ErrCodeVerification,
+			keygenStartRound,
+			tss.BroadcastPartyId,
+			fmt.Errorf("invalid aggregate verification shares: %w", err),
+		)
 	}
 	transcriptHash, err := buildFROSTKeygenTranscriptHash(s.cfg, s.planHash, snap, group, verificationShares)
 	if err != nil {

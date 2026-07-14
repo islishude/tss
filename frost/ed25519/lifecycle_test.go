@@ -215,6 +215,9 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if sign.derivation != nil {
 		t.Fatal("derivation result was not released")
 	}
+	if sign.commitments != nil || sign.commitMessage.Payload != nil {
+		t.Fatal("destroyed sign session retained nonce commitment state")
+	}
 	testutil.AssertBytesCleared(t, childPublicKey)
 	testutil.AssertBytesCleared(t, childChainCode)
 	testutil.AssertBytesCleared(t, additiveShift)

@@ -13,11 +13,6 @@ import (
 
 const signingNonceContextLabel = "frost-ed25519-signing-nonce-context-v1"
 
-type rfc9591NonceDerivationReader interface {
-	io.Reader
-	rfc9591NonceDerivation()
-}
-
 func signingNonceGenerate(
 	secret *fed.Scalar,
 	reader io.Reader,
@@ -25,6 +20,26 @@ func signingNonceGenerate(
 	message, contextHash, planHash []byte,
 	purpose string,
 ) (*fed.Scalar, error) {
+	binding := transcript.New(signingNonceContextLabel)
+	binding.AppendBytes("session_id", sessionID[:])
+	binding.AppendString("purpose", purpose)
+	binding.AppendBytes("message", message)
+	binding.AppendBytes("context_hash", contextHash)
+	binding.AppendBytes("plan_hash", planHash)
+	bindingHash := binding.Sum()
+	defer clear(bindingHash)
+	return signingNonceGenerateWithBinding(secret, reader, bindingHash)
+}
+
+// rfc9591NonceGenerate implements the exact RFC 9591 nonce_generate input. It
+// is kept separate from the repository-bound production derivation so
+// conformance vectors cannot silently select a different algorithm by reader
+// dynamic type.
+func rfc9591NonceGenerate(secret *fed.Scalar, reader io.Reader) (*fed.Scalar, error) {
+	return signingNonceGenerateWithBinding(secret, reader, nil)
+}
+
+func signingNonceGenerateWithBinding(secret *fed.Scalar, reader io.Reader, binding []byte) (*fed.Scalar, error) {
 	if secret == nil {
 		return nil, errors.New("nil signing secret")
 	}
@@ -46,16 +61,8 @@ func signingNonceGenerate(
 	h.Write([]byte("nonce"))
 	h.Write(randomBytes[:])
 	h.Write(secretEnc)
-	if _, vectorMode := reader.(rfc9591NonceDerivationReader); !vectorMode {
-		binding := transcript.New(signingNonceContextLabel)
-		binding.AppendBytes("session_id", sessionID[:])
-		binding.AppendString("purpose", purpose)
-		binding.AppendBytes("message", message)
-		binding.AppendBytes("context_hash", contextHash)
-		binding.AppendBytes("plan_hash", planHash)
-		bindingHash := binding.Sum()
-		h.Write(bindingHash)
-		clear(bindingHash)
+	if len(binding) > 0 {
+		h.Write(binding)
 	}
 
 	uniform := h.Sum(nil)

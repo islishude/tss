@@ -68,15 +68,15 @@ func (Envelope) WireVersion() uint16 { return envelopeWireVersion }
 // Clone returns a deep copy of the envelope.
 func (e Envelope) Clone() Envelope {
 	clone := Envelope{
-		Protocol:    e.Protocol,
-		SessionID:   e.SessionID,
-		Round:       e.Round,
-		From:        e.From,
-		To:          e.To,
-		PayloadType: e.PayloadType,
-		Payload:     append([]byte(nil), e.Payload...),
+		Protocol:        e.Protocol,
+		SessionID:       e.SessionID,
+		Round:           e.Round,
+		From:            e.From,
+		To:              e.To,
+		PayloadType:     e.PayloadType,
+		Payload:         bytes.Clone(e.Payload),
+		SenderSignature: bytes.Clone(e.SenderSignature),
 	}
-	clone.SenderSignature = bytes.Clone(e.SenderSignature)
 	return clone
 }
 
@@ -127,7 +127,7 @@ func (in InboundEnvelope) PayloadType() PayloadType {
 
 // Payload returns a copy of the envelope payload bytes.
 func (in InboundEnvelope) Payload() []byte {
-	return append([]byte(nil), in.env.Payload...)
+	return bytes.Clone(in.env.Payload)
 }
 
 // Digest computes the domain-separated digest of the inbound envelope.

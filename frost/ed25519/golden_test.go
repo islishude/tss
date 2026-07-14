@@ -9,6 +9,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/testvectors"
 )
 
@@ -218,6 +219,118 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 		t.Error("round-trip produced different encoding")
 	}
 	if _, err := unmarshalSignPartialPayload(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+func TestGoldenKeygenConfirmation(t *testing.T) {
+	t.Parallel()
+	publicKey, err := newPublicKeyPointFromPoint(fed.NewGeneratorPoint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := KeygenConfirmation{
+		SessionID:       testutil.MustSessionID(701),
+		Sender:          2,
+		Threshold:       2,
+		Parties:         tss.NewPartySet(1, 2, 3),
+		PublicKey:       publicKey,
+		TranscriptHash:  bytes.Repeat([]byte{0x94}, 32),
+		CommitmentsHash: bytes.Repeat([]byte{0x95}, 32),
+		ChainCode:       bytes.Repeat([]byte{0x96}, 32),
+		PlanHash:        bytes.Repeat([]byte{0x97}, 32),
+	}
+	raw, err := confirmation.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	testvectors.CheckHexGolden(t, "wire/v1/frost/KeygenConfirmation.golden", raw)
+
+	decoded, err := tss.DecodeBinary[KeygenConfirmation](raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := decoded.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := tss.DecodeBinary[KeygenConfirmation](append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+func TestGoldenReshareCommitmentsPayload(t *testing.T) {
+	t.Parallel()
+	commitments, err := newReshareCommitmentsFromPoints(
+		[]*fed.Point{fed.NewIdentityPoint(), fed.NewGeneratorPoint()},
+		2,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := reshareCommitmentsPayload{
+		Commitments: commitments,
+		PlanHash:    bytes.Repeat([]byte{0x98}, 32),
+	}
+	raw, err := marshalReshareCommitmentsPayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testvectors.CheckHexGolden(t, "wire/v1/frost/ReshareCommitmentsPayload.golden", raw)
+
+	decoded, err := unmarshalReshareCommitmentsPayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := marshalReshareCommitmentsPayload(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := unmarshalReshareCommitmentsPayload(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+func TestGoldenReshareSharePayload(t *testing.T) {
+	t.Parallel()
+	scalar, err := scalarBytes(big.NewInt(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	share, err := newEdSecretScalar(scalar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer share.Destroy()
+	payload := reshareSharePayload{
+		Share:    share,
+		PlanHash: bytes.Repeat([]byte{0x99}, 32),
+	}
+	raw, err := marshalReshareSharePayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testvectors.CheckHexGolden(t, "wire/v1/frost/ReshareSharePayload.golden", raw)
+
+	decoded, err := unmarshalReshareSharePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoded.Share.Destroy()
+	raw2, err := marshalReshareSharePayload(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := unmarshalReshareSharePayload(append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

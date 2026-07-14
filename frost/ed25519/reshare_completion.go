@@ -305,7 +305,12 @@ func (s *ReshareSession) prepareResharePublicBinding() (groupCommitments, *resha
 	for _, id := range s.newParties {
 		pub, err := newCommitments.Eval(id)
 		if err != nil {
-			return groupCommitments{}, nil, nil, err
+			return groupCommitments{}, nil, nil, tss.NewProtocolError(
+				tss.ErrCodeVerification,
+				reshareStartRound,
+				tss.BroadcastPartyId,
+				fmt.Errorf("invalid aggregate verification share for party %d: %w", id, err),
+			)
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub.Clone()})
 		partyData[id] = keySharePartyData{VerificationShare: pub}

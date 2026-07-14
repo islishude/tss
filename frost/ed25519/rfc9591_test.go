@@ -14,12 +14,6 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-type rfc9591VectorNonceReader struct {
-	io.Reader
-}
-
-func (rfc9591VectorNonceReader) rfc9591NonceDerivation() {}
-
 // TestRFC9591ContextString verifies the RFC 9591 Section 5.4.1 ciphersuite
 // context string used for domain separation.
 func TestRFC9591ContextString(t *testing.T) {
@@ -162,15 +156,23 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, out1, err := startFROSTSignWithOptions(key1, sessionID, v.signers, v.message, SignOptions{
-		NonceReader: rfc9591VectorNonceReader{Reader: bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...))},
-	})
+	s1, out1, err := startRFC9591VectorSign(
+		key1,
+		sessionID,
+		v.signers,
+		v.message,
+		bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...)),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s3, out3, err := startFROSTSignWithOptions(key3, sessionID, v.signers, v.message, SignOptions{
-		NonceReader: rfc9591VectorNonceReader{Reader: bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...))},
-	})
+	s3, out3, err := startRFC9591VectorSign(
+		key3,
+		sessionID,
+		v.signers,
+		v.message,
+		bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...)),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +210,40 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 	if !stded25519.Verify(stded25519.PublicKey(v.groupPublicKey), v.message, sig) {
 		t.Fatal("RFC vector signature failed Ed25519 verification")
 	}
+}
+
+func startRFC9591VectorSign(
+	key *KeyShare,
+	sessionID tss.SessionID,
+	signers tss.PartySet,
+	message []byte,
+	reader io.Reader,
+) (*SignSession, []tss.Envelope, error) {
+	limits := testLimits()
+	plan, err := NewSignPlan(SignPlanOption{
+		Key:       key,
+		SessionID: sessionID,
+		Signers:   signers,
+		Context:   testFROSTSigningContext(),
+		Message:   message,
+		Limits:    &limits,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	guard := testFROSTGuard(key.state.Party, testFROSTGuardParties(key.state.Parties, key.state.Party), sessionID)
+	return startSignWithNonceGenerator(key, plan, SignRuntime{
+		Local: tss.LocalConfig{Self: key.state.Party, Rand: reader},
+		Guard: guard,
+	}, func(
+		secret *fed.Scalar,
+		reader io.Reader,
+		_ tss.SessionID,
+		_, _, _ []byte,
+		_ string,
+	) (*fed.Scalar, error) {
+		return rfc9591NonceGenerate(secret, reader)
+	})
 }
 
 // TestRFC9591ThresholdCombinations verifies FROST signatures work for

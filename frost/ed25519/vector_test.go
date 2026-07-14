@@ -63,7 +63,7 @@ func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeySha
 	return shares
 }
 
-func TestFROSTCrossImplementationVectors(t *testing.T) {
+func TestFROSTProtocolFormatRegressionVectors(t *testing.T) {
 	t.Parallel()
 	data := testvectors.Read(t, "protocol/frost-ed25519/frost_ed25519_vectors.json")
 	var vectors []frostTestVector

@@ -173,6 +173,126 @@ func TestFROSTReshareShareApplyRollsBackOnCompletionError(t *testing.T) {
 	}
 }
 
+func TestFROSTRefreshIdentityVerificationShareAbortsAndClearsSecrets(t *testing.T) {
+	for _, commitmentFirst := range []bool{true, false} {
+		name := "share arrives last"
+		if !commitmentFirst {
+			name = "commitment arrives last"
+		}
+		t.Run(name, func(t *testing.T) {
+			session, _, remote, _ := frostTwoPartyRefreshSessions(t)
+			defer session.Destroy()
+			defer remote.Destroy()
+
+			commitment, share := maliciousFROSTRefreshIdentityVerificationShareEnvelopes(t, session, 2)
+			first, last := share, commitment
+			if commitmentFirst {
+				first, last = commitment, share
+			}
+			if out, err := session.Handle(testutil.DeliverEnvelope(first)); err != nil {
+				t.Fatalf("first verification-identity input rejected early: %v", err)
+			} else if len(out) != 0 {
+				t.Fatalf("first verification-identity input produced %d outbound envelopes", len(out))
+			}
+
+			out, err := session.Handle(testutil.DeliverEnvelope(last))
+			protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
+			if protocolErr.Blame != nil || protocolErr.Party != tss.BroadcastPartyId {
+				t.Fatalf("aggregate verification identity was attributed to one dealer: %#v", protocolErr)
+			}
+			if len(out) != 0 {
+				t.Fatalf("aggregate verification identity produced %d outbound envelopes", len(out))
+			}
+			if !session.aborted || session.completed {
+				t.Fatal("aggregate verification identity did not leave refresh terminally aborted")
+			}
+			if len(session.shares) != 0 || session.pendingShare != nil || session.newShare != nil {
+				t.Fatal("aggregate verification identity retained refresh secret material")
+			}
+		})
+	}
+}
+
+func maliciousFROSTRefreshIdentityVerificationShareEnvelopes(t *testing.T, session *ReshareSession, dealer tss.PartyID) (tss.Envelope, tss.Envelope) {
+	t.Helper()
+	if session.oldKey == nil || session.shares[session.selfID] == nil || session.commits[session.selfID].Len() == 0 {
+		t.Fatal("missing local refresh material for verification-identity fixture")
+	}
+
+	oldShare, err := session.oldKey.secretScalar()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldShare.Set(fed.NewScalar())
+	localRefreshShare, err := edScalarFromSecret(session.shares[session.selfID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localRefreshShare.Set(fed.NewScalar())
+	finalWithoutRemote := fed.NewScalar().Add(oldShare, localRefreshShare)
+	defer finalWithoutRemote.Set(fed.NewScalar())
+	remoteShare := fed.NewScalar().Subtract(fed.NewScalar(), finalWithoutRemote)
+	defer remoteShare.Set(fed.NewScalar())
+	remoteEvaluation := fed.NewIdentityPoint().ScalarBaseMult(remoteShare)
+
+	commitments, err := newReshareCommitmentsFromPoints(
+		[]*fed.Point{fed.NewIdentityPoint(), remoteEvaluation},
+		session.newThreshold,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{
+		Commitments: commitments,
+		PlanHash:    bytes.Clone(session.planHash),
+	}, session.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitmentEnvelope, err := newEnvelope(
+		session.cfg,
+		reshareStartRound,
+		dealer,
+		tss.BroadcastPartyId,
+		payloadReshareCommitments,
+		commitPayload,
+	)
+	clear(commitPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secretShare, err := newEdSecretScalarFromFed(remoteShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharePayload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{
+		Share:    secretShare,
+		PlanHash: bytes.Clone(session.planHash),
+	}, session.limits)
+	secretShare.Destroy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	shareEnvelope, err := newEnvelope(
+		session.cfg,
+		reshareStartRound,
+		dealer,
+		session.selfID,
+		payloadReshareShare,
+		sharePayload,
+	)
+	clear(sharePayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		clear(commitmentEnvelope.Payload)
+		clear(shareEnvelope.Payload)
+	})
+	return commitmentEnvelope, shareEnvelope
+}
+
 func TestFROSTReshareMultipleInvalidDealerSharesBlameCanonicalFirst(t *testing.T) {
 	t.Parallel()
 

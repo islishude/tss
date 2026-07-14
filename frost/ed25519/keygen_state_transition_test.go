@@ -230,6 +230,136 @@ func TestFROSTKeygenAggregateIdentityAbortsAndClearsSecrets(t *testing.T) {
 	}
 }
 
+func TestFROSTKeygenIdentityVerificationShareAbortsAndClearsSecrets(t *testing.T) {
+	for i, commitmentFirst := range []bool{true, false} {
+		name := "share arrives last"
+		if !commitmentFirst {
+			name = "commitment arrives last"
+		}
+		t.Run(name, func(t *testing.T) {
+			parties := tss.NewPartySet(1, 2)
+			sessionID := testutil.MustSessionID(int64(870 + i))
+			session, _, err := startFROSTKeygen(tss.ThresholdConfig{
+				Threshold: 2,
+				Parties:   parties,
+				Self:      1,
+				SessionID: sessionID,
+				Rand:      testutil.DeterministicReader(int64(880 + i)),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Destroy()
+
+			commitment, share := maliciousFROSTIdentityVerificationShareEnvelopes(t, session, 2)
+			first, last := share, commitment
+			if commitmentFirst {
+				first, last = commitment, share
+			}
+			if out, err := session.Handle(testutil.DeliverEnvelope(first)); err != nil {
+				t.Fatalf("first verification-identity input rejected early: %v", err)
+			} else if len(out) != 0 {
+				t.Fatalf("first verification-identity input produced %d outbound envelopes", len(out))
+			}
+
+			out, err := session.Handle(testutil.DeliverEnvelope(last))
+			protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
+			if protocolErr.Blame != nil || protocolErr.Party != tss.BroadcastPartyId {
+				t.Fatalf("aggregate verification identity was attributed to one dealer: %#v", protocolErr)
+			}
+			if len(out) != 0 {
+				t.Fatalf("aggregate verification identity produced %d outbound envelopes", len(out))
+			}
+			if !session.aborted || session.completed || session.state != keygenAborted {
+				t.Fatal("aggregate verification identity did not leave keygen terminally aborted")
+			}
+			if session.local != nil || session.pending != nil || session.keyShare != nil {
+				t.Fatal("aggregate verification identity retained local or assembled secret material")
+			}
+			for _, slot := range session.round1.slots {
+				if slot.share != nil {
+					t.Fatal("aggregate verification identity retained a round-1 secret share slot")
+				}
+			}
+		})
+	}
+}
+
+func maliciousFROSTIdentityVerificationShareEnvelopes(t *testing.T, session *KeygenSession, dealer tss.PartyID) (tss.Envelope, tss.Envelope) {
+	t.Helper()
+	if session.local == nil || session.local.commitments == nil || session.local.localShare == nil {
+		t.Fatal("missing local material for verification-identity fixture")
+	}
+
+	honestShare, err := edScalarFromSecret(session.local.localShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer honestShare.Set(fed.NewScalar())
+	remoteShare := fed.NewScalar().Subtract(fed.NewScalar(), honestShare)
+	defer remoteShare.Set(fed.NewScalar())
+
+	honestConstant, err := session.local.commitments.PointAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	constantScalar := edcurve.ScalarOne()
+	defer constantScalar.Set(fed.NewScalar())
+	constantCommitment := fed.NewIdentityPoint().ScalarBaseMult(constantScalar)
+	if fed.NewIdentityPoint().Add(honestConstant, constantCommitment).Equal(fed.NewIdentityPoint()) == 1 {
+		constantScalar.Add(constantScalar, edcurve.ScalarOne())
+		constantCommitment = fed.NewIdentityPoint().ScalarBaseMult(constantScalar)
+	}
+	remoteEvaluation := fed.NewIdentityPoint().ScalarBaseMult(remoteShare)
+	linearCommitment := fed.NewIdentityPoint().Subtract(remoteEvaluation, constantCommitment)
+	commitments, err := newKeygenCommitmentsFromPoints(
+		[]*fed.Point{constantCommitment, linearCommitment},
+		session.cfg.Threshold,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	chainCode := bytes.Repeat([]byte{0x6a}, 32)
+	t.Cleanup(func() { clear(chainCode) })
+	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
+		Commitments:     commitments,
+		ChainCodeCommit: bip32util.ChainCodeCommitment(frostChainCodeCommitLabel, session.cfg.SessionID, dealer, chainCode),
+		PlanHash:        bytes.Clone(session.planHash),
+	}, session.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitmentEnvelope, err := newEnvelope(session.cfg, keygenStartRound, dealer, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
+	clear(commitPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	secretShare, err := newEdSecretScalarFromFed(remoteShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharePayload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{
+		Share:    secretShare,
+		PlanHash: bytes.Clone(session.planHash),
+	}, session.limits)
+	secretShare.Destroy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	shareEnvelope, err := newEnvelope(session.cfg, keygenStartRound, dealer, session.cfg.Self, payloadKeygenShare, sharePayload)
+	clear(sharePayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		clear(commitmentEnvelope.Payload)
+		clear(shareEnvelope.Payload)
+	})
+	return commitmentEnvelope, shareEnvelope
+}
+
 func maliciousFROSTIdentityAggregateEnvelopes(t *testing.T, session *KeygenSession, dealer tss.PartyID) (tss.Envelope, tss.Envelope) {
 	t.Helper()
 	if session.local == nil || session.local.commitments == nil {

@@ -172,21 +172,35 @@ partials, Paillier private factors, and CGGMP21 presign shares while leaving
 public metadata, such as party ids, public keys, signer sets, transcript hashes,
 and public signatures, available for diagnostics where practical.
 
-FROST Ed25519 signing nonces are derived from 32 bytes of fresh randomness and
-the local secret-share scalar encoding. A `SignSession` stores nonce bytes only
+FROST Ed25519 signing nonces are derived from 32 bytes of fresh randomness,
+the local secret-share scalar encoding, and a labeled hash that binds the
+session, message, signing context, sign plan, and hiding/binding nonce role.
+A `SignSession` stores nonce bytes only
 until its round-2 partial payload is constructed; successful partial generation
 and attributable signing failures clear those bytes immediately. `Destroy`
 should still be called after completion or abort to clear message copies,
-partials, additive-shift scalars, and any remaining session-owned material.
+partials, additive-shift scalars, public nonce commitments, and any remaining
+session-owned material.
 Round-1 nonce commitment points must use canonical, non-identity prime-order
 encodings. Failure to decode an authenticated signer's commitment is an
 attributable terminal error, not a recoverable malformed-message rejection.
+Failure to decode an authenticated signer's round-2 partial payload, including
+a non-canonical scalar, is likewise an attributable terminal error under RFC
+9591 Sections 5.3 and 7.4. The abort clears any remaining nonces, partials,
+message copy, and derivation state.
 
 FROST `KeyShare.Derive` validates the complete lifecycle confirmation and
 secret/public consistency before using derivation metadata. Destroyed shares and
 shares whose public metadata no longer matches their lifecycle state cannot
 derive child keys; public-only derivation requires a separately validated
 metadata snapshot.
+
+FROST verification shares are canonical, non-identity prime-order elements.
+An identity verification share publicly fixes the corresponding Shamir share
+to zero and can reduce the effective secrecy threshold. Standalone shares,
+persisted `KeyShare` records, and aggregate DKG/refresh/reshare evaluation all
+reject it. An aggregate identity at one participant index terminally aborts the
+lifecycle without blaming one dealer and clears staged secret material.
 
 CGGMP21 signing accepts only an already established generation with an empty
 signing path. A non-hardened BIP32 result becomes signable only through

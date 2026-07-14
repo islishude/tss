@@ -35,6 +35,7 @@ func (s *SignSession) abort() {
 	}
 	s.aborted = true
 	s.clearNonceScalars()
+	s.clearSigningCommitments()
 	if s.deltaScalar != nil {
 		s.deltaScalar.Set(fed.NewScalar())
 	}
@@ -58,6 +59,7 @@ func (s *SignSession) clearCompletedSigningState() {
 		return
 	}
 	s.clearNonceScalars()
+	s.clearSigningCommitments()
 	clearScalarMap(s.partials)
 	s.partials = nil
 	s.partialEnvelopes = nil
@@ -66,6 +68,14 @@ func (s *SignSession) clearCompletedSigningState() {
 	s.pendingEnvelopes = nil
 	clear(s.message)
 	s.message = nil
+}
+
+func (s *SignSession) clearSigningCommitments() {
+	if s == nil {
+		return
+	}
+	s.commitments = nil
+	s.commitMessage = tss.Envelope{}
 }
 
 // Destroy clears local reshare material retained by the reshare session.

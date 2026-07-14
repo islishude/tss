@@ -204,6 +204,13 @@ When all `n` dealers' commitments and shares are collected and verified:
 5. **Chain code:** After the round-2 commit/reveal check, `chain = XOR_{i=1}^{n} chainCode_i`.
 6. **Transcript hash:** Labeled, domain-separated SHA-256 binding the ciphersuite context, protocol, version, session ID, threshold, sorted parties, the aggregate of the round-1 chain-code commitments, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
 
+Every `V_p` must decode as a canonical, non-identity prime-order element.
+An identity at any participant index means that participant's scalar share is
+zero and is therefore public. DKG, refresh, and reshare treat this aggregate
+condition as an unblamed verification failure, terminally abort, and clear
+their staged secret material. Standalone `VerificationShare` and persisted
+`KeyShare` validation and decoding enforce the same invariant.
+
 At this point the session has only local pending material. It then broadcasts a
 round-2 `KeygenConfirmation` payload binding the session ID, sender, threshold,
 party set, group public key, keygen transcript hash, and group commitments hash.
@@ -254,6 +261,8 @@ CSPRNGs and must not intentionally repeat output. `SignOptions.NonceReader`
 serves the in-memory simulation helper.
 The session stores the canonical nonce bytes only until the round-2 partial is
 constructed. After that point the nonce bytes are cleared and set to `nil`.
+The public commitment map and retained local commitment envelope remain only
+until terminal success, abort, or `Destroy`, when they are also released.
 
 The signer broadcasts the public commitments:
 
@@ -323,9 +332,16 @@ z_i = d_i + ρ_i·e_i + λ_i·c·(x_i + δ)   mod q
 
 The signing session clears `d_i` and `e_i` immediately after the partial
 payload is constructed. After successful aggregation it also clears its message
-copy, partial scalars, and retained partial envelopes. Call
+copy, partial scalars, retained partial envelopes, commitment map, and local
+commitment envelope while preserving the final signature. Call
 `SignSession.Destroy()` when the session is no longer needed to clear the
 remaining session-owned material on a best-effort basis.
+
+An authenticated signer whose round-2 partial payload cannot be decoded,
+including a scalar outside `[0, q-1]` or with any of its top three bits set, is
+blamed from the public envelope evidence
+(`EvidenceKindFrostPartialSignature`). The recipient terminally aborts and
+clears its nonce and signing state as required by RFC 9591 Sections 5.3 and 7.4.
 
 ### Aggregation and Verification
 
@@ -490,7 +506,7 @@ crypto/ed25519.Verify(plan.VerificationKeyBytes(), message, sig) // true
 | -------------------- | ---------------------------------------------------------------------- |
 | Context string       | `"FROST-ED25519-SHA512-v1"` per RFC 9591 §6.1                          |
 | Ciphersuite          | Ed25519-SHA512 with the standard Ed25519 challenge                     |
-| Nonce generation     | RFC 9591 `H3` over `random32` concatenated with `SerializeScalar(x_i)` |
+| Nonce generation     | RFC 9591 `H3` input plus a repository-defined signing-intent binding   |
 | Binding factor       | RFC 9591 `H1` over `PK`, `H4(msg)`, `H5(encoded commitments)`, and `i` |
 | Scalar encoding      | 32-byte little-endian canonical scalar encoding                        |
 | Point encoding       | 32-byte compressed Edwards y-coordinate                                |
@@ -502,6 +518,11 @@ crypto/ed25519.Verify(plan.VerificationKeyBytes(), message, sig) // true
 
 - Dealerless DKG remains the default; trusted-dealer import is an explicit
   alternative whose plan and contributions are bound into the normal DKG.
+- Production nonce derivation appends a labeled hash of the session ID,
+  message, signing-context hash, sign-plan hash, and nonce role to the RFC
+  `random32 || SerializeScalar(x_i)` input. The Appendix E.1 conformance test
+  calls the exact RFC primitive explicitly; a separate committed regression
+  vector exercises the normal `StartSign` path with the repository extension.
 - Wire envelopes are this library's transport-neutral TLV messages, not an RFC wire format.
 - `Signature()` returns a plain `[]byte` rather than a structured `(R, z)` tuple — the caller can split on the 32-byte boundary if needed.
 

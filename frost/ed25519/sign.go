@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sync"
 
@@ -104,18 +105,41 @@ type SignRuntime struct {
 	Guard *tss.EnvelopeGuard
 }
 
+type signingNonceGenerator func(
+	secret *fed.Scalar,
+	reader io.Reader,
+	sessionID tss.SessionID,
+	message, contextHash, planHash []byte,
+	purpose string,
+) (*fed.Scalar, error)
+
 // StartSign starts a FROST signing session from a shared immutable lifecycle
 // plan and local runtime configuration. In production, the shared plan means
 // equivalent authenticated sign-run metadata, not a shared Go object. The run
 // creator must distribute one signing session ID, signer set, message, and
 // derivation context so every signer reconstructs an equivalent plan locally.
 func StartSign(key *KeyShare, plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelope, error) {
+	return startSignWithNonceGenerator(key, plan, runtime, signingNonceGenerate)
+}
+
+// startSignWithNonceGenerator is the package-internal conformance seam used by
+// exact RFC nonce vectors. Production callers enter through StartSign, which
+// always selects the repository-bound generator.
+func startSignWithNonceGenerator(
+	key *KeyShare,
+	plan *SignPlan,
+	runtime SignRuntime,
+	nonceGenerator signingNonceGenerator,
+) (*SignSession, []tss.Envelope, error) {
 	local := runtime.Local
 	if key == nil || key.state == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil key share"))
 	}
 	if local.Self == 0 {
 		local.Self = key.state.Party
+	}
+	if nonceGenerator == nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil signing nonce generator"))
 	}
 	if err := key.ValidateConsistency(); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
@@ -170,13 +194,13 @@ func StartSign(key *KeyShare, plan *SignPlan, runtime SignRuntime) (*SignSession
 	defer x.Set(fed.NewScalar())
 	// FROST uses two nonces per signer so the binding factor can commit to the
 	// complete participant set and prevent later nonce-substitution attacks.
-	d, err := signingNonceGenerate(
+	d, err := nonceGenerator(
 		x, local.Rand, plan.state.sessionID, message, plan.state.contextHash, planHash, "hiding",
 	)
 	if err != nil {
 		return nil, nil, err
 	}
-	e, err := signingNonceGenerate(
+	e, err := nonceGenerator(
 		x, local.Rand, plan.state.sessionID, message, plan.state.contextHash, planHash, "binding",
 	)
 	if err != nil {
