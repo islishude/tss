@@ -184,7 +184,7 @@ func (p *Presign) PublicMetadata() (PresignPublicMetadata, bool) {
 		SID:                  p.state.Epoch.SID,
 		RID:                  p.state.Epoch.RID,
 		EpochID:              bytes.Clone(p.state.EpochID),
-		Identifiers:          cloneEpochPartyIdentifierMetadata(p.state.Epoch.Identifiers),
+		Identifiers:          tss.CloneSlice(p.state.Epoch.Identifiers),
 		SourceEpochID:        sourceEpochID,
 		Epoch:                p.state.Epoch.Clone(),
 		LifecycleSlot:        lifecycleSlot,

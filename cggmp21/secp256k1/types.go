@@ -171,8 +171,8 @@ func (m KeySharePublicMetadata) Clone() KeySharePublicMetadata {
 		SID:                  m.SID,
 		RID:                  m.RID,
 		EpochID:              bytes.Clone(m.EpochID),
-		Identifiers:          cloneEpochPartyIdentifierMetadata(m.Identifiers),
-		PublicShares:         cloneEpochPublicShareMetadata(m.PublicShares),
+		Identifiers:          tss.CloneSlice(m.Identifiers),
+		PublicShares:         tss.CloneSlice(m.PublicShares),
 		AuxiliaryDigest:      bytes.Clone(m.AuxiliaryDigest),
 		SourceEpochID:        bytes.Clone(m.SourceEpochID),
 		Epoch:                m.Epoch.Clone(),
@@ -219,7 +219,7 @@ func (m PresignPublicMetadata) Clone() PresignPublicMetadata {
 		SID:                  m.SID,
 		RID:                  m.RID,
 		EpochID:              bytes.Clone(m.EpochID),
-		Identifiers:          cloneEpochPartyIdentifierMetadata(m.Identifiers),
+		Identifiers:          tss.CloneSlice(m.Identifiers),
 		SourceEpochID:        bytes.Clone(m.SourceEpochID),
 		Epoch:                m.Epoch.Clone(),
 		LifecycleSlot:        m.LifecycleSlot,
@@ -236,28 +236,6 @@ func (m PresignPublicMetadata) Clone() PresignPublicMetadata {
 		KeygenTranscriptHash: bytes.Clone(m.KeygenTranscriptHash),
 		PartiesHash:          bytes.Clone(m.PartiesHash),
 	}
-}
-
-func cloneEpochPartyIdentifierMetadata(in []EpochPartyIdentifier) []EpochPartyIdentifier {
-	if in == nil {
-		return nil
-	}
-	out := make([]EpochPartyIdentifier, len(in))
-	for i := range in {
-		out[i] = in[i].Clone()
-	}
-	return out
-}
-
-func cloneEpochPublicShareMetadata(in []EpochPublicShare) []EpochPublicShare {
-	if in == nil {
-		return nil
-	}
-	out := make([]EpochPublicShare, len(in))
-	for i := range in {
-		out[i] = in[i].Clone()
-	}
-	return out
 }
 
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
