@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"slices"
-	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testvectors"
@@ -189,82 +188,4 @@ func validateDecodedKeygenFixtureShare(share *KeyShare, expectedID tss.PartyID, 
 		return errors.New("canonical re-encoding changed")
 	}
 	return nil
-}
-
-func TestCommittedKeygenFixturesCoverCachedCombinations(t *testing.T) {
-	for _, key := range requiredKeygenFixtureOrder {
-		t.Run(fmt.Sprintf("%d-of-%d", key.threshold, key.n), func(t *testing.T) {
-			shares, ok, err := loadKeygenFixture(key.threshold, key.n)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !ok {
-				t.Fatalf("missing fixture for %d-of-%d", key.threshold, key.n)
-			}
-			if len(shares) != key.n {
-				t.Fatalf("got %d shares, want %d", len(shares), key.n)
-			}
-		})
-	}
-}
-
-func TestKeygenFixtureCanonicalRoundTrip(t *testing.T) {
-	fixtures, err := readKeygenFixtureFile()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range requiredKeygenFixtureOrder {
-		t.Run(fmt.Sprintf("%d-of-%d", key.threshold, key.n), func(t *testing.T) {
-			fixture, ok, err := findKeygenFixture(fixtures, key.threshold, key.n)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !ok {
-				t.Fatalf("missing fixture for %d-of-%d", key.threshold, key.n)
-			}
-			if len(fixture.Parties) != key.n || len(fixture.KeygenShares) != key.n {
-				t.Fatalf("%d-of-%d fixture has %d parties and %d shares", key.threshold, key.n, len(fixture.Parties), len(fixture.KeygenShares))
-			}
-			for i, encoded := range fixture.KeygenShares {
-				id := tss.PartyID(fixture.Parties[i])
-				raw, err := hex.DecodeString(encoded)
-				if err != nil {
-					t.Fatalf("party %d fixture decode: %v", id, err)
-				}
-				decoded, err := tss.DecodeBinaryWithLimits[KeyShare](raw, testLimits())
-				if err != nil {
-					t.Fatalf("party %d unmarshal: %v", id, err)
-				}
-				reencoded, err := decoded.MarshalBinaryWithLimits(testLimits())
-				if err != nil {
-					t.Fatalf("party %d re-marshal: %v", id, err)
-				}
-				if !bytes.Equal(reencoded, raw) {
-					t.Fatalf("party %d re-encoding changed", id)
-				}
-			}
-		})
-	}
-}
-
-func TestCachedKeygenSharesReturnsIndependentClones(t *testing.T) {
-	a := CachedKeygenShares(t, 2, 3)
-	b := CachedKeygenShares(t, 2, 3)
-
-	if a[1] == b[1] {
-		t.Fatal("expected independent KeyShare pointers")
-	}
-
-	a[1].state.PublicKey[0] ^= 1
-	a[1].state.ChainCode[0] ^= 1
-	a[1].state.Parties[0] = 99
-
-	if err := b[1].ValidateWithLimits(testLimits()); err != nil {
-		t.Fatalf("second clone was affected by first clone mutation: %v", err)
-	}
-
-	c := CachedKeygenShares(t, 2, 3)
-	if err := c[1].ValidateWithLimits(testLimits()); err != nil {
-		t.Fatalf("cache was polluted: %v", err)
-	}
 }

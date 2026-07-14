@@ -1,4 +1,4 @@
-//go:build tier1
+//go:build integration
 
 package secp256k1
 
@@ -12,7 +12,7 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-func TestTier1_CGGMP21_Presign_Figure9ProofsAreComplete(t *testing.T) {
+func TestIntegration_CGGMP21_Presign_Figure9ProofsAreComplete(t *testing.T) {
 	for _, kind := range []presignRedAlertKind{presignRedAlertNonce, presignRedAlertChi} {
 		t.Run(string(kind), func(t *testing.T) {
 			s1, s2 := figure9ReadyPresignSessions(t)
@@ -53,7 +53,7 @@ func TestTier1_CGGMP21_Presign_Figure9ProofsAreComplete(t *testing.T) {
 	}
 }
 
-func TestTier1_CGGMP21_Presign_Figure9MutationsAreRejected(t *testing.T) {
+func TestIntegration_CGGMP21_Presign_Figure9MutationsAreRejected(t *testing.T) {
 	for _, kind := range []presignRedAlertKind{presignRedAlertNonce, presignRedAlertChi} {
 		t.Run(string(kind), func(t *testing.T) {
 			s1, s2 := figure9ReadyPresignSessions(t)
@@ -89,7 +89,7 @@ func TestTier1_CGGMP21_Presign_Figure9MutationsAreRejected(t *testing.T) {
 	}
 }
 
-func TestTier1_CGGMP21_Presign_InvalidFigure9ProofBlamesOnlyDirectSender(t *testing.T) {
+func TestIntegration_CGGMP21_Presign_InvalidFigure9ProofBlamesOnlyDirectSender(t *testing.T) {
 	for _, kind := range []presignRedAlertKind{presignRedAlertNonce, presignRedAlertChi} {
 		t.Run(string(kind), func(t *testing.T) {
 			s1, s2 := figure9ReadyPresignSessions(t)
@@ -119,7 +119,7 @@ func TestTier1_CGGMP21_Presign_InvalidFigure9ProofBlamesOnlyDirectSender(t *test
 	}
 }
 
-func TestTier1_CGGMP21_Presign_AllValidFigure9ProofsAbortWithoutBlame(t *testing.T) {
+func TestIntegration_CGGMP21_Presign_AllValidFigure9ProofsAbortWithoutBlame(t *testing.T) {
 	s1, s2 := figure9ReadyPresignSessions(t)
 	receiver := mustPrepareFigure9(t, s1, presignRedAlertChi)
 	defer receiver.destroy()
@@ -151,7 +151,7 @@ func TestTier1_CGGMP21_Presign_AllValidFigure9ProofsAbortWithoutBlame(t *testing
 	}
 }
 
-func TestTier1_CGGMP21_Presign_LocalZeroDeltaAndChiRemainValid(t *testing.T) {
+func TestIntegration_CGGMP21_Presign_LocalZeroDeltaAndChiRemainValid(t *testing.T) {
 	s1, _ := figure9ReadyPresignSessions(t)
 	self, ok := s1.partyState(s1.key.state.Party)
 	if !ok {
@@ -234,7 +234,7 @@ func TestTier1_CGGMP21_Presign_LocalZeroDeltaAndChiRemainValid(t *testing.T) {
 	}
 }
 
-func TestTier1_CGGMP21_Presign_AggregateZeroDeltaIsUnattributed(t *testing.T) {
+func TestIntegration_CGGMP21_Presign_AggregateZeroDeltaIsUnattributed(t *testing.T) {
 	s1, _ := figure9ReadyPresignSessions(t)
 	self, ok := s1.partyState(s1.key.state.Party)
 	if !ok {

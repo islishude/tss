@@ -1,4 +1,4 @@
-//go:build tier1
+//go:build integration
 
 package secp256k1
 
@@ -13,7 +13,7 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-func TestTier1_CGGMPGenerateTrustedDealerKeySharesAndReconstruct(t *testing.T) {
+func TestIntegration_CGGMP21_TrustedDealer_GenerateReconstructAndSign(t *testing.T) {
 	encoded := make([]byte, 32)
 	encoded[31] = 17
 	secretKey, err := ParseSecretKey(encoded)

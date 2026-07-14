@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"io"
 	"math/big"
+	"strconv"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -665,32 +666,46 @@ func TestAffGStarProofSpecialSoundness(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer proof1.Destroy()
-	rng.reset()
-	proof2, err := ProveAffGStar(params, []byte("extract-aff-g-star-2"), stmt, witness, rng)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer proof2.Destroy()
 	if err := VerifyAffGStar(params, []byte("extract-aff-g-star-1"), stmt, proof1); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyAffGStar(params, []byte("extract-aff-g-star-2"), stmt, proof2); err != nil {
+	bits1 := affGStarChallenges(proof1.TranscriptHash, len(proof1.A))
+	var (
+		proof2      *AffGStarProof
+		proof2State []byte
+	)
+	round := -1
+	// Distinct transcript states can legitimately map to the same 8-bit
+	// challenge. Try deterministic domain-separated states until special
+	// soundness has the two different challenges it requires.
+	for variant := 2; variant <= 256 && proof2 == nil; variant++ {
+		proof2State = strconv.AppendInt([]byte("extract-aff-g-star-"), int64(variant), 10)
+		rng.reset()
+		candidate, proveErr := ProveAffGStar(params, proof2State, stmt, witness, rng)
+		if proveErr != nil {
+			t.Fatal(proveErr)
+		}
+		candidateBits := affGStarChallenges(candidate.TranscriptHash, len(candidate.A))
+		for i := range proof1.A {
+			if affGStarChallengeBit(bits1, i) != affGStarChallengeBit(candidateBits, i) {
+				proof2 = candidate
+				round = i
+				break
+			}
+		}
+		if proof2 == nil {
+			candidate.Destroy()
+		}
+	}
+	if proof2 == nil || round < 0 {
+		t.Fatal("could not derive distinct challenges from domain-separated transcript states")
+	}
+	defer proof2.Destroy()
+	if err := VerifyAffGStar(params, proof2State, stmt, proof2); err != nil {
 		t.Fatal(err)
 	}
 	if !equalByteLists(proof1.A, proof2.A) || !equalByteLists(proof1.B, proof2.B) || !equalByteLists(proof1.R, proof2.R) {
 		t.Fatal("commitments differ — RNG replay failed")
-	}
-	bits1 := affGStarChallenges(proof1.TranscriptHash, len(proof1.A))
-	bits2 := affGStarChallenges(proof2.TranscriptHash, len(proof2.A))
-	round := -1
-	for i := range proof1.A {
-		if affGStarChallengeBit(bits1, i) != affGStarChallengeBit(bits2, i) {
-			round = i
-			break
-		}
-	}
-	if round < 0 {
-		t.Fatal("independent transcript states produced identical bit challenges")
 	}
 	z1, _ := wire.DecodeBigInt(proof1.Z[round])
 	z2, _ := wire.DecodeBigInt(proof2.Z[round])

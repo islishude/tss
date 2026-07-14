@@ -49,7 +49,7 @@ tests; it is not an audit or production-readiness claim.
 | Publish the aggregated ciphertext and a setup-less `Πdec`               | `figure9.go`, `internal/zk/paillier/dec.go`       | DONE   |
 | Publish one setup-less `Πaff-g*` per peer over canonical MtA views      | `figure9.go`, `internal/zk/paillier/affg_star.go` | DONE   |
 | Attribute the first invalid proof to its authenticated sender           | `figure9.go`, `evidence.go`                       | DONE   |
-| Return an unblamed invariant if all proofs verify but the alert remains | `figure9.go`, `figure9_tier1_test.go`             | DONE   |
+| Return an unblamed invariant if all proofs verify but the alert remains | `figure9.go`, `figure9_integration_test.go`       | DONE   |
 
 ## Figure 10: Signing
 
@@ -62,28 +62,28 @@ tests; it is not an audit or production-readiness claim.
 
 ## Durable Lifecycle
 
-| Requirement                                                                        | Code location                                             | Status |
-| ---------------------------------------------------------------------------------- | --------------------------------------------------------- | ------ |
-| Load the exact current generation and validate canonical key material before start | `lifecycle_keyshare.go`, `presign_round1.go`              | DONE   |
-| Acquire a generation-bound presign lease before releasing initial envelopes        | `presign_round1.go`, `tssrun/lifecycle.go`                | DONE   |
-| Atomically persist an available presign and finish its lease                       | `presign_lifecycle.go`, `tssrun/LifecycleStore`           | DONE   |
-| Expose only a public persisted descriptor after successful presign commit          | `presign_runtime.go`, `presign_runtime_test.go`           | DONE   |
-| Atomically claim availability and persist exact intent and outbox                  | `online_sign_lifecycle.go`, `sign_attempt_coordinator.go` | DONE   |
-| Reconcile unknown outcomes only with the exact attempt query                       | `online_sign_lifecycle.go`, `tssrun/lifecycle.go`         | DONE   |
-| Fence refresh/reshare cutover and burn source-epoch available presigns             | `tssrun/lifecycle.go`, lifecycle conformance tests        | DONE   |
-| Install a non-hardened child as a distinct lineage after fresh Figure 7/F.1        | `child_derivation.go`, `child_derivation_plan.go`         | DONE   |
+| Requirement                                                                        | Code location                                               | Status |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------ |
+| Load the exact current generation and validate canonical key material before start | `lifecycle_keyshare.go`, `presign_round1.go`                | DONE   |
+| Acquire a generation-bound presign lease before releasing initial envelopes        | `presign_round1.go`, `tssrun/lifecycle.go`                  | DONE   |
+| Atomically persist an available presign and finish its lease                       | `presign_lifecycle.go`, `tssrun/LifecycleStore`             | DONE   |
+| Expose only a public persisted descriptor after successful presign commit          | `presign_runtime.go`, `presign_runtime_integration_test.go` | DONE   |
+| Atomically claim availability and persist exact intent and outbox                  | `online_sign_lifecycle.go`, `sign_attempt_coordinator.go`   | DONE   |
+| Reconcile unknown outcomes only with the exact attempt query                       | `online_sign_lifecycle.go`, `tssrun/lifecycle.go`           | DONE   |
+| Fence refresh/reshare cutover and burn source-epoch available presigns             | `tssrun/lifecycle.go`, lifecycle conformance tests          | DONE   |
+| Install a non-hardened child as a distinct lineage after fresh Figure 7/F.1        | `child_derivation.go`, `child_derivation_plan.go`           | DONE   |
 
 ## Security Profile and Negative Coverage
 
-| Requirement                                                                               | Code location                                                  | Status |
-| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------ |
-| Default `(Ell,EllPrime,Epsilon,ChallengeBits)=(256,1280,512,256)`                         | `internal/zk/paillier/params.go`                               | DONE   |
-| Enforce independent 3072-bit minimum Paillier and auxiliary moduli                        | `internal/zk/paillier`, `paper_auxiliary_payload.go`           | DONE   |
-| Use bounded rejection sampling for canonical non-zero field and modulus challenges        | `internal/zk/challenge`, `internal/zk/paillier/modulus.go`     | DONE   |
-| Reject malformed points, ciphertext non-members, range violations, and wrong domains      | `internal/zk/paillier/*_test.go`                               | DONE   |
-| Reject wrong epoch, RID, plan, sender, recipient, committee, or signer set                | protocol state-transition and integration tests                | DONE   |
-| Reject early, duplicate, conflicting, replayed, and out-of-order payloads without effects | `presign_state_transition_test.go`, lifecycle transition tests | DONE   |
-| Keep Figure 7 accusation records and Figure 9 evidence public-only where required         | `paper_auxiliary_state_test.go`, `figure9_tier1_test.go`       | DONE   |
+| Requirement                                                                               | Code location                                                              | Status |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------ |
+| Default `(Ell,EllPrime,Epsilon,ChallengeBits)=(256,1280,512,256)`                         | `internal/zk/paillier/params.go`                                           | DONE   |
+| Enforce independent 3072-bit minimum Paillier and auxiliary moduli                        | `internal/zk/paillier`, `paper_auxiliary_payload.go`                       | DONE   |
+| Use bounded rejection sampling for canonical non-zero field and modulus challenges        | `internal/zk/challenge`, `internal/zk/paillier/modulus.go`                 | DONE   |
+| Reject malformed points, ciphertext non-members, range violations, and wrong domains      | `internal/zk/paillier/*_test.go`                                           | DONE   |
+| Reject wrong epoch, RID, plan, sender, recipient, committee, or signer set                | protocol state-transition and integration tests                            | DONE   |
+| Reject early, duplicate, conflicting, replayed, and out-of-order payloads without effects | `presign_state_transition_integration_test.go`, lifecycle transition tests | DONE   |
+| Keep Figure 7 accusation records and Figure 9 evidence public-only where required         | `paper_auxiliary_state_test.go`, `figure9_integration_test.go`             | DONE   |
 
 ## Review Gaps
 

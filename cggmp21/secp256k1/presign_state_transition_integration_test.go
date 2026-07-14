@@ -1,3 +1,5 @@
+//go:build integration
+
 package secp256k1
 
 import (

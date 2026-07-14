@@ -1,3 +1,5 @@
+//go:build integration
+
 package secp256k1
 
 import (
@@ -8,23 +10,6 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
-
-func paperKeygenTestPolicies() tss.PolicySet {
-	entries := CGGMP21Policies().Entries()
-	for i := range entries {
-		entries[i].BroadcastConsistency = tss.BroadcastConsistencyNone
-		entries[i].RequireSenderSignature = false
-	}
-	policies, err := tss.NewPolicySet(entries...)
-	if err != nil {
-		panic(err)
-	}
-	return policies
-}
-
-func paperKeygenTestGuard(self tss.PartyID, parties tss.PartySet, sid tss.SessionID) *tss.EnvelopeGuard {
-	return tss.NewTestEnvelopeGuard(self, parties, tss.ProtocolCGGMP21Secp256k1, sid, paperKeygenTestPolicies())
-}
 
 func routePaperKeygen(t *testing.T, sessions map[tss.PartyID]*KeygenSession, parties tss.PartySet, queue []tss.Envelope) {
 	t.Helper()
