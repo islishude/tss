@@ -7,9 +7,10 @@ consensus and security boundaries.
 
 ## Read Before Changing Code
 
-- Read [`docs/testing-rules.md`](docs/testing-rules.md) before adding, moving, or
-  changing tests. It defines the test tiers, required invariants, fuzzing rules,
-  vector policy, and crash/restart expectations.
+- Read [`docs/testing-rules.md`](docs/testing-rules.md) and
+  [`docs/testing-invariants.md`](docs/testing-invariants.md) before adding,
+  moving, or changing tests. They separate test tiers and design rules from
+  cross-cutting, protocol, and crash/restart contracts.
 - Read [`docs/security.md`](docs/security.md) and the relevant protocol document
   before changing a protocol, lifecycle, storage, transport, or secret-handling
   path.
@@ -180,8 +181,9 @@ the changed boundary or task justifies the cost.
 - Update `docs/*.md` when behavior, API, wire format, proof statement, security
   assumption, lifecycle, storage, transport, recovery, or deployment expectations
   change.
-- Update `docs/testing-rules.md` when adding a test tier, invariant class,
-  protocol phase, or shared harness pattern.
+- Update `docs/testing-rules.md` for test tiers or shared testing practices, and
+  `docs/testing-invariants.md` for durable invariant classes, protocol phases,
+  or lifecycle coverage contracts.
 - Add or update executable external-package examples when a public API changes.
 - Keep README status and capability claims synchronized with executable code and
   current review status.

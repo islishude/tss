@@ -5,6 +5,9 @@ current shape of the repository by package, build tag, invariant group, and
 runtime tier so future removals can be justified by invariant coverage rather
 than file count.
 
+Stable policy lives in [`testing-rules.md`](testing-rules.md); normative
+behavioral coverage lives in [`testing-invariants.md`](testing-invariants.md).
+
 Snapshot date: 2026-07-14, after the CGGMP21 CI-timeout tier cleanup.
 
 ## Repository Snapshot

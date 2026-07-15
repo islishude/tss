@@ -187,9 +187,10 @@ race, stress, and fuzz suites:
 | `make fuzz-smoke`         | Short fuzz pass for decoder and reject-path targets.                      |
 | `make vectors-verify-all` | Verify committed wire, protocol, and fixture vectors.                     |
 
-Testing policy and invariant requirements live in
-[`docs/testing-rules.md`](docs/testing-rules.md). Canonical vector commands and
-layout live in
+Testing policy lives in [`docs/testing-rules.md`](docs/testing-rules.md), with
+behavioral contracts in
+[`docs/testing-invariants.md`](docs/testing-invariants.md). Canonical vector
+commands and layout live in
 [`internal/testvectors/README.md`](internal/testvectors/README.md).
 
 ## Documentation
@@ -200,7 +201,7 @@ layout live in
 | Security     | [Threat model and caller responsibilities](docs/security.md), [wire format](docs/wire.md), [root package](docs/root-package.md)                                                     |
 | Protocols    | [FROST Ed25519](docs/frost-ed25519.md), [CGGMP21 secp256k1](docs/cggmp21-secp256k1.md)                                                                                              |
 | Review       | [Architecture](docs/architecture.md), [Paillier/ZK proofs](docs/paillier-zk-proofs.md), [audit guide](docs/audit-guide.md), [CGGMP21 checklist](docs/cggmp21-protocol-checklist.md) |
-| Verification | [Testing rules](docs/testing-rules.md), [test inventory](docs/test-inventory.md), [test vectors](internal/testvectors/README.md)                                                    |
+| Verification | [Testing rules](docs/testing-rules.md), [testing invariants](docs/testing-invariants.md), [test inventory](docs/test-inventory.md), [test vectors](internal/testvectors/README.md)  |
 
 ## License
 
