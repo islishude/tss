@@ -10,8 +10,9 @@ import (
 // It returns a [DerivationResult] containing the child public key, cumulative
 // additive shift, and child chain code.
 //
-// Only non-hardened indices (i < 2^31) are supported. If path is nil or empty,
-// the parent key is returned unchanged with a zero additive shift.
+// Only non-hardened indices (i < 2^31) are supported, and path may contain at
+// most [tss.MaxDerivationDepth] indices. If path is nil or empty, the parent key
+// is returned unchanged with a zero additive shift.
 func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	return bip32util.DeriveEd25519KhovratovichLaw(publicKey, chainCode, path, opts...)
 }

@@ -13,53 +13,16 @@ import (
 func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 	t.Parallel()
 
-	parties := tss.NewPartySet(1, 2)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	kg1, _, err := startFROSTKeygen(tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   parties,
-		Self:      1,
-		SessionID: sessionID,
-	}, testFROSTGuard(1, parties, sessionID))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, out2, err := startFROSTKeygen(tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   parties,
-		Self:      2,
-		SessionID: sessionID,
-	}, testFROSTGuard(2, parties, sessionID))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Base envelopes: out2[0] = broadcast commitment, out2[1] = direct share to party 1.
-	commit := out2[0]
-	if commit.PayloadType != payloadKeygenCommitments {
-		t.Fatalf("expected payloadKeygenCommitments, got %q", commit.PayloadType)
-	}
-
-	share := out2[1]
-	if share.PayloadType != payloadKeygenShare {
-		t.Fatalf("expected payloadKeygenShare, got %q", share.PayloadType)
-	}
-
 	tests := []struct {
-		name     string
-		base     tss.Envelope
-		mutate   func(tss.Envelope) tss.Envelope
-		protect  tss.ChannelProtection
-		wantErr  error  // sentinel error (checked with errors.Is)
-		wantCode string // protocol error code (checked with assertFROSTProtocolCode)
+		name        string
+		payloadType tss.PayloadType
+		mutate      func(tss.Envelope) tss.Envelope
+		protect     tss.ChannelProtection
+		wantErr     error  // sentinel error (checked with errors.Is)
+		wantCode    string // protocol error code (checked with assertFROSTProtocolCode)
 	}{
 		{
-			name: "wrong session", base: commit,
+			name: "wrong session", payloadType: payloadKeygenCommitments,
 			mutate: func(env tss.Envelope) tss.Envelope {
 				wrongID, _ := tss.NewSessionID(nil)
 				env.SessionID = wrongID
@@ -68,7 +31,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			wantCode: tss.ErrCodeInvalidMessage,
 		},
 		{
-			name: "wrong protocol", base: commit,
+			name: "wrong protocol", payloadType: payloadKeygenCommitments,
 			mutate: func(env tss.Envelope) tss.Envelope {
 				env.Protocol = "wrong-protocol"
 				return env
@@ -76,7 +39,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			wantCode: tss.ErrCodeInvalidMessage,
 		},
 		{
-			name: "wrong round", base: commit,
+			name: "wrong round", payloadType: payloadKeygenCommitments,
 			mutate: func(env tss.Envelope) tss.Envelope {
 				env.Round = 2
 				return env
@@ -84,7 +47,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			wantCode: tss.ErrCodeInvalidMessage,
 		},
 		{
-			name: "wrong recipient on share", base: share,
+			name: "wrong recipient on share", payloadType: payloadKeygenShare,
 			mutate: func(env tss.Envelope) tss.Envelope {
 				env.To = 99
 				return env
@@ -92,7 +55,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			wantErr: tss.ErrWrongRecipient,
 		},
 		{
-			name: "broadcast secret share", base: share,
+			name: "broadcast secret share", payloadType: payloadKeygenShare,
 			mutate: func(env tss.Envelope) tss.Envelope {
 				env.To = 0
 				return env
@@ -100,7 +63,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			wantErr: tss.ErrExpectedDirectMessage,
 		},
 		{
-			name: "non-confidential share", base: share,
+			name: "non-confidential share", payloadType: payloadKeygenShare,
 			mutate: func(env tss.Envelope) tss.Envelope {
 				return env
 			},
@@ -113,7 +76,14 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			mutated := tc.mutate(tc.base)
+			kg1, remoteOut := frostKeygenTransitionSessions(t)
+			defer kg1.Destroy()
+			to := tss.BroadcastPartyId
+			if tc.payloadType == payloadKeygenShare {
+				to = kg1.cfg.Self
+			}
+			base := mustFROSTEnvelope(t, remoteOut, tc.payloadType, to)
+			mutated := tc.mutate(base)
 
 			in := testutil.DeliverEnvelope(mutated)
 			if tc.protect != tss.ChannelProtectionUnknown {
@@ -137,21 +107,12 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 	// Duplicate commitment: use a fresh session so the first delivery does not interfere.
 	t.Run("duplicate commitment", func(t *testing.T) {
 		t.Parallel()
-
-		sess2, _, err := startFROSTKeygen(tss.ThresholdConfig{
-			Threshold: 2,
-			Parties:   parties,
-			Self:      1,
-			SessionID: sessionID,
-		}, testFROSTGuard(1, parties, sessionID))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		dup := commit
+		sess2, remoteOut := frostKeygenTransitionSessions(t)
+		defer sess2.Destroy()
+		dup := mustFROSTEnvelope(t, remoteOut, payloadKeygenCommitments, tss.BroadcastPartyId)
 
 		_, _ = sess2.Handle(testutil.DeliverEnvelope(dup))
-		_, err = sess2.Handle(testutil.DeliverEnvelope(dup))
+		_, err := sess2.Handle(testutil.DeliverEnvelope(dup))
 		if !errors.Is(err, tss.ErrDuplicateMessage) {
 			t.Fatalf("expected ErrDuplicateMessage on second delivery, got %v", err)
 		}

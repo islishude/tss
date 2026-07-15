@@ -134,6 +134,55 @@ func TestFROSTTrustedDealerPlanAndContributionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFROSTTrustedDealerPlanSnapshotReturnsCompleteOwnedIntent(t *testing.T) {
+	t.Parallel()
+	plan, _ := newFROSTTrustedDealerFixture(t, 814, 19, 0x3a, 815)
+
+	assertSnapshot := func(t *testing.T, candidate *TrustedDealerImportPlan) TrustedDealerImportPlanSnapshot {
+		t.Helper()
+		snapshot, ok := candidate.Snapshot()
+		if !ok {
+			t.Fatal("missing trusted-dealer plan snapshot")
+		}
+		if len(snapshot.Commitments) != len(candidate.state.Commitments) {
+			t.Fatalf("constant commitment count = %d, want %d", len(snapshot.Commitments), len(candidate.state.Commitments))
+		}
+		if len(snapshot.ChainCodeCommitments) != len(candidate.state.Commitments) {
+			t.Fatalf("chain-code commitment count = %d, want %d", len(snapshot.ChainCodeCommitments), len(candidate.state.Commitments))
+		}
+		for _, commitment := range candidate.state.Commitments {
+			if got := snapshot.Commitments[commitment.Party]; !bytes.Equal(got, commitment.ConstantCommitment.Bytes()) {
+				t.Fatalf("party %d constant commitment mismatch", commitment.Party)
+			}
+			if got := snapshot.ChainCodeCommitments[commitment.Party]; !bytes.Equal(got, commitment.ChainCodeCommit) {
+				t.Fatalf("party %d chain-code commitment mismatch", commitment.Party)
+			}
+		}
+		return snapshot
+	}
+
+	snapshot := assertSnapshot(t, plan)
+	party := plan.state.Commitments[0].Party
+	snapshot.Parties[0] = 99
+	snapshot.PublicKey[0] ^= 0xff
+	snapshot.ChainCode[0] ^= 0xff
+	snapshot.Commitments[party][0] ^= 0xff
+	snapshot.ChainCodeCommitments[party][0] ^= 0xff
+	delete(snapshot.Commitments, plan.state.Commitments[1].Party)
+	delete(snapshot.ChainCodeCommitments, plan.state.Commitments[1].Party)
+	assertSnapshot(t, plan)
+
+	raw, err := plan.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded TrustedDealerImportPlan
+	if err := decoded.UnmarshalBinary(raw); err != nil {
+		t.Fatal(err)
+	}
+	assertSnapshot(t, &decoded)
+}
+
 func TestFROSTTrustedDealerStartRejectsMismatchedContributionsWithoutConsumption(t *testing.T) {
 	t.Run("wrong party", func(t *testing.T) {
 		plan, contributions := newFROSTTrustedDealerFixture(t, 820, 7, 0x31, 821)
@@ -256,8 +305,8 @@ func TestFROSTTrustedDealerCommitmentBindingsRejectBeforeAcceptance(t *testing.T
 
 			out, err := session1.Handle(testutil.DeliverEnvelope(env))
 			protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-			if protocolErr.Blame != nil {
-				t.Fatal("trusted-dealer plan binding failure produced blame")
+			if protocolErr.Party != env.From || protocolErr.Blame == nil {
+				t.Fatal("trusted-dealer public commitment rejection lacked sender attribution")
 			}
 			if len(out) != 0 {
 				t.Fatalf("rejected trusted-dealer commitment produced %d envelopes", len(out))
@@ -266,7 +315,7 @@ func TestFROSTTrustedDealerCommitmentBindingsRejectBeforeAcceptance(t *testing.T
 				t.Fatal("trusted-dealer commitment rejection did not abort and clear local material")
 			}
 			remoteSlot := session1.round1.slots[2]
-			if remoteSlot.commitments != nil || remoteSlot.share != nil || remoteSlot.chainCodeCommit != nil {
+			if remoteSlot.commitments != nil || remoteSlot.share != nil || remoteSlot.chainCodeCommit != nil || remoteSlot.proof != nil {
 				t.Fatal("trusted-dealer commitment rejection mutated the remote inbox slot")
 			}
 		})

@@ -38,6 +38,7 @@ func (s *SignSession) abort() {
 	s.clearSigningCommitments()
 	if s.deltaScalar != nil {
 		s.deltaScalar.Set(fed.NewScalar())
+		s.deltaScalar = nil
 	}
 	if s.derivation != nil {
 		s.derivation.Destroy()

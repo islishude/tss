@@ -30,9 +30,26 @@ func frostMarshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string
 	return encoded
 }
 
+// frostKeygenCommitmentBlame builds public blame evidence for invalid FROST
+// DKG commitments or their constant-term proof. Commitment payloads are
+// broadcast public material, so evidence may bind the authenticated envelope.
+func frostKeygenCommitmentBlame(config tss.ThresholdConfig, env tss.Envelope, commitments [][]byte) *tss.Blame {
+	fields := []tss.EvidenceField{
+		{Key: frostEvidenceFieldPartiesHash, Value: tss.PartySetHash(config.Parties, frostPartySetHashLabel)},
+	}
+	if commitments != nil {
+		fields = append(fields, tss.EvidenceField{Key: frostEvidenceFieldCommitmentsHash, Value: transcript.ByteSlicesHash(frostCommitmentsHashLabel, commitments)})
+	}
+	return &tss.Blame{
+		Reason:   "invalid FROST DKG commitment or proof",
+		Parties:  tss.NewPartySet(env.From),
+		Evidence: frostMarshalEvidence(env, tss.EvidenceKindFrostKeygenCommitment, "invalid FROST DKG commitment or proof", fields...),
+	}
+}
+
 // frostKeygenBlame builds Blame evidence for an invalid FROST DKG share.
 func frostKeygenBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitments [][]byte) *tss.Blame {
-	evidenceEnv, err := newEnvelope(config, 1, dealer, config.Self, payloadKeygenShare, nil)
+	evidenceEnv, err := newEnvelope(config, keygenShareRound, dealer, config.Self, payloadKeygenShare, nil)
 	if err != nil {
 		// Envelope construction with nil payload is infallible under normal
 		// operation; only a corrupted limits config could trigger this path.

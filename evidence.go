@@ -43,6 +43,8 @@ const (
 	EvidenceKindAggregateSign EvidenceKind = "aggregate_signature"
 	// EvidenceKindFrostKeygenShare marks an invalid FROST DKG share.
 	EvidenceKindFrostKeygenShare EvidenceKind = "frost_keygen_share"
+	// EvidenceKindFrostKeygenCommitment marks invalid public FROST DKG commitment or proof material.
+	EvidenceKindFrostKeygenCommitment EvidenceKind = "frost_keygen_commitment"
 	// EvidenceKindFrostReshareShare marks an invalid FROST reshare share.
 	EvidenceKindFrostReshareShare EvidenceKind = "frost_reshare_share"
 	// EvidenceKindFrostNonceCommitment marks an invalid FROST signing nonce commitment.
@@ -336,6 +338,7 @@ func validEvidenceKind(kind EvidenceKind) bool {
 		EvidenceKindPresignRedAlert,
 		EvidenceKindSignPartial,
 		EvidenceKindAggregateSign,
+		EvidenceKindFrostKeygenCommitment,
 		EvidenceKindFrostKeygenShare,
 		EvidenceKindFrostReshareShare,
 		EvidenceKindFrostNonceCommitment,

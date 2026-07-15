@@ -116,7 +116,7 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, keygenOut, err := startFROSTKeygen(tss.ThresholdConfig{
+	keygen1, keygenOut, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   tss.NewPartySet(1, 2),
 		Self:      1,
@@ -125,6 +125,24 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer keygen1.Destroy()
+	keygen2, keygenOut2, err := startFROSTKeygen(tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   tss.NewPartySet(1, 2),
+		Self:      2,
+		SessionID: keygenSessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keygen2.Destroy()
+	keygenRound2, err := keygen1.Handle(testutil.DeliverEnvelope(
+		mustFROSTEnvelope(t, keygenOut2, payloadKeygenCommitments, tss.BroadcastPartyId),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keygenOut = append(keygenOut, keygenRound2...)
 
 	shares := frostKeygen(t, 2, 2)
 	confirmation, err := shares[1].NewConfirmation()

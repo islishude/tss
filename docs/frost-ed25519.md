@@ -1,15 +1,21 @@
 # FROST Ed25519
 
-The `frost/ed25519` package implements a dealerless FROST-style threshold Ed25519 protocol based on [RFC 9591](https://www.rfc-editor.org/rfc/rfc9591).
+The `frost/ed25519` package combines the dealerless key-generation protocol from
+the [original FROST paper](https://eprint.iacr.org/2020/852) with the two-round
+Ed25519 signing protocol from
+[RFC 9591](https://www.rfc-editor.org/rfc/rfc9591). RFC 9591 specifies signing,
+not dealerless key generation. Repository-defined lifecycle confirmation,
+production nonce binding, refresh, reshare, and HD derivation are documented as
+extensions rather than RFC behavior.
 
 ## Protocol Overview
 
-| Phase     | Rounds | Description                                               |
-| --------- | ------ | --------------------------------------------------------- |
-| DKG       | 2      | Dealerless distributed key generation plus confirmation.  |
-| Signing   | 2      | Nonce commitment (round 1), partial signature (round 2).  |
-| Resharing | 2      | Reshare/refresh shares, then target-holder confirmations. |
-| BIP32 HD  | local  | Khovratovich-Law non-hardened child key derivation.       |
+| Phase     | Rounds | Description                                                               |
+| --------- | ------ | ------------------------------------------------------------------------- |
+| DKG       | 3      | Proof-carrying commitments, confidential shares, repository confirmation. |
+| Signing   | 2      | RFC 9591 nonce commitment, then partial signature.                        |
+| Resharing | 2      | Reshare/refresh shares, then target-holder confirmations.                 |
+| BIP32 HD  | local  | Khovratovich-Law non-hardened child key derivation.                       |
 
 The group public key is a standard Ed25519 verification key. Signatures are standard 64-byte `R || S` Ed25519 values verifiable with `crypto/ed25519.Verify`.
 
@@ -43,6 +49,11 @@ any application key identifier. Each party validates the metadata, reconstructs
 for `tss.ProtocolFROSTEd25519` and the same session ID, calls `StartKeygen`
 locally, dispatches inbound envelopes to `KeygenSession.Handle`, and routes any
 returned envelopes.
+
+Round 1 broadcasts coefficient commitments, the chain-code commitment, and a
+required constant-term Schnorr proof. A party emits its round-2 confidential
+shares only after it has verified every round-1 proof. Round 3 broadcasts the
+repository confirmation and chain-code reveal.
 
 The keygen session ID is stored in `KeyShare` metadata after completion.
 `KeygenSession.KeyShare()` becomes available only after the confirmation round.
@@ -95,6 +106,15 @@ must keep old-only dealer sessions registered through the confirmation round;
 new-holder completion itself does not depend on every removed dealer observing
 that final round.
 
+Refresh and reshare restart tests exercise this boundary through the shared
+clone-on-read, compare-and-swap `internal/testharness.CrashyStore`. A crash
+before persistence recovers only the source generation, which remains usable by
+the old committee. A crash after persistence, or an unknown commit outcome,
+must re-read the authoritative store and recover only the target generation,
+which is usable by the target committee. A definite non-commit destroys the
+candidate; an unknown outcome retains callback ownership until reconciliation
+and never authorizes selection from an in-memory guess.
+
 ## Trusted-Dealer Import and Secret Reconstruction
 
 `NewTrustedDealerImport` splits an existing group secret into non-zero additive
@@ -104,10 +124,18 @@ constant-term commitment, and each chain-code commitment. Contributions are
 secret-bearing canonical records and must be provisioned to exactly one party
 through a confidential caller-managed channel.
 
+`TrustedDealerImportPlan.Snapshot()` returns caller-owned public data.
+`Commitments` means the per-party constant-term commitments; the separate
+`ChainCodeCommitments` map contains deep-copied per-party chain-code
+commitments. This additive snapshot field does not change the plan digest or
+wire shape.
+
 Each party calls `StartTrustedDealerImport`. From round 1 onward this is the
 ordinary keygen state machine and the existing keygen payload shapes. Every
 degree-zero polynomial commitment must match the plan before state mutation;
-completion rechecks the target public key and XOR-aggregated chain code.
+every participant must also prove knowledge of that constant term, including
+1-of-1 and full-threshold ceremonies. Completion rechecks the target public key
+and XOR-aggregated chain code.
 `GenerateTrustedDealerKeyShares` runs those same sessions through an
 authenticated in-memory router for centralized provisioning and returns
 caller-owned `KeyShare` values that must be encrypted before distribution.
@@ -163,7 +191,7 @@ f_i(x) = a_{i,0} + a_{i,1}·x + … + a_{i,t-1}·x^{t-1}  (mod q)
 
 where `t` is the threshold and `q` is the Ed25519 scalar order (`2^252 + 27742317777372353535851937790883648493`).
 
-### Commitments
+### Round 1: Commitments and Constant-Term Proof
 
 Each party publishes Feldman-style coefficient commitments:
 
@@ -171,9 +199,40 @@ Each party publishes Feldman-style coefficient commitments:
 C_{i,k} = a_{i,k} · B          for k ∈ [0, t-1]
 ```
 
-where `B` is the Ed25519 base point. Commitments are broadcast as a `keygenCommitmentsPayload` TLV record.
+where `B` is the Ed25519 base point. The round-1
+`keygenCommitmentsPayload` broadcasts those commitments, the dealer's
+chain-code commitment, and a required Schnorr proof of knowledge for the
+constant coefficient `a_{i,0}`. The proof is required for every threshold and
+for both dealerless and trusted-dealer-import flows; there is no 1-of-1,
+full-threshold, or trusted-import exception. The payload keeps schema version 1
+and requires the nested proof at tag 4; the retired three-field body is rejected
+without a fallback decoder.
 
-### Share Distribution
+For public statement `C_{i,0} = a_{i,0}·B`, the prover samples a secret nonce
+`r`, publishes a canonical non-identity prime-order point `R = r·B`, derives a
+canonical non-zero challenge `c`, and returns a canonical response `μ`:
+
+```
+μ = r + c·a_{i,0}  mod q
+μ·B  ≟  R + c·C_{i,0}
+```
+
+The nested proof wire record encodes `R` at tag 1 and `μ` at tag 2.
+
+A zero response is valid when it satisfies the equation. The nonce is a
+one-use `internal/secret.Scalar` and is destroyed after finalization, failure,
+or cancellation. It is sampled after the polynomial, local share, and chain
+code so adding the proof does not reorder deterministic key-material RNG. The
+challenge uses a labeled SHA-256 transcript and rejection sampling rather than
+biased modular reduction, with a fixed limit of 256 candidates. It binds the protocol and
+version, ciphersuite, session, round 1, dealer, threshold, canonically sorted
+complete party set, plan hash, every coefficient commitment, chain-code
+commitment, `C_{i,0}`, and `R`. This proof prevents a dealer from choosing its
+constant commitment as a function of the other dealers' commitments without
+knowing the corresponding secret, the rogue-key attack addressed by the
+original FROST paper.
+
+### Round 2: Confidential Share Distribution
 
 Each party computes private shares for every other party and delivers them in confidential point-to-point envelopes:
 
@@ -181,7 +240,12 @@ Each party computes private shares for every other party and delivers them in co
 s_{i→j} = f_i(j)   (mod q)
 ```
 
-The share is encoded as a canonical 32-byte scalar and sent as a direct confidential message (`To != 0`, transport must report `ChannelConfidential` in `ReceiveInfo`).
+The share is encoded as a canonical 32-byte scalar and sent as a direct
+confidential message (`To != 0`, transport must report `ChannelConfidential` in
+`ReceiveInfo`). No dealer emits any round-2 share until it has received and
+verified the complete round-1 proof set. A round-2 share that arrives early may
+occupy only its sender's bounded pending slot; it cannot advance the state and
+is fully revalidated against the accepted commitment before promotion.
 
 ### Share Verification
 
@@ -191,9 +255,19 @@ Each receiver `j` verifies share `s_{i→j}` against dealer `i`'s commitments:
 s_{i→j} · B  ≟  Σ_{k=0}^{t-1} (j^k · C_{i,k})
 ```
 
-A failed verification returns a `ProtocolError` with `Blame` evidence binding the dealer ID, commitment hash, and reason.
+A failed verification returns an attributable terminal verification error. For
+a malformed or invalid public round-1 commitment/proof, evidence may bind the
+actual public envelope digest with
+`EvidenceKindFrostKeygenCommitment`. For a confidential round-2 share, evidence
+uses a synthetic envelope that binds only the sender's slot, party-set hash, and
+commitments hash. It never records the share, original confidential payload, or
+either one's hash. Authenticated malformed round-1 or round-2 payloads,
+non-canonical values, invalid proofs, and invalid shares abort the session,
+produce no outbound effects, and clear pending secret state. Guard-layer
+rejections and the existing plan-hash-mismatch path retain their separate
+nonterminal semantics and do not manufacture cryptographic blame.
 
-### Confirmation and Completion
+### Round 3: Repository Confirmation and Completion
 
 When all `n` dealers' commitments and shares are collected and verified:
 
@@ -201,8 +275,8 @@ When all `n` dealers' commitments and shares are collected and verified:
 2. **Group commitments:** For each degree `k`, `GC_k = Σ_{i=1}^{n} C_{i,k}`
 3. **Group public key:** `PK = GC_0` (the aggregated degree-zero commitment)
 4. **Verification shares:** For each party `p`, `V_p = Σ_{k=0}^{t-1} (p^k · GC_k)`
-5. **Chain code:** After the round-2 commit/reveal check, `chain = XOR_{i=1}^{n} chainCode_i`.
-6. **Transcript hash:** Labeled, domain-separated SHA-256 binding the ciphersuite context, protocol, version, session ID, threshold, sorted parties, the aggregate of the round-1 chain-code commitments, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
+5. **Chain code:** After the round-3 commit/reveal check, `chain = XOR_{i=1}^{n} chainCode_i`.
+6. **Transcript hash:** Labeled, domain-separated SHA-256 binding the ciphersuite context, protocol, version, session ID, threshold, sorted parties, plan hash, the aggregate of the round-1 chain-code commitments, every dealer commitment set, the canonical proof bytes verified for every dealer, group commitments, and verification shares. This value is identical for every party in the completed DKG.
 
 Every `V_p` must decode as a canonical, non-identity prime-order element.
 An identity at any participant index means that participant's scalar share is
@@ -212,10 +286,12 @@ their staged secret material. Standalone `VerificationShare` and persisted
 `KeyShare` validation and decoding enforce the same invariant.
 
 At this point the session has only local pending material. It then broadcasts a
-round-2 `KeygenConfirmation` payload binding the session ID, sender, threshold,
+round-3 `KeygenConfirmation` payload binding the session ID, sender, threshold,
 party set, group public key, keygen transcript hash, and group commitments hash.
-Because the transcript hash binds every dealer commitment set and the aggregate
-chain code, any equivocated broadcast view produces a mismatching confirmation.
+Because the transcript hash binds every dealer commitment set, proof, and the
+aggregate chain-code commitment, any equivocated broadcast view produces a
+mismatching confirmation. Round 3 separately checks every revealed chain code
+against its round-1 commitment before deriving the final aggregate chain code.
 
 `KeygenSession.KeyShare()` returns `false` until confirmations from every party
 are received, canonical, non-confidential broadcasts, and consistent with the
@@ -224,24 +300,34 @@ local pending material. The resulting `KeyShare` stores the local scalar share
 code, keygen session ID, keygen transcript hash, and keygen confirmation
 evidence.
 
-A canonical confirmation that arrives before its sender's round-1 commitment
-is held in that sender's bounded pending slot. It is verified and promoted only
-after the commitment arrives, so transport reordering does not abort DKG.
+A canonical confirmation that arrives before the local pending key material is
+ready is held in that sender's bounded pending slot. It is verified and promoted
+only after its prerequisites are accepted, so transport reordering does not
+weaken the phase checks.
 
 ### Domain Separation
 
-Keygen commitment hashing uses the label `frost-ed25519-keygen-commitments-v1`. The full domain binds `(session ID, threshold, sorted parties, dealer ID, commitment bytes)`.
+Keygen commitment hashing uses the label
+`frost-ed25519-keygen-commitments-v1`. The constant-term proof uses
+`frost-ed25519-keygen-constant-proof-v1` and the complete statement described
+above.
 
 Repository-defined FROST transcript fields use the canonical labeled-entry
 encoding documented in [`wire.md`](wire.md). Party sets are sorted and encoded
 as canonical uint32 lists; dealer and verification-share records repeat their
 party ID before the associated public fields. The keygen transcript binds the
 aggregate of the round-1 chain-code commitments, not the final aggregate chain
-code. RFC 9591 `H1`/`H4`/`H5` retain their RFC-defined SHA-512 concatenation.
+code, and binds the canonical proof bytes actually verified for each dealer.
+RFC 9591 `H1`/`H4`/`H5` retain their RFC-defined SHA-512 concatenation for the
+separate signing protocol.
 
 ## Signing
 
-Signing operates in two rounds. Only `threshold` or more signers from the original participant set may participate.
+Signing operates in two rounds. `DefaultLimits()` accepts any canonically
+ordered signer subset with `threshold <= len(signers) <= n`. Applications that
+require exactly the threshold number of signers may supply `Limits` with
+`Threshold.AllowOversizedSignerSet = false`; this policy choice is not part of
+the sign-plan digest, while the actual signer set is.
 
 ### Round 1: Nonce Commitments
 
@@ -302,7 +388,12 @@ Each signer computes the group nonce commitment `R`:
 R = Σ_{j} (D_j + ρ_j · E_j)
 ```
 
-A signer whose `R` is the identity point aborts (probability negligible for honest nonces).
+If `R` is the identity point, the session returns an unblamed terminal
+verification error attributed to the broadcast aggregate rather than to an
+individual signer. It emits no partial-signature effects and clears the nonces,
+commitments, partials, message copy, derivation state, and staged signature.
+This event has negligible probability for honest nonces, but it is handled as a
+fixed failure state rather than a retryable round rollback.
 
 ### Round 2: Partial Signatures
 
@@ -454,21 +545,28 @@ Use `KeyShare.Derive(path)` or `DeriveNonHardenedBIP32(pubKey, chainCode, path)`
 to resolve a path into a `tss.DerivationResult` containing the child public key,
 child chain code, resolved path, and internal additive shift.
 
-For each path index `i`:
+For path level `j` with non-hardened index `i_j`:
 
-1. `Z = HMAC-SHA512(c_par, 0x02 || A_par || ser_32(i))`
-2. `zL = 8 · LE_OS2IP(Z[0:28]) mod q` (cofactor clearing)
-3. `cumulativeShift += zL mod q`
-4. `childPub = A_par + cumShift · B`
-5. `childChain = HMAC-SHA512(c_par, 0x03 || A_par || ser_32(i))[32:64]`
+1. `Z_j = HMAC-SHA512(c_{j-1}, 0x02 || A_{j-1} || ser_32(i_j))`
+2. `δ_j = 8 · LE_OS2IP(Z_j[0:28]) mod q` (cofactor clearing)
+3. `A_j = A_{j-1} + δ_j·B`
+4. `c_j = HMAC-SHA512(c_{j-1}, 0x03 || A_{j-1} || ser_32(i_j))[32:64]`
 
-For public derivation, a zero `zL` is valid: the public point stays unchanged
+The implementation also accumulates `Δ = Σ_j δ_j mod q` for threshold signing,
+but that accumulator is used only for the final equivalent relation
+`A_j = A_root + Δ·B`. Each next HMAC input and public-key update uses the
+immediately preceding `A_{j-1}` and `c_{j-1}`; it never adds the cumulative
+shift to an already shifted parent.
+
+For public derivation, a zero `δ_j` is valid: the public point stays unchanged
 while the child chain code advances. The invalid-child condition is instead
 `childPub == identity`, matching the paper. `ErrorOnInvalidChild` returns
 `ErrInvalidChild`; `SkipInvalidChild` increments the index and recomputes both
 the tweak and chain code until it reaches a valid non-hardened child.
 
-Only non-hardened indices (`i < 2^31`) are supported since hardened derivation requires the full private key, which no single party holds.
+Only non-hardened indices (`i < 2^31`) are supported since hardened derivation
+requires the full private key, which no single party holds. A path contains at
+most `tss.MaxDerivationDepth = 255` levels.
 
 ### Signing with HD
 
@@ -516,35 +614,38 @@ crypto/ed25519.Verify(plan.VerificationKeyBytes(), message, sig) // true
 
 ### Differences from RFC 9591
 
-- Dealerless DKG remains the default; trusted-dealer import is an explicit
-  alternative whose plan and contributions are bound into the normal DKG.
+- RFC 9591 does not define dealerless key generation. The default three-round
+  DKG follows the original FROST paper's proof-of-knowledge requirement and
+  adds a repository confirmation round. Trusted-dealer import is an explicit
+  alternative whose plan and contributions enter that same proof-gated DKG.
 - Production nonce derivation appends a labeled hash of the session ID,
   message, signing-context hash, sign-plan hash, and nonce role to the RFC
-  `random32 || SerializeScalar(x_i)` input. The Appendix E.1 conformance test
-  calls the exact RFC primitive explicitly; a separate committed regression
-  vector exercises the normal `StartSign` path with the repository extension.
+  `random32 || SerializeScalar(x_i)` input. Only the Appendix E.1 signing vector
+  calls the exact RFC primitive explicitly; end-to-end tests that use repository
+  DKG or production nonce binding are repository-extension tests, not complete
+  RFC flows.
 - Wire envelopes are this library's transport-neutral TLV messages, not an RFC wire format.
 - `Signature()` returns a plain `[]byte` rather than a structured `(R, z)` tuple — the caller can split on the 32-byte boundary if needed.
 
 ## Payload Types
 
-| Payload Type                         | Direction      | Confidential | Content                                   |
-| ------------------------------------ | -------------- | ------------ | ----------------------------------------- |
-| `frost.ed25519.keygen.commitments`   | broadcast      | no           | Polynomial commitments + chain code       |
-| `frost.ed25519.keygen.share`         | point-to-point | yes          | Scalar share for one recipient            |
-| `frost.ed25519.keygen.confirmation`  | broadcast      | no           | Completed DKG binding + chain-code reveal |
-| `frost.ed25519.sign.commitment`      | broadcast      | no           | `(D, E)` nonce commitments                |
-| `frost.ed25519.sign.partial`         | broadcast      | no           | Partial signature scalar `z_i`            |
-| `frost.ed25519.reshare.commitments`  | broadcast      | no           | Reshare polynomial commitments            |
-| `frost.ed25519.reshare.share`        | point-to-point | yes          | Reshare scalar for one recipient          |
-| `frost.ed25519.reshare.confirmation` | broadcast      | no           | Completed reshare/refresh binding         |
+| Payload Type                         | Round | Direction      | Confidential | Content                                          |
+| ------------------------------------ | ----- | -------------- | ------------ | ------------------------------------------------ |
+| `frost.ed25519.keygen.commitments`   | 1     | broadcast      | no           | Polynomial/chain-code commitments + required PoK |
+| `frost.ed25519.keygen.share`         | 2     | point-to-point | yes          | Scalar share for one recipient                   |
+| `frost.ed25519.keygen.confirmation`  | 3     | broadcast      | no           | Completed DKG binding + chain-code reveal        |
+| `frost.ed25519.sign.commitment`      | 1     | broadcast      | no           | `(D, E)` nonce commitments                       |
+| `frost.ed25519.sign.partial`         | 2     | broadcast      | no           | Partial signature scalar `z_i`                   |
+| `frost.ed25519.reshare.commitments`  | 1     | broadcast      | no           | Reshare polynomial commitments                   |
+| `frost.ed25519.reshare.share`        | 1     | point-to-point | yes          | Reshare scalar for one recipient                 |
+| `frost.ed25519.reshare.confirmation` | 2     | broadcast      | no           | Completed reshare/refresh binding                |
 
 ## Sequence Diagrams
 
 ### Protocol Flow Summary
 
 ```
-DKG ──→ Signing (Online, 2 Rounds)
+DKG (3 Rounds) ──→ Signing (Online, 2 Rounds)
               │
               │  no offline pre-computation
               │  message required at round 1
@@ -555,9 +656,12 @@ DKG ──→ Signing (Online, 2 Rounds)
          BIP32 HD Derivation (local, no network rounds)
 ```
 
-### DKG — Distributed Key Generation (2 Rounds)
+### DKG — Distributed Key Generation (3 Rounds)
 
-Round 1: each party broadcasts polynomial commitments and delivers private Shamir shares. Round 2: keygen confirmations are broadcast and cross-verified against the local transcript.
+Round 1 broadcasts polynomial and chain-code commitments plus the required
+constant-term proof. Only after all proofs verify does round 2 distribute
+confidential Shamir shares. Round 3 reveals chain-code contributions and
+cross-verifies repository confirmations against the local transcript.
 
 ```mermaid
 sequenceDiagram
@@ -568,14 +672,17 @@ sequenceDiagram
     Note over P1,PN: Local Setup
     P1->>P1: Sample f₁(x)=a₁₀+a₁₁x+… deg t-1
     P1->>P1: C_{1,k}=a_{1,k}·B for k∈[0,t-1]
+    P1->>P1: Schnorr PoK of a₁₀ for C_{1,0}
     P2->>P2: Sample f₂(x)=a₂₀+a₂₁x+… deg t-1
     P2->>P2: C_{2,k}=a_{2,k}·B for k∈[0,t-1]
+    P2->>P2: Schnorr PoK of a₂₀ for C_{2,0}
 
-    Note over P1,PN: Round 1 — Broadcast Commitments
-    P1-->>PN: C_{1,k}, chain-code-commit₁
-    P2-->>PN: C_{2,k}, chain-code-commit₂
+    Note over P1,PN: Round 1 — Broadcast Commitments + Required PoK
+    P1-->>PN: C_{1,k}, chain-code-commit₁, PoK₁
+    P2-->>PN: C_{2,k}, chain-code-commit₂, PoK₂
+    Note over P1,PN: Verify every PoK before any share effect
 
-    Note over P1,PN: Round 1 — Private Share Distribution (confidential)
+    Note over P1,PN: Round 2 — Private Share Distribution (confidential)
     P1->>P2: s_{1→2}=f₁(2) mod q
     P1->>PN: s_{1→N}=f₁(N) mod q
     P2->>P1: s_{2→1}=f₂(1) mod q
@@ -588,7 +695,7 @@ sequenceDiagram
     P2->>P2: s_{j→2}·B ≟ Σ(j^k·C_{j,k})
     P2->>P2: x₂=Σ s_{j→2}, PK=GC₀, V₂
 
-    Note over P1,PN: Round 2 — Keygen Confirmation Broadcast
+    Note over P1,PN: Round 3 — Keygen Confirmation Broadcast
     P1-->>PN: KeygenConfirmation (session, PK, transcript, chain code)
     P2-->>PN: KeygenConfirmation (session, PK, transcript, chain code)
     PN-->>P1: KeygenConfirmation (session, PK, transcript, chain code)
@@ -728,9 +835,9 @@ sequenceDiagram
 
     loop For each index i in path
         HD->>HD: Z=F(c_par, 0x02‖A_par‖ser₃₂(i))
-        HD->>HD: zL=8·LE_OS2IP(Z[0:28]) mod q
-        HD->>HD: cumShift+=zL
-        HD->>HD: childPub=A_par+cumShift·B
+        HD->>HD: δ=8·LE_OS2IP(Z[0:28]) mod q
+        HD->>HD: childPub=A_par+δ·B
+        HD->>HD: Δ+=δ only for final root-relative shift
         HD->>HD: childChain=F(c_par, 0x03‖A_par‖ser₃₂(i))[32:64]
     end
 

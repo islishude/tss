@@ -16,31 +16,64 @@ func (s *KeygenSession) tryAdvance() ([]tss.Envelope, error) {
 	if s == nil || s.completed || s.aborted {
 		return nil, nil
 	}
-	if s.pending == nil {
+	switch s.state {
+	case keygenCollectingCommitments:
+		ready, err := s.round1.commitmentsReady()
+		if err != nil || !ready {
+			return nil, err
+		}
+		return s.completeCommitmentRound()
+	case keygenCollectingShares:
 		snap, ok, err := s.round1.snapshot()
 		if err != nil || !ok {
 			return nil, err
 		}
 		defer snap.Destroy()
-		return s.completeRound1(snap)
+		return s.completeShareRound(snap)
+	case keygenAwaitingConfirmations:
+		snap, ok, err := s.confirmations.snapshot()
+		if err != nil || !ok {
+			return nil, err
+		}
+		defer snap.Destroy()
+		return nil, s.completeConfirmationRound(snap)
+	default:
+		return nil, nil
 	}
-	snap, ok, err := s.confirmations.snapshot()
-	if err != nil || !ok {
-		return nil, err
-	}
-	defer snap.Destroy()
-	return nil, s.completeConfirmationRound(snap)
 }
 
-func (s *KeygenSession) completeRound1(snap *frostKeygenRound1Snapshot) ([]tss.Envelope, error) {
+func (s *KeygenSession) completeCommitmentRound() ([]tss.Envelope, error) {
+	if err := verifyAvailableFROSTKeygenShares(s.cfg, s.round1); err != nil {
+		return nil, err
+	}
+	out, err := emitFROSTKeygenRound2(s, s.local)
+	if err != nil {
+		return nil, err
+	}
+	s.state = keygenCollectingShares
+	s.local.DestroyPolynomial()
+	more, err := s.tryAdvance()
+	if err != nil {
+		clearEnvelopePayloads(out)
+		return nil, err
+	}
+	return append(out, more...), nil
+}
+
+func (s *KeygenSession) completeShareRound(snap *frostKeygenRound1Snapshot) ([]tss.Envelope, error) {
 	prepared, err := s.preparePendingKeyMaterial(snap)
 	if err != nil {
 		return nil, err
 	}
+	return s.commitPreparedPendingKeyShare(prepared)
+}
+
+func (s *KeygenSession) commitPreparedPendingKeyShare(prepared *preparedPendingKeyShare) ([]tss.Envelope, error) {
 	defer prepared.destroy()
 	out := s.commitPendingKeyShare(prepared)
 	more, err := s.tryAdvance()
 	if err != nil {
+		clearEnvelopePayloads(out)
 		return nil, err
 	}
 	return append(out, more...), nil
@@ -93,7 +126,7 @@ func (s *KeygenSession) preparePendingKeyMaterial(snap *frostKeygenRound1Snapsho
 	if err != nil {
 		return nil, tss.NewProtocolError(
 			tss.ErrCodeVerification,
-			keygenStartRound,
+			keygenShareRound,
 			tss.BroadcastPartyId,
 			fmt.Errorf("invalid aggregate keygen commitments: %w", err),
 		)
@@ -105,7 +138,7 @@ func (s *KeygenSession) preparePendingKeyMaterial(snap *frostKeygenRound1Snapsho
 	if err != nil {
 		return nil, tss.NewProtocolError(
 			tss.ErrCodeVerification,
-			keygenStartRound,
+			keygenShareRound,
 			tss.BroadcastPartyId,
 			fmt.Errorf("invalid aggregate verification shares: %w", err),
 		)
@@ -182,9 +215,43 @@ func verifyFROSTKeygenShares(cfg tss.ThresholdConfig, snap *frostKeygenRound1Sna
 			cfg.Logger().Warn(cfg.Ctx(), "invalid DKG share", "party_id", cfg.Self, "dealer", id)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: keygenStartRound,
+				Round: keygenShareRound,
 				Party: id,
 				Blame: frostKeygenBlame(cfg, id, snap.commitments[id].BytesList()),
+				Err:   verifyErr,
+			}
+		}
+	}
+	return nil
+}
+
+func verifyAvailableFROSTKeygenShares(cfg tss.ThresholdConfig, in *frostKeygenRound1Inbox) error {
+	if in == nil {
+		return errors.New("nil keygen inbox")
+	}
+	for _, id := range cfg.Parties {
+		slot, err := in.slot(id)
+		if err != nil {
+			return err
+		}
+		if slot.share == nil {
+			continue
+		}
+		if slot.commitments == nil {
+			return tss.NewProtocolError(tss.ErrCodeInvariant, keygenCommitmentRound, id, errors.New("share buffered without dealer commitments at round transition"))
+		}
+		share, err := edScalarFromSecret(slot.share)
+		if err != nil {
+			return err
+		}
+		verifyErr := slot.commitments.VerifyShare(cfg.Self, share)
+		share.Set(fed.NewScalar())
+		if verifyErr != nil {
+			return &tss.ProtocolError{
+				Code:  tss.ErrCodeVerification,
+				Round: keygenShareRound,
+				Party: id,
+				Blame: frostKeygenBlame(cfg, id, slot.commitments.BytesList()),
 				Err:   verifyErr,
 			}
 		}
@@ -245,9 +312,15 @@ func deriveFROSTVerificationShares(parties tss.PartySet, group groupCommitments)
 func buildFROSTKeygenTranscriptHash(cfg tss.ThresholdConfig, planHash []byte, snap *frostKeygenRound1Snapshot, group groupCommitments, verificationShares []VerificationShare) ([]byte, error) {
 	chainCodeCommits := make(map[tss.PartyID][]byte, len(cfg.Parties))
 	dealerCommits := make(map[tss.PartyID][][]byte, len(cfg.Parties))
+	dealerProofs := make(map[tss.PartyID][]byte, len(cfg.Parties))
 	for _, id := range cfg.Parties {
 		chainCodeCommits[id] = snap.chainCodeCommits[id]
 		dealerCommits[id] = snap.commitments[id].BytesList()
+		encodedProof, err := marshalFROSTKeygenProof(snap.proofs[id])
+		if err != nil {
+			return nil, err
+		}
+		dealerProofs[id] = encodedProof
 	}
 	aggregate, err := bip32util.AggregateChainCode(cfg.Parties, chainCodeCommits)
 	if err != nil {
@@ -260,6 +333,7 @@ func buildFROSTKeygenTranscriptHash(cfg tss.ThresholdConfig, planHash []byte, sn
 		aggregate,
 		planHash,
 		dealerCommits,
+		dealerProofs,
 		group.BytesList(),
 		verificationShares,
 	), nil

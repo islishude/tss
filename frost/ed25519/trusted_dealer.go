@@ -61,12 +61,15 @@ type TrustedDealerImportPlan struct {
 
 // TrustedDealerImportPlanSnapshot is a caller-owned public plan snapshot.
 type TrustedDealerImportPlanSnapshot struct {
-	SessionID   tss.SessionID
-	Threshold   int
-	Parties     tss.PartySet
-	PublicKey   []byte
-	ChainCode   []byte
+	SessionID tss.SessionID
+	Threshold int
+	Parties   tss.PartySet
+	PublicKey []byte
+	ChainCode []byte
+	// Commitments contains each dealer's constant-term polynomial commitment.
 	Commitments map[tss.PartyID][]byte
+	// ChainCodeCommitments contains each dealer's chain-code commitment.
+	ChainCodeCommitments map[tss.PartyID][]byte
 }
 
 type trustedDealerContributionState struct {
@@ -243,6 +246,10 @@ func StartTrustedDealerImport(plan *TrustedDealerImportPlan, contribution *Trust
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := prepareFROSTKeygenProof(cfg, planHash, material); err != nil {
+		material.Destroy()
+		return nil, nil, err
+	}
 	session, err := newFROSTKeygenSession(cfg, plan.limits, planHash, guard, material, plan)
 	if err != nil {
 		material.Destroy()
@@ -395,16 +402,19 @@ func (p *TrustedDealerImportPlan) Snapshot() (TrustedDealerImportPlanSnapshot, b
 		return TrustedDealerImportPlanSnapshot{}, false
 	}
 	commitments := make(map[tss.PartyID][]byte, len(p.state.Commitments))
+	chainCodeCommitments := make(map[tss.PartyID][]byte, len(p.state.Commitments))
 	for _, commitment := range p.state.Commitments {
 		commitments[commitment.Party] = commitment.ConstantCommitment.Bytes()
+		chainCodeCommitments[commitment.Party] = bytes.Clone(commitment.ChainCodeCommit)
 	}
 	return TrustedDealerImportPlanSnapshot{
-		SessionID:   p.state.SessionID,
-		Threshold:   p.state.Threshold,
-		Parties:     p.state.Parties.Clone(),
-		PublicKey:   p.state.PublicKey.Bytes(),
-		ChainCode:   bytes.Clone(p.state.ChainCode),
-		Commitments: commitments,
+		SessionID:            p.state.SessionID,
+		Threshold:            p.state.Threshold,
+		Parties:              p.state.Parties.Clone(),
+		PublicKey:            p.state.PublicKey.Bytes(),
+		ChainCode:            bytes.Clone(p.state.ChainCode),
+		Commitments:          commitments,
+		ChainCodeCommitments: chainCodeCommitments,
 	}, true
 }
 

@@ -215,6 +215,7 @@ func TestFROSTSignScenarios(t *testing.T) {
 	}{
 		{name: "1-of-1", threshold: 1, parties: 1, signers: tss.NewPartySet(1)},
 		{name: "2-of-3", threshold: 2, parties: 3, signers: tss.NewPartySet(1, 3)},
+		{name: "2-of-3-all-signers", threshold: 2, parties: 3, signers: tss.NewPartySet(1, 2, 3)},
 		{name: "3-of-5", threshold: 3, parties: 5, signers: tss.NewPartySet(1, 3, 5)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -463,15 +464,23 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := tss.NewPartySet(1, 2)
-	kg1, _, err := startFROSTKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
+	kg1, out1, err := startFROSTKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := startFROSTKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	defer kg1.Destroy()
+	kg2, _, err := startFROSTKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	share := out2[1]
+	defer kg2.Destroy()
+	round2From2, err := kg2.Handle(testutil.DeliverEnvelope(
+		mustFROSTEnvelope(t, out1, payloadKeygenCommitments, tss.BroadcastPartyId),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := mustFROSTEnvelope(t, round2From2, payloadKeygenShare, 1)
 	t.Run("broadcast", func(t *testing.T) {
 		mutated := share
 		mutated.To = 0
@@ -481,10 +490,10 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 		}
 	})
 	t.Run("non-confidential", func(t *testing.T) {
-		mutated := share
-		mutated.To = 99 // wrong recipient
-		_, err := kg1.Handle(testutil.DeliverEnvelope(mutated))
-		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
+		_, err := kg1.Handle(testutil.DeliverEnvelopeWithProtection(share, tss.ChannelPlaintext))
+		if !errors.Is(err, tss.ErrMissingConfidentiality) {
+			t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
+		}
 	})
 }
 

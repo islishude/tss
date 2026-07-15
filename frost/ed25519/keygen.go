@@ -6,12 +6,14 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/zk/schnorred25519"
 )
 
 type keygenState uint8
 
 const (
-	keygenCollectingRound1 keygenState = iota
+	keygenCollectingCommitments keygenState = iota
+	keygenCollectingShares
 	keygenAwaitingConfirmations
 	keygenConfirmed
 	keygenAborted
@@ -38,9 +40,10 @@ type KeygenSession struct {
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments     keygenCommitments `json:"commitments" wire:"1,custom,max_items=threshold"`
-	ChainCodeCommit []byte            `json:"chain_code_commit,omitempty" wire:"2,bytes"`
-	PlanHash        []byte            `json:"plan_hash" wire:"3,bytes,len=32"`
+	Commitments     keygenCommitments     `json:"commitments" wire:"1,custom,max_items=threshold"`
+	ChainCodeCommit []byte                `json:"chain_code_commit,omitempty" wire:"2,bytes"`
+	PlanHash        []byte                `json:"plan_hash" wire:"3,bytes,len=32"`
+	Proof           *schnorred25519.Proof `json:"proof" wire:"4,record"`
 }
 
 const keygenCommitmentsPayloadWireVersion uint16 = 1

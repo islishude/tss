@@ -286,7 +286,7 @@ func startSignWithNonceGenerator(
 	out := []tss.Envelope{env}
 	partial, err := s.tryEmitPartial()
 	if err != nil {
-		s.clearNonceScalars()
+		s.abort()
 		return nil, nil, err
 	}
 	out = append(out, partial...)
@@ -321,9 +321,7 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
-		if shouldAbortSession(err) {
-			s.abort()
-		}
+		s.abortOnProtocolError(err)
 	}()
 	tx, err := s.buildSignTransition(env)
 	if err != nil {
@@ -339,6 +337,12 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 	}
 	tx.markCommitted()
 	return effects.envelopes, nil
+}
+
+func (s *SignSession) abortOnProtocolError(err error) {
+	if shouldAbortSession(err) {
+		s.abort()
+	}
 }
 
 // Signature returns the completed RFC 8032 Ed25519 signature.

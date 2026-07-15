@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/big"
 
+	fed "filippo.io/edwards25519"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 )
@@ -44,6 +45,37 @@ func DeriveCanonicalNonZeroSecp256k1(domainLabel string, root []byte, counterLim
 		}
 	}
 	return secp.Scalar{}, ErrRejectionLimit
+}
+
+// DeriveCanonicalNonZeroEd25519 derives a uniformly distributed non-zero
+// Ed25519 scalar by rejection sampling SHA-256 transcript roots. root is the
+// already domain-separated proof transcript hash. domainLabel separates retry
+// hashes from every other repository transcript, and counterLimit explicitly
+// bounds the total number of labeled expansion candidates. Counter zero is
+// also expanded as H(domainLabel, root, 0); the raw root is never interpreted
+// directly as a scalar.
+//
+// Ed25519 scalars use a canonical little-endian encoding. Each uniformly
+// random candidate has its top three bits cleared before parsing, leaving a
+// uniform integer in [0, 2^253). Zero and candidates greater than or equal to
+// the subgroup order are rejected rather than reduced. The accepted result is
+// therefore uniform in [1, q), without modular bias.
+func DeriveCanonicalNonZeroEd25519(domainLabel string, root []byte, counterLimit uint32) (*fed.Scalar, error) {
+	if err := validateInputs(domainLabel, root, counterLimit); err != nil {
+		return nil, err
+	}
+	for counter := range counterLimit {
+		candidate := challengeCandidate(domainLabel, root, counter)
+		// Canonical Ed25519 scalar encodings are little-endian. Restrict the
+		// uniformly random candidate to 253 bits before rejection sampling.
+		candidate[len(candidate)-1] &= 0x1f
+		scalar, ok := canonicalNonZeroEd25519Candidate(candidate)
+		clear(candidate)
+		if ok {
+			return scalar, nil
+		}
+	}
+	return nil, ErrRejectionLimit
 }
 
 // DeriveNonZeroBits derives a uniformly distributed non-zero integer in
@@ -93,4 +125,16 @@ func challengeCandidate(domainLabel string, root []byte, counter uint32) []byte 
 func canonicalNonZeroSecp256k1Candidate(candidate []byte) (secp.Scalar, bool) {
 	scalar, err := secp.ScalarFromBytes(candidate)
 	return scalar, err == nil
+}
+
+func canonicalNonZeroEd25519Candidate(candidate []byte) (*fed.Scalar, bool) {
+	scalar, err := fed.NewScalar().SetCanonicalBytes(candidate)
+	if err != nil {
+		return nil, false
+	}
+	if scalar.Equal(fed.NewScalar()) == 1 {
+		scalar.Set(fed.NewScalar())
+		return nil, false
+	}
+	return scalar, true
 }

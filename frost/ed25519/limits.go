@@ -42,7 +42,8 @@ type Limits struct {
 }
 
 // DefaultLimits returns fail-closed production limits for FROST Ed25519.
-// It rejects 1-of-1, oversized signer sets, and thresholds below 2.
+// It rejects 1-of-1 and thresholds below 2 while allowing any signer set from
+// the threshold through the full participant set, as defined by FROST.
 func DefaultLimits() Limits {
 	return Limits{
 		Threshold: tss.ThresholdLimits{
@@ -51,7 +52,7 @@ func DefaultLimits() Limits {
 			MaxSigners:              maxFROSTSigners,
 			MinProductionThreshold:  2,
 			AllowOneOfOne:           false,
-			AllowOversizedSignerSet: false,
+			AllowOversizedSignerSet: true,
 		},
 		State: StateLimits{
 			MaxSerializedKeyShareBytes:                  tss.DefaultMaxSerializedKeyShareBytes,

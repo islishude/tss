@@ -8,7 +8,7 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-func TestFROSTKeygenRejectNoMutationInvariant(t *testing.T) {
+func TestFROSTKeygenMalformedCommitmentTerminallyAbortsAndClearsSecrets(t *testing.T) {
 	t.Parallel()
 
 	parties := tss.NewPartySet(1, 2)
@@ -37,17 +37,52 @@ func TestFROSTKeygenRejectNoMutationInvariant(t *testing.T) {
 	bad := out2[0]
 	bad.Payload = []byte("malformed keygen commitments")
 
-	before := snapshotFROSTKeygenSession(kg1)
 	out, err := kg1.Handle(testutil.DeliverEnvelope(bad))
-	after := snapshotFROSTKeygenSession(kg1)
 
 	if err == nil {
 		t.Fatal("expected malformed keygen commitment to be rejected")
 	}
+	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
+	if protocolErr.Party != bad.From || protocolErr.Blame == nil {
+		t.Fatalf("malformed keygen commitment blame = %#v, want party %d", protocolErr.Blame, bad.From)
+	}
 	if len(out) != 0 {
 		t.Fatalf("rejected keygen message produced %d outbound envelopes", len(out))
 	}
-	assertFROSTSnapshotUnchanged(t, before, after)
+	if !kg1.aborted || kg1.state != keygenAborted || kg1.local != nil || kg1.pending != nil || kg1.keyShare != nil {
+		t.Fatal("malformed keygen commitment did not terminally abort and clear secret state")
+	}
+	for _, slot := range kg1.round1.slots {
+		if slot.share != nil {
+			t.Fatal("malformed keygen commitment retained a secret share slot")
+		}
+	}
+}
+
+func TestFROSTKeygenMalformedShareTerminallyAbortsAndClearsSecrets(t *testing.T) {
+	t.Parallel()
+
+	session, remoteOut := frostKeygenTransitionSessions(t)
+	defer session.Destroy()
+	bad := mustFROSTEnvelope(t, remoteOut, payloadKeygenShare, session.cfg.Self)
+	bad.Payload = []byte("malformed confidential keygen share")
+
+	out, err := session.Handle(testutil.DeliverEnvelope(bad))
+	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
+	if protocolErr.Round != keygenShareRound || protocolErr.Party != bad.From || protocolErr.Blame == nil {
+		t.Fatalf("malformed keygen share error = %#v", protocolErr)
+	}
+	if len(out) != 0 {
+		t.Fatalf("malformed keygen share produced %d outbound envelopes", len(out))
+	}
+	if !session.aborted || session.state != keygenAborted || session.local != nil || session.pending != nil || session.keyShare != nil {
+		t.Fatal("malformed keygen share did not terminally abort and clear secret state")
+	}
+	for _, slot := range session.round1.slots {
+		if slot.share != nil {
+			t.Fatal("malformed keygen share retained a secret share slot")
+		}
+	}
 }
 
 func TestFROSTSignMalformedCommitmentAbortsAndClearsSecrets(t *testing.T) {

@@ -148,7 +148,7 @@ Each function takes a valid envelope and returns a mutated copy. These are the b
 
 The following functionality lives outside `internal/testharness/` but serves the same cross-cutting role:
 
-- `crash_store.go` (in `internal/testharness/`) — `CrashPoint` enum (`BeforePersist`, `AfterPersist`, `BeforeOutbound`, `AfterOutbound`) and `CrashyStore` wrapper. Used by crash/restart tests (Section 8).
+- `crash_store.go` (in `internal/testharness/`) — `CrashPoint` enum (`CrashBeforePersist`, `CrashAfterPersist`, `CrashBeforeOutbound`, `CrashAfterOutbound`) and `CrashyStore` wrapper. Used by crash/restart tests (Section 8).
 - `internal/testvectors` — shared path and safe hex-golden comparison helpers. Mismatch output reports sizes and SHA-256 digests, never raw vector bytes.
 - `internal/testutil/testutil.go` — shared assertions and fixtures such as `AssertProtocolError`, `DeliverEnvelope`, `SeedFromEnv`, `RewriteWireField`, and other test helpers.
 - Fuzz corpus seeding — done programmatically via `f.Add()` in each fuzz target file (see Fuzzing Rules). Persistent corpora live in `internal/wire/testdata/fuzz/`.

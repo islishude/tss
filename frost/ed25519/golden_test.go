@@ -85,6 +85,7 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 		Commitments:     commitments,
 		ChainCodeCommit: bytes.Repeat([]byte{0x91}, 32),
 		PlanHash:        bytes.Repeat([]byte{0x90}, 32),
+		Proof:           structurallyValidFROSTKeygenProof(),
 	}
 	raw, err := marshalKeygenCommitmentsPayload(payload)
 	if err != nil {

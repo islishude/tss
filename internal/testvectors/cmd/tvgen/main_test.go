@@ -36,6 +36,21 @@ func TestSelectTargetsRejectsUnknownSelector(t *testing.T) {
 	}
 }
 
+func TestIndependentEd25519BIP32VectorsAreVerifyOnly(t *testing.T) {
+	const name = "protocol/ed25519-bip32"
+
+	targets, err := selectTargets(opVerify, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].Name != name {
+		t.Fatalf("verify targets = %#v, want only %s", targets, name)
+	}
+	if _, err := selectTargets(opUpdate, name); err == nil {
+		t.Fatal("independent Ed25519-BIP32 vector unexpectedly has an update target")
+	}
+}
+
 func TestGoTestArgs(t *testing.T) {
 	spec := runSpec{Run: "^TestGenerateVectors$", Tags: []string{"vectorgen"}}
 	got := goTestArgs(spec, "45m", []string{"./frost/ed25519"})

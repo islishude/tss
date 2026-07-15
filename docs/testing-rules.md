@@ -82,9 +82,10 @@ General rules:
 - Use table-driven tests when cases share setup and assertions. Keep tests in the
   file that owns the invariant rather than creating broad catch-all files.
 - Tests must not alter package-level default limits or cryptographic security
-  parameters. Tests that need 1-of-1 thresholds, oversized signer sets, reduced
-  Paillier moduli, or fast ZK parameters must pass explicit test `Limits` and
-  `SecurityParams` through plan options or `WithLimits` APIs.
+  parameters. Tests that need 1-of-1 thresholds, signer-set behavior outside the
+  owning protocol's defaults (including FROST exact-threshold rejection),
+  reduced Paillier moduli, or fast ZK parameters must pass explicit test
+  `Limits` and `SecurityParams` through plan options or `WithLimits` APIs.
 
 ### Parallelism
 
@@ -219,6 +220,33 @@ Early messages are either:
 Completion, abort, and destruction are terminal states unless the public API
 explicitly defines otherwise.
 
+FROST Ed25519 dealerless-keygen tests must cover the original paper's
+constant-term proof-of-knowledge invariant:
+
+- deterministic prove/verify, wrong secret/public/domain rejection, every
+  statement-field substitution, canonical point/scalar boundaries, zero
+  response parsing, and one-use nonce destruction;
+- required proofs for 1-of-1, 2-of-2, threshold-less-than-committee,
+  full-threshold, and trusted-dealer-import lifecycles;
+- the 2-of-2 rogue-key regression and proof verification before any
+  confidential round-2 share effect;
+- bounded early-share buffering without phase advancement, followed by full
+  revalidation against the accepted round-1 commitment;
+- duplicate, equivocation, out-of-order, cross-session, malformed, invalid
+  proof, and invalid-share paths with terminal cleanup;
+- the separate nonterminal/no-cryptographic-blame behavior for guard rejection
+  and lifecycle plan-hash mismatch; and
+- public commitment evidence based on public-envelope data, while confidential
+  share evidence contains neither the share, original payload, nor a hash of
+  either.
+
+FROST signing tests must prove that the default policy accepts every signer-set
+size from threshold through committee size, an explicit exact-threshold policy
+rejects oversized sets, and distinct signer sets produce distinct plan digests.
+They must deterministically construct an identity aggregate nonce commitment and
+assert an unblamed terminal verification error, no effects, and complete
+cleanup of nonce, commitment, partial, message, derivation, and signature state.
+
 CGGMP21 accountability tests distinguish two paper paths:
 
 - Figure 7 decryption failure may disclose one ephemeral DH exponent only in
@@ -261,6 +289,17 @@ For each relevant field, generate a valid object in one context and verify that 
 fails after substituting another context. At minimum, test cross-session,
 cross-phase, cross-recipient, cross-signer-set, cross-digest, and cross-epoch or
 cross-child use. Signer-set ordering must have one canonical interpretation.
+
+The FROST keygen constant-term proof challenge specifically binds protocol and
+version, ciphersuite, session, round, dealer, threshold, canonical complete
+party set, plan hash, every coefficient commitment, chain-code commitment,
+constant commitment, and proof commitment. The completed keygen transcript must
+bind the canonical proof bytes in dealer order. Tests substitute every field and
+test party/dealer input permutation against the canonical result.
+
+`frostReshareTranscriptHash` keeps its established label and implementation.
+Its contract tests pin one digest, substitute every field independently, and
+verify that dealer/party map insertion order cannot change canonical output.
 
 Repository-defined SHA-256 transcripts must also test:
 
@@ -357,6 +396,13 @@ Tests must verify:
 - serialized lifecycle shares reject missing, partial, and fully stripped
   confirmation sets;
 - interrupted operations do not leave two inconsistent usable shares;
+- FROST before-persist refresh/reshare crashes reload only the source generation
+  and prove the old committee can still sign;
+- FROST after-persist and outcome-unknown cutovers re-read the authoritative
+  durable generation, reload only the target, and prove the target committee can
+  sign;
+- a definite FROST cutover non-commit destroys the candidate, while an unknown
+  outcome retains callback ownership until authoritative reconciliation;
 - incomplete refresh leaves only the old share usable;
 - completed CGGMP21 refresh atomically retires the source blob and burns all
   source-epoch available presigns;
@@ -375,9 +421,12 @@ Tests must verify:
 Storage-sensitive tests must reload serialized state into new objects; an in-memory
 round trip alone is not a restart test.
 
-Use the shared crash-store harness to inject failures around persistence and
-outbound emission. Cover the points before persist, after persist, before
-outbound, and after outbound when they are meaningful for the phase.
+Use the shared clone-on-read, compare-and-swap `CrashyStore` harness to inject
+failures around persistence and outbound emission. It must model stale-version
+conflicts, before-persist failures, after-persist unknown outcomes, and explicit
+replacement or rejection with secret-blob cleanup. Cover the points before
+persist, after persist, before outbound, and after outbound when they are
+meaningful for the phase.
 
 | State at crash                                  | Required state after restart                                               |
 | ----------------------------------------------- | -------------------------------------------------------------------------- |
@@ -389,6 +438,9 @@ outbound, and after outbound when they are meaningful for the phase.
 | Delivery certificate durable                    | Resume the session without outbound replay                                 |
 | Completion computed but not durable             | Signature remains unavailable; retry persists the same result              |
 | Burn durable                                    | Presign cannot start or resume an attempt                                  |
+| FROST refresh/reshare before target persist     | Source is the only recoverable generation                                  |
+| FROST target persist durable or outcome unknown | Re-read store; target is the only recoverable generation                   |
+| FROST target definite non-commit                | Source remains current; candidate is destroyed                             |
 | Refresh/reshare before fence                    | Source remains current                                                     |
 | Cutover fence durable, target not committed     | Reconcile the exact fenced transition; do not admit new source work        |
 | Cutover committed                               | Target current, source retired, source-epoch available presigns burned     |
@@ -453,7 +505,10 @@ session, parties, threshold, ordered constant-term commitments, and security
 profile. Wrong-party, wrong-session, wrong-plan, substituted contribution,
 changed degree-zero commitment, changed chain-code commitment, replayed local
 claim, and malformed canonical records must fail before unsafe state mutation or
-outbound effects.
+outbound effects. Every imported constant term must carry the same valid Schnorr
+proof required by dealerless DKG. Snapshot tests distinguish constant-term
+`Commitments` from deep-copied per-party `ChainCodeCommitments` and verify that
+mutating either returned value cannot alter the plan.
 
 CGGMP21 interactive import must prove that each participant generates and
 retains only its own Paillier private material. Centralized import must execute
@@ -468,6 +523,13 @@ subsets, final public-key verification, redaction, and non-consumption of input
 shares. Failure messages and fuzz artifacts must never contain reconstructed
 scalars or contribution bytes.
 
+FROST non-hardened HD tests must update each level as
+`A_j = A_{j-1} + δ_j·B`, using the cumulative shift only to check the final
+root-relative relation `A_j = A_root + Δ·B`. Cover empty/single/multi-level
+paths, zero tweak, invalid-child skip/error behavior, index `2^31-1`, rejection
+of hardened indices, and the `tss.MaxDerivationDepth = 255` boundary. Verify the
+committed public-only `[0]`, `[0,1]`, and `[2147483647]` external-oracle vectors.
+
 ## Fuzzing
 
 Prioritize decoders and reject paths:
@@ -476,6 +538,7 @@ Prioritize decoders and reject paths:
 - guard acceptance;
 - key-share and presign decoding;
 - blame evidence decoding and verification; and
+- FROST keygen commitment/proof and confidential-share semantic decoding; and
 - ZK proof decoding and verification.
 
 Fuzz targets must enforce:
@@ -486,8 +549,10 @@ Fuzz targets must enforce:
   tests.
 
 Seed corpora from canonical vectors and regression cases. Add every minimized
-security-relevant failure as a permanent corpus entry. Use the Makefile's fuzz
-targets for smoke, CI, and scheduled runs.
+security-relevant failure as a permanent corpus entry. FROST semantic-decode
+corpora include the canonical keygen commitment-with-proof and keygen-share wire
+records, including the retired proof-less commitment shape as a reject seed. Use
+the Makefile's fuzz targets for smoke, CI, and scheduled runs.
 
 ## Test Data and Fixtures
 
@@ -499,6 +564,10 @@ targets for smoke, CI, and scheduled runs.
 - Vector generation must be explicit and reproducible where the protocol permits.
   Verification must cover decoding, validation, canonical re-encoding, and the
   vector's cryptographic result.
+- Independent Ed25519-BIP32 oracle vectors are public-only and verify-only. They
+  record the pinned oracle release, tag commit, release-asset digest, and exact
+  one-time command; CI must neither download the oracle nor provide a vector
+  update path through `tvgen` for those vectors.
 - `internal/testvectors/cmd/tvgen` selects generation tests with the `vectorgen`
   tag and a narrow `-run` expression. Do not make ordinary integration tests
   visible through `vectorgen` just because generation needs shared helpers.

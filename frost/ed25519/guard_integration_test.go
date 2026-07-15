@@ -88,7 +88,7 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   sessionID,
-		Round:       1,
+		Round:       keygenCommitmentRound,
 		From:        12,
 		To:          0,
 		PayloadType: payloadKeygenCommitments,
@@ -224,7 +224,7 @@ func TestFROSTKeygenRejectsPlaintextShare(t *testing.T) {
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   sessionID,
-		Round:       1,
+		Round:       keygenShareRound,
 		From:        22,
 		To:          21,
 		PayloadType: payloadKeygenShare,

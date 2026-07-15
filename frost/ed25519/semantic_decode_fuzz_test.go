@@ -6,10 +6,13 @@ import (
 	"testing"
 
 	"github.com/islishude/tss/internal/testvectors"
+	"github.com/islishude/tss/internal/wire"
 )
 
 const (
 	fuzzKeyShare uint8 = iota
+	fuzzKeygenCommitments
+	fuzzKeygenShare
 	fuzzNonceCommitment
 	fuzzSignPartial
 	fuzzKeygenConfirmation
@@ -26,6 +29,8 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 		name string
 	}{
 		{kind: fuzzKeyShare, name: "wire/v1/frost/KeyShare.golden"},
+		{kind: fuzzKeygenCommitments, name: "wire/v1/frost/KeygenCommitmentsPayload.golden"},
+		{kind: fuzzKeygenShare, name: "wire/v1/frost/KeygenSharePayload.golden"},
 		{kind: fuzzNonceCommitment, name: "wire/v1/frost/NonceCommitmentPayload.golden"},
 		{kind: fuzzSignPartial, name: "wire/v1/frost/SignPartialPayload.golden"},
 		{kind: fuzzKeygenConfirmation, name: "wire/v1/frost/KeygenConfirmation.golden"},
@@ -40,6 +45,20 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 			f.Fatalf("decode seed %s: %v", seed.name, err)
 		}
 		f.Add(seed.kind, raw[:n])
+		if seed.kind == fuzzKeygenCommitments {
+			version, fields, err := wire.UnmarshalFields(raw[:n], keygenCommitmentsPayloadWireType)
+			if err != nil {
+				f.Fatalf("decode keygen commitment seed fields: %v", err)
+			}
+			if len(fields) != 4 || fields[len(fields)-1].Tag != 4 {
+				f.Fatalf("keygen commitment seed does not end in required proof tag 4")
+			}
+			proofless, err := wire.MarshalFields(version, keygenCommitmentsPayloadWireType, fields[:len(fields)-1])
+			if err != nil {
+				f.Fatalf("build retired proof-less keygen commitment seed: %v", err)
+			}
+			f.Add(seed.kind, proofless)
+		}
 	}
 
 	f.Fuzz(func(t *testing.T, kind uint8, raw []byte) {
@@ -48,7 +67,7 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 			canonical []byte
 			err       error
 		)
-		switch kind % 6 {
+		switch kind % 8 {
 		case fuzzKeyShare:
 			var share *KeyShare
 			share, err = UnmarshalKeyShareWithLimits(raw, limits)
@@ -57,6 +76,21 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 			}
 			defer share.Destroy()
 			canonical, err = share.MarshalBinaryWithLimits(limits)
+		case fuzzKeygenCommitments:
+			var value keygenCommitmentsPayload
+			value, err = unmarshalKeygenCommitmentsPayload(raw)
+			if err != nil {
+				return
+			}
+			canonical, err = marshalKeygenCommitmentsPayloadWithLimits(value, limits)
+		case fuzzKeygenShare:
+			var value keygenSharePayload
+			value, err = unmarshalKeygenSharePayload(raw)
+			if err != nil {
+				return
+			}
+			defer value.Share.Destroy()
+			canonical, err = marshalKeygenSharePayloadWithLimits(value, limits)
 		case fuzzNonceCommitment:
 			var value nonceCommitment
 			value, err = unmarshalNonceCommitmentPayload(raw)

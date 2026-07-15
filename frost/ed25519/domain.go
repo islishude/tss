@@ -16,7 +16,7 @@ const (
 	frostReshareTranscriptLabel = "frost-ed25519-reshare-transcript-v1"
 )
 
-func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties tss.PartySet, chainCodeCommitAggregate, planHash []byte, dealerCommitments map[tss.PartyID][][]byte, groupCommitments [][]byte, verificationShares []VerificationShare) []byte {
+func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties tss.PartySet, chainCodeCommitAggregate, planHash []byte, dealerCommitments map[tss.PartyID][][]byte, dealerProofs map[tss.PartyID][]byte, groupCommitments [][]byte, verificationShares []VerificationShare) []byte {
 	t := transcript.New(frostKeygenTranscriptLabel)
 	t.AppendString("ciphersuite_context", rfc9591ContextString)
 	t.AppendString("protocol", string(tss.ProtocolFROSTEd25519))
@@ -33,6 +33,7 @@ func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties t
 	for _, id := range sortedParties {
 		t.AppendUint32("dealer", id)
 		t.AppendBytesList("dealer_commitments", dealerCommitments[id])
+		t.AppendBytes("dealer_constant_proof", dealerProofs[id])
 	}
 	t.AppendBytesList("group_commitments", groupCommitments)
 	appendVerificationShares(t, verificationShares)

@@ -10,7 +10,7 @@ These categories have different meanings:
 - Fixtures are committed test-only caches used to avoid expensive setup during
   tests.
 
-Current inventory: 40 binary wire golden files, 2 protocol JSON files, and 1
+Current inventory: 41 binary wire golden files, 3 protocol JSON files, and 1
 fixture JSON file.
 
 ## Categories
@@ -41,10 +41,10 @@ wire/v1/
                        KeygenConfirmation, Presign, Presign.fast,
                        PresignRound3Payload, ResharePlan, SignPartialPayload,
                        TrustedDealerImportPlan, TrustedDealerContribution
-  zk/         9 files  SecurityParams, ModulusProof, FactorProof,
+  zk/         10 files SecurityParams, ModulusProof, FactorProof,
                        RingPedersenParams,
                        RingPedersenProof, EncProof, AffGProof,
-                       LogStarProof, SchnorrProof
+                       LogStarProof, SchnorrProof, Ed25519SchnorrProof
 ```
 
 ### Protocol vectors
@@ -56,16 +56,31 @@ checks.
 
 ```text
 protocol/
+  ed25519-bip32/khovratovich_law_vectors.json
   frost-ed25519/frost_ed25519_vectors.json
   cggmp21-secp256k1/cggmp21_secp256k1_vectors.json
 ```
 
+The Ed25519-BIP32 file contains public-only, independent Khovratovich-Law
+non-hardened derivation vectors. It records the pinned `cardano-address` 4.0.7
+release, tag commit, release-asset SHA-256, and the complete one-time CLI oracle
+commands. The CLI requires exactly two child-path segments for an account public
+key, so the vector provenance records that interface constraint and how the
+paper's public equation was used to expose the intermediate role-0 parent while
+the pinned CLI independently fixed the `0/0`, `0/1`, and `0/2147483647`
+endpoints. The committed file and recorded CLI inputs contain public keys and
+chain codes only. Verification is fully local. This target deliberately has no
+`tvgen update` operation, and CI neither downloads nor executes the external
+binary.
+
 FROST Ed25519 vectors are self-generated protocol-format regressions, not
 independent-implementation vectors. Key generation is deterministic: the stored
-seed reproduces the group public key and key-share encodings. Stored signatures
-are verified for validity; fresh signing uses fresh nonces and may produce
-different signatures. RFC 9591 Appendix E.1 provides the independent
-specification vector for the ciphersuite operations.
+seed reproduces the proof-gated three-round DKG, group public key, transcript,
+and key-share encodings. Stored signatures are verified for validity; fresh
+signing uses fresh nonces and may produce different signatures. Only RFC 9591
+Appendix E.1 is the independent exact specification vector for the signing
+ciphersuite operations; repository DKG and production nonce-binding flows are
+not labeled as complete RFC flows.
 
 CGGMP21 secp256k1 vectors are non-deterministic to generate because the protocol
 uses `crypto/rand` for proof nonces. The committed file is a format regression
@@ -131,6 +146,7 @@ Single-target commands are available when only one vector group is affected:
 ```sh
 go run ./internal/testvectors/cmd/tvgen update wire/frost
 go run ./internal/testvectors/cmd/tvgen update fixtures/cggmp21-keygen
+go run ./internal/testvectors/cmd/tvgen verify protocol/ed25519-bip32
 go run ./internal/testvectors/cmd/tvgen verify protocol/frost-ed25519
 ```
 
@@ -149,6 +165,7 @@ wire/frost
 wire/zk
 wire/cggmp21-fast
 wire/cggmp21-integration
+protocol/ed25519-bip32            verify-only
 protocol/frost-ed25519
 protocol/cggmp21-secp256k1
 fixtures/cggmp21-keygen
@@ -226,7 +243,9 @@ decision explicitly requires them.
 1. Add generation and verification in the package that owns the wire or protocol
    helper. Do not export internal protocol APIs just for vector generation.
 2. Use `internal/testvectors.CheckHexGolden` for hex-encoded wire golden files.
-3. Keep protocol JSON generation behind the `vectorgen` build tag.
+3. Keep self-generated protocol JSON generation behind the `vectorgen` build
+   tag. Independent external-oracle vectors must instead be verify-only targets
+   with no `tvgen update` operation.
 4. Use `internal/testvectors.Read` for committed vector reads and
    `internal/testvectors.Path` for generator writes.
 5. Document whether the new file is a wire golden vector, protocol vector, or

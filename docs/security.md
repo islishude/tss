@@ -131,7 +131,9 @@ successful party start. They are bound to one session, party, and plan. The
 application run store must still reject duplicate starts across restored copies
 or processes. The public plan commits to every contribution's public point and
 chain-code commitment, so a substituted local contribution or round-1 constant
-term fails closed.
+term fails closed. The normal FROST keygen round-1 constant-term Schnorr proof
+is still mandatory for trusted import, including 1-of-1 and full-threshold
+plans; plan membership does not replace proof of knowledge.
 
 `SecretKey.MarshalBinary` is an explicit exfiltration boundary. It returns a
 caller-owned fixed 32-byte secret that the caller must clear. Reconstruction
@@ -172,6 +174,26 @@ partials, Paillier private factors, and CGGMP21 presign shares while leaving
 public metadata, such as party ids, public keys, signer sets, transcript hashes,
 and public signatures, available for diagnostics where practical.
 
+FROST dealerless DKG follows the original paper's rogue-key defense. Round 1
+broadcasts coefficient and chain-code commitments with a Schnorr proof of
+knowledge of the constant coefficient. The proof statement binds the complete
+session, plan, threshold, canonically ordered committee, all coefficient
+commitments, and chain-code commitment. No round-2 confidential share is
+released until every round-1 proof verifies. Early shares are bounded by sender
+and are revalidated after their commitment is accepted; they cannot advance the
+phase. The final keygen transcript binds the canonical proof bytes actually
+verified for every dealer.
+
+An authenticated malformed or invalid FROST keygen commitment, proof, or share
+is an attributable terminal verification failure and emits no outbound effects.
+Public round-1 evidence may bind the actual public envelope digest.
+Confidential-share evidence is synthetic: it binds the sender slot, party-set
+hash, and commitments hash, but never the scalar share, original payload, or a
+hash of either. Abort destroys the local polynomial, pending shares,
+chain-code reveals, pending key share, and remaining secret proof state.
+Guard-layer rejection and the existing plan-hash-mismatch path keep their
+separate nonterminal behavior and do not create proof/share blame.
+
 FROST Ed25519 signing nonces are derived from 32 bytes of fresh randomness,
 the local secret-share scalar encoding, and a labeled hash that binds the
 session, message, signing context, sign plan, and hiding/binding nonce role.
@@ -189,11 +211,24 @@ a non-canonical scalar, is likewise an attributable terminal error under RFC
 9591 Sections 5.3 and 7.4. The abort clears any remaining nonces, partials,
 message copy, and derivation state.
 
+The aggregate nonce commitment `R = Σ(D_i + ρ_i E_i)` must not be the identity.
+Identity is a terminal, unblamed verification failure attributed to the
+broadcast aggregate, not to one signer. It produces no partial-signature
+effects and clears nonces, commitments, partials, the message copy, derivation
+state, and any staged signature. The state machine does not roll back the round
+to retry with the same signing intent.
+
 FROST `KeyShare.Derive` validates the complete lifecycle confirmation and
 secret/public consistency before using derivation metadata. Destroyed shares and
 shares whose public metadata no longer matches their lifecycle state cannot
 derive child keys; public-only derivation requires a separately validated
 metadata snapshot.
+
+Non-hardened FROST HD derivation updates the public point one level at a time:
+`A_j = A_{j-1} + δ_j·B`. The cumulative `Δ = Σδ_j` is retained only for the
+final root-relative signing relation `A_j = A_root + Δ·B`; it is not added again
+to an already shifted parent. Paths contain at most
+`tss.MaxDerivationDepth = 255` levels and every index must be less than `2^31`.
 
 FROST verification shares are canonical, non-identity prime-order elements.
 An identity verification share publicly fixes the corresponding Shamir share
@@ -383,12 +418,17 @@ and active proof relations and limitations are in
 ## Keygen Broadcast Consistency
 
 The keygen protocols assume authenticated transport and converge through an
-explicit confirmation round. After local DKG material verifies, FROST Ed25519
-and CGGMP21 secp256k1 `KeygenSession` instances automatically broadcast a
-`KeygenConfirmation` message binding the session ID, sender, threshold, party
-set, public key, keygen transcript hash, and commitments hash. A `KeyShare` is
-not exposed by `KeygenSession.KeyShare()` until the full confirmation set is
-received and verified.
+explicit confirmation round. FROST round 1 broadcasts commitments and the
+paper-required constant-term proof, round 2 sends confidential shares only
+after the complete proof set verifies, and repository-defined round 3
+broadcasts the confirmation and chain-code reveal. RFC 9591 specifies the
+separate signing protocol and does not specify this dealerless DKG. CGGMP21 has
+its own three-round keygen. After local DKG material verifies, each
+`KeygenSession` automatically broadcasts a `KeygenConfirmation` message binding
+the session ID, sender, threshold, party set, public key, keygen transcript hash,
+and commitments hash. A `KeyShare` is not exposed by
+`KeygenSession.KeyShare()` until the full confirmation set is received and
+verified.
 
 Applications must keep delivering keygen envelopes until the protocol-specific
 completion accessor returns a share:
@@ -420,6 +460,16 @@ Transport responsibilities:
 - treat `ReceiveInfo` as transport-verified facts, not self-declared metadata; this library enforces confidentiality and broadcast consistency through `EnvelopeGuard`;
 - treat two different confirmations from one sender in one session as equivocation;
 - never persist or use keygen material before the completion accessor returns a confirmed `KeyShare`.
+
+The shared `internal/testharness.CrashyStore` is test evidence, not a production
+storage implementation. It clones blobs on read, models compare-and-swap
+conflicts, and injects crashes before and after persistence. FROST refresh and
+reshare restart tests require a before-persist crash to recover only the source
+generation and an after-persist or outcome-unknown result to re-read the
+authoritative store and recover only the target generation. Definite
+non-commits destroy the candidate. Unknown outcomes retain callback ownership
+until reconciliation; callers must never choose a generation from process-local
+state. A production backend needs equivalent transaction and restart evidence.
 
 ## Paillier Ciphertext Membership
 

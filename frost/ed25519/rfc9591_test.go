@@ -67,19 +67,19 @@ func TestRFC9591Ed25519Challenge(t *testing.T) {
 	}
 }
 
-// TestRFC9591EndToEndSignature verifies that a full FROST Ed25519 keygen,
-// signing, and Ed25519 signature verification produces valid output.
-// This exercises the complete RFC 9591 flow: keygen → sign → verify.
-func TestRFC9591EndToEndSignature(t *testing.T) {
+// TestFROSTEndToEndSignatureWithRFC9591Signing verifies the repository DKG and
+// production signing path produce a standard Ed25519 signature. RFC 9591 does
+// not specify key generation; only the signing equations are RFC-aligned here.
+func TestFROSTEndToEndSignatureWithRFC9591Signing(t *testing.T) {
 	t.Parallel()
-	// 2-of-3 keygen (matching RFC 9591 Appendix E configuration).
+	// Use the same 2-of-3 topology as RFC 9591 Appendix E.1.
 	shares := frostKeygen(t, 2, 3)
 	key1 := shares[1]
 	key3 := shares[3]
 
 	message := []byte("test")
 
-	// Sign with signers P1, P3 (matching the RFC test vector).
+	// Use the same P1/P3 signer topology while retaining production nonce binding.
 	signers := []*KeyShare{key1, key3}
 	pub, sig, err := signFROSTSimulation(message, signers, testFROSTSigningContext())
 	if err != nil {
@@ -246,9 +246,9 @@ func startRFC9591VectorSign(
 	})
 }
 
-// TestRFC9591ThresholdCombinations verifies FROST signatures work for
-// the standard threshold configurations from the RFC.
-func TestRFC9591ThresholdCombinations(t *testing.T) {
+// TestFROSTThresholdCombinations verifies the repository DKG and signing path
+// across representative threshold configurations.
+func TestFROSTThresholdCombinations(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name      string
@@ -257,11 +257,13 @@ func TestRFC9591ThresholdCombinations(t *testing.T) {
 		signers   tss.PartySet
 	}{
 		{"1-of-1", 1, 1, tss.NewPartySet(1)},
+		{"2-of-2", 2, 2, tss.NewPartySet(1, 2)},
 		{"2-of-3", 2, 3, tss.NewPartySet(1, 3)},
+		{"3-of-3", 3, 3, tss.NewPartySet(1, 2, 3)},
 		{"3-of-5", 3, 5, tss.NewPartySet(1, 3, 5)},
 	}
 
-	message := []byte("RFC 9591 compliance test")
+	message := []byte("FROST threshold combination test")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

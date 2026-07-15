@@ -236,6 +236,7 @@ func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 
 	chainCodeCommit := bytes.Repeat([]byte{0x91}, 32)
 	planHash := bytes.Repeat([]byte{0x90}, 32)
+	proof := structurallyValidFROSTKeygenProof()
 
 	keygenCommitments, err := newKeygenCommitmentsFromPoints(
 		[]*fed.Point{fed.NewGeneratorPoint(), fed.NewIdentityPoint()},
@@ -261,20 +262,17 @@ func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 			Commitments:     keygenCommitments.Clone(),
 			ChainCodeCommit: chainCodeCommit,
 			PlanHash:        planHash,
+			Proof:           proof,
 		},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(oldKeygenRaw, newKeygenRaw) {
-		t.Fatalf("custom keygen commitments changed payload bytes:\n old %x\n new %x", oldKeygenRaw, newKeygenRaw)
+	if bytes.Equal(oldKeygenRaw, newKeygenRaw) {
+		t.Fatal("required keygen proof did not change the commitment payload shape")
 	}
-	keygenDecoded, err := unmarshalKeygenCommitmentsPayload(oldKeygenRaw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !keygenCommitments.Equal(keygenDecoded.Commitments) {
-		t.Fatal("keygen custom field did not decode old byteslist encoding")
+	if _, err := unmarshalKeygenCommitmentsPayload(oldKeygenRaw); err == nil {
+		t.Fatal("legacy three-field keygen commitment payload was accepted")
 	}
 	_, keygenFields, err := wire.UnmarshalFields(newKeygenRaw, keygenCommitmentsPayloadWireType)
 	if err != nil {
@@ -282,6 +280,9 @@ func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 	}
 	if !bytes.Equal(keygenFields[0].Value, wire.EncodeBytesList(keygenCommitments.BytesList())) {
 		t.Fatal("keygen custom field no longer matches byteslist encoding")
+	}
+	if len(keygenFields) != 4 || keygenFields[3].Tag != 4 {
+		t.Fatalf("keygen proof field shape = %#v, want required tag 4", keygenFields)
 	}
 
 	reshareCommitments, err := newReshareCommitmentsFromPoints(
@@ -349,6 +350,10 @@ func TestCommitmentsPayloadCustomCommitmentsEnforceResourceLimit(t *testing.T) {
 	}
 
 	planHash := bytes.Repeat([]byte{0x90}, 32)
+	proofRaw, err := structurallyValidFROSTKeygenProof().MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
 	keygenRaw, err := wire.MarshalFields(
 		keygenCommitmentsPayloadWireVersion,
 		keygenCommitmentsPayloadWireType,
@@ -356,6 +361,7 @@ func TestCommitmentsPayloadCustomCommitmentsEnforceResourceLimit(t *testing.T) {
 			{Tag: 1, Value: wire.EncodeBytesList(keygenCommitments.BytesList())},
 			{Tag: 2, Value: bytes.Repeat([]byte{0x91}, 32)},
 			{Tag: 3, Value: planHash},
+			{Tag: 4, Value: proofRaw},
 		},
 	)
 	if err != nil {

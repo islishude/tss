@@ -439,9 +439,12 @@ inside transcripts instead.
 - `internal/zk/paillier.MulStarProof` (Πmul\*)
 - `internal/zk/paillier.DecProof` (Πdec)
 - `internal/zk/schnorr.Proof`
+- `internal/zk/schnorred25519.Proof`
 
 Protocol payloads, MtA messages, Paillier keys, active Paillier proof types, and
-Schnorr proofs all use the same strict TLV encoding. CGGMP21 Figure 6,
+Schnorr proofs all use the same strict TLV encoding. The FROST keygen
+commitments payload carries its required Ed25519 constant-term proof as a nested
+typed TLV record. CGGMP21 Figure 6,
 Figure 7/F.1, reshare handoff, and Figure 8 payloads carry
 Paillier public keys, Ring-Pedersen parameters, and Paillier/MtA proofs as
 nested typed TLV records, not pre-serialized opaque byte strings. Nested fields

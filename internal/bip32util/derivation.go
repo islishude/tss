@@ -92,7 +92,7 @@ func DeriveEd25519KhovratovichLaw(publicKey, chainCode []byte, path tss.Derivati
 	if len(chainCode) != ChainCodeSize {
 		return nil, fmt.Errorf("%w: got %d bytes", tss.ErrInvalidChainCodeLength, len(chainCode))
 	}
-	parentPoint, err := edcurve.PointFromBytes(publicKey)
+	rootPoint, err := edcurve.PointFromBytes(publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", tss.ErrInvalidPublicKey, err)
 	}
@@ -114,6 +114,7 @@ func DeriveEd25519KhovratovichLaw(publicKey, chainCode []byte, path tss.Derivati
 	}
 
 	parentChain := bytes.Clone(chainCode)
+	parentPoint := new(fed.Point).Set(rootPoint)
 	cumShift := edcurve.ScalarZero()
 	resolvedPath := make(tss.DerivationPath, 0, len(path))
 	var parentFingerprint [4]byte
@@ -129,17 +130,19 @@ func DeriveEd25519KhovratovichLaw(publicKey, chainCode []byte, path tss.Derivati
 				tss.ErrHardenedDerivationUnsupported, i, idx)
 		}
 
-		intermediatePub, err := deriveEd25519PublicKey(parentPoint, cumShift)
-		if err != nil {
-			return nil, err
-		}
-		parentFingerprint = ComputeFingerprint(intermediatePub)
+		parentPub := parentPoint.Bytes()
+		parentFingerprint = ComputeFingerprint(parentPub)
 
-		tweak, childChain, usedIdx, err := deriveEd25519Child(intermediatePub, parentChain, idx, cfg)
+		tweak, childChain, usedIdx, err := deriveEd25519Child(parentPub, parentChain, idx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("%w at path segment %d (index %d): %w",
 				tss.ErrInvalidChild, i, idx, err)
 		}
+		// Khovratovich-Law public derivation advances the actual parent at
+		// every level: A_j = A_{j-1} + [delta_j]B. cumShift is tracked
+		// independently only for threshold signers that apply the final
+		// aggregate shift to their root secret shares.
+		parentPoint = edcurve.AddPoints(parentPoint, fed.NewIdentityPoint().ScalarBaseMult(tweak))
 		cumShift.Add(cumShift, tweak)
 		resolvedPath = append(resolvedPath, usedIdx)
 		parentChain = childChain
@@ -147,10 +150,7 @@ func DeriveEd25519KhovratovichLaw(publicKey, chainCode []byte, path tss.Derivati
 	}
 
 	shiftBytes := cumShift.Bytes()
-	childPub, err := deriveEd25519PublicKey(parentPoint, cumShift)
-	if err != nil {
-		return nil, err
-	}
+	childPub := parentPoint.Bytes()
 
 	return &tss.DerivationResult{
 		Scheme:            tss.DerivationSchemeEd25519KhovratovichLaw,

@@ -14,7 +14,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                keygenStartRound,
+		Round:                keygenCommitmentRound,
 		PayloadType:          payloadKeygenCommitments,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -22,7 +22,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                keygenStartRound,
+		Round:                keygenShareRound,
 		PayloadType:          payloadKeygenShare,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,

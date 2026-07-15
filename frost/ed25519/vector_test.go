@@ -40,14 +40,64 @@ func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeySha
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := map[tss.PartyID]*KeygenSession{}
-	messages := make([]tss.Envelope, 0)
+	limits := testLimits()
+	plan, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: session,
+		Parties:   parties,
+		Threshold: threshold,
+		Limits:    &limits,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	configs := make(map[tss.PartyID]tss.ThresholdConfig, n)
+	materials := make(map[tss.PartyID]*frostKeygenLocalMaterial, n)
 	for _, id := range parties {
 		cfg := tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session, Rand: rng}
-		kg, out, err := startFROSTKeygen(cfg)
+		material, err := generateFROSTKeygenLocalMaterial(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
+		configs[id] = cfg
+		materials[id] = material
+	}
+	// Preserve the historical deterministic key-material stream: every party's
+	// polynomial and chain code is sampled before the newly added proof nonces.
+	// Production parties have independent readers; this ordering only prevents
+	// the single-reader regression vector fixture from changing group keys.
+	for _, id := range parties {
+		if err := prepareFROSTKeygenProof(configs[id], planHash, materials[id]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sessions := map[tss.PartyID]*KeygenSession{}
+	messages := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		cfg := configs[id]
+		kg, err := newFROSTKeygenSession(
+			cfg,
+			limits,
+			planHash,
+			testFROSTGuard(id, parties, session),
+			materials[id],
+			nil,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := emitFROSTKeygenRound1(kg, materials[id])
+		if err != nil {
+			t.Fatal(err)
+		}
+		more, err := kg.tryAdvance()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, more...)
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}

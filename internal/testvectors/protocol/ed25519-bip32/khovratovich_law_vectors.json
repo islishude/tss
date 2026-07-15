@@ -1,0 +1,57 @@
+{
+  "format": "tss-ed25519-bip32-khovratovich-law-public-v1",
+  "algorithm": "Khovratovich-Law Ed25519-BIP32 non-hardened public derivation",
+  "provenance": {
+    "paper_url": "https://input-output-hk.github.io/adrestia/static/Ed25519_BIP.pdf",
+    "oracle_name": "cardano-address",
+    "oracle_version": "4.0.7",
+    "release_url": "https://github.com/IntersectMBO/cardano-addresses/releases/tag/4.0.7",
+    "tag_commit": "a6b7c3d87ea306c3b21bb096bf8cf23fbf7c93c7",
+    "release_asset": "cardano-address-4.0.7-macos.tar.gz",
+    "release_asset_url": "https://github.com/IntersectMBO/cardano-addresses/releases/download/4.0.7/cardano-address-4.0.7-macos.tar.gz",
+    "release_asset_sha256": "f7ea1c2ab700120a11d5246a35844d967a486b2de0086a8cef264acced73e05a",
+    "release_asset_platform": "macOS arm64",
+    "version_output": "4.0.7 @ unknown",
+    "commands": [
+      "printf '%s\\n' 'acct_xvk1z0v5g7g3pfz7vd2079cptgvkxlzvuwy2z40n6anqm99yhsseaveacz7gvcdfvn86v6yxr2pv2shs3dh9frmq4zh6g8yqjmkg95zx2ds9dyp0h' | cardano-address key inspect",
+      "printf '%s\\n' 'acct_xvk1z0v5g7g3pfz7vd2079cptgvkxlzvuwy2z40n6anqm99yhsseaveacz7gvcdfvn86v6yxr2pv2shs3dh9frmq4zh6g8yqjmkg95zx2ds9dyp0h' | cardano-address key child 0/0 | cardano-address key inspect",
+      "printf '%s\\n' 'acct_xvk1z0v5g7g3pfz7vd2079cptgvkxlzvuwy2z40n6anqm99yhsseaveacz7gvcdfvn86v6yxr2pv2shs3dh9frmq4zh6g8yqjmkg95zx2ds9dyp0h' | cardano-address key child 0/1 | cardano-address key inspect",
+      "printf '%s\\n' 'acct_xvk1z0v5g7g3pfz7vd2079cptgvkxlzvuwy2z40n6anqm99yhsseaveacz7gvcdfvn86v6yxr2pv2shs3dh9frmq4zh6g8yqjmkg95zx2ds9dyp0h' | cardano-address key child 0/2147483647 | cardano-address key inspect"
+    ],
+    "cli_path_constraint": "cardano-address key child accepts an acct_xvk only with exactly two path segments (role and index) and rejects a one-segment public derivation.",
+    "public_vector_method": "Starting from the recorded public account key, the Khovratovich-Law paper equation was evaluated one step to obtain the public role-0 parent. Repeated paper derivation matched all three pinned CLI endpoints at 0/0, 0/1, and 0/2147483647. The requested [0] and [2147483647] vectors use that public role-0 parent and the corresponding CLI endpoint; [0,1] uses the public account key and exact CLI endpoint directly.",
+    "notes": "The committed vectors and every recorded derivation-command input contain public keys and chain codes only; no private key, recovery phrase, or seed is committed. CI verifies the committed outputs without downloading or executing cardano-address, and tvgen has no update target for this file."
+  },
+  "vectors": [
+    {
+      "name": "path_0",
+      "path": [0],
+      "oracle_parent_path": [0],
+      "oracle_child_path": [0, 0],
+      "parent_public_key": "4aafeb78ba50ae6149b3b0098fbb5e191af9ce22a23139f7ac65fd8d8293cabd",
+      "parent_chain_code": "4e0113e14a2d78a583e9fd59c5e1516c147060122826c0b8264c35fdcd1b8ee6",
+      "child_public_key": "186755aa539c6978cf2e3a0e6d7f8a3e9a6a2d958eee52c758638515fd061482",
+      "child_chain_code": "baf54830d1b33cac0d4adb416eecd2b3a14bbf20e592547927e24af44e2f51a2"
+    },
+    {
+      "name": "path_0_1",
+      "path": [0, 1],
+      "oracle_parent_path": [],
+      "oracle_child_path": [0, 1],
+      "parent_public_key": "13d94479110a45e6354ff17015a19637c4ce388a155f3d7660d94a4bc219eb33",
+      "parent_chain_code": "dc0bc8661a964cfa668861a82c542f08b6e548f60a8afa41c8096ec82d046536",
+      "child_public_key": "cb9019af53edc3f5eac2e6e2699b394fd08321a4dde83794b096f298a05782a3",
+      "child_chain_code": "0ab6d8e79d678d13b6d4d3ef57addfe22085ca3829f1486e604c926df063adf1"
+    },
+    {
+      "name": "path_2147483647",
+      "path": [2147483647],
+      "oracle_parent_path": [0],
+      "oracle_child_path": [0, 2147483647],
+      "parent_public_key": "4aafeb78ba50ae6149b3b0098fbb5e191af9ce22a23139f7ac65fd8d8293cabd",
+      "parent_chain_code": "4e0113e14a2d78a583e9fd59c5e1516c147060122826c0b8264c35fdcd1b8ee6",
+      "child_public_key": "7c0921212080079cbbfe4064cfe52d1f22b6b7dd588db84ef913e45845c94fdc",
+      "child_chain_code": "e7df2090662a525d23aa95e0d49eb6c048b18fe690e57ab9e610505198822cde"
+    }
+  ]
+}

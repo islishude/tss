@@ -53,7 +53,8 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 }
 
 // Derive validates the key share and resolves a non-hardened Ed25519-BIP32
-// derivation path. Destroyed or inconsistent shares are rejected.
+// derivation path of at most [tss.MaxDerivationDepth] indices. Destroyed or
+// inconsistent shares are rejected.
 func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	if k == nil || k.state == nil {
 		return nil, errors.New("nil key share")

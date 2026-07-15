@@ -40,7 +40,7 @@ not production durability or key management.
 
 | Capability                     | `frost/ed25519`                                                          | `cggmp21/secp256k1`                                                                                |
 | ------------------------------ | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| Dealerless key generation      | 2 rounds; confirmation is round 2                                        | 3 rounds; confirmation is round 3                                                                  |
+| Dealerless key generation      | 3 rounds; proof-gated shares and round-3 confirmation                    | 3 rounds; confirmation is round 3                                                                  |
 | Trusted-dealer import          | Interactive contribution flow and centralized provisioning helper        | Interactive contribution flow and centralized provisioning helper                                  |
 | Explicit secret reconstruction | Threshold interpolation of the canonical Ed25519 group scalar            | Threshold interpolation of the secp256k1 private scalar                                            |
 | Signing                        | 2 online rounds; partial verification and Ed25519-compatible aggregation | 3-round offline presign plus 1-round online sign                                                   |
@@ -50,10 +50,19 @@ not production durability or key management.
 | Failure evidence               | Public blame evidence for attributable protocol failures                 | Signed equivocation, Figure 7 accusations, Figure 9 proofs, and direct invalid-partial attribution |
 
 FROST signatures are standard 64-byte Ed25519 signatures accepted by
-`crypto/ed25519.Verify`. The implementation follows RFC 9591 signing equations
-and domain separation but adds dealerless DKG, lifecycle binding, refresh,
-resharing, and BIP32-style derivation; it should be described as FROST-style, not
-as a wire-compatible implementation of every RFC ciphersuite.
+`crypto/ed25519.Verify`. The two-round signing protocol follows RFC 9591 signing
+equations and domain separation. RFC 9591 does not specify dealerless key
+generation: this repository's three-round dealerless DKG follows the original
+FROST paper, including a required Schnorr proof of knowledge for every dealer's
+constant term before confidential shares are released. Lifecycle confirmation,
+refresh, resharing, production nonce binding, and BIP32-style derivation are
+repository extensions, so the package should be described as FROST-style rather
+than as a wire-compatible implementation of every RFC ciphersuite.
+
+FROST signing accepts any canonical signer set whose size is between the key's
+threshold and committee size by default; callers may opt back into an
+exact-threshold policy. An identity aggregate nonce commitment is an unblamed
+terminal verification failure and clears the session's signing state.
 
 CGGMP21 signing never reconstructs the private key or nonce shares. The current
 path implements paper Figures 6-10: Figure 7/F.1 creates each auxiliary epoch,
@@ -121,6 +130,12 @@ Each participant runs one local protocol state machine. A real deployment must:
 durable cutover interfaces explicit while leaving the transport and database to
 the application. See [docs/tssrun.md](docs/tssrun.md) for its contracts and
 [docs/deployment.md](docs/deployment.md) for the operational model.
+
+The shared test harness includes a clone-on-read, compare-and-swap `CrashyStore`
+for before/after-persist fault injection. Refresh and reshare restart tests use
+it to prove that recovery selects only the authoritative durable generation:
+the source remains usable before persistence, while a durable or
+outcome-unknown target commit requires re-reading and using the target.
 
 ### CGGMP21 Presign Safety
 

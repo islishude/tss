@@ -9,6 +9,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/zk/schnorred25519"
 )
 
 type frostKeygenLocalMaterial struct {
@@ -17,7 +18,19 @@ type frostKeygenLocalMaterial struct {
 	localShare      *secret.Scalar
 	chainCode       []byte
 	chainCodeCommit []byte
+	proof           *schnorred25519.Proof
 	ownMessages     []tss.Envelope
+}
+
+// DestroyPolynomial clears the local polynomial after every round-2 share has
+// been constructed. The local aggregate input and chain-code reveal remain
+// owned by the session until the confirmation phase is staged.
+func (m *frostKeygenLocalMaterial) DestroyPolynomial() {
+	if m == nil {
+		return
+	}
+	clearScalars(m.polynomial)
+	m.polynomial = nil
 }
 
 // Destroy clears secret local keygen material.
@@ -25,9 +38,9 @@ func (m *frostKeygenLocalMaterial) Destroy() {
 	if m == nil {
 		return
 	}
-	clearScalars(m.polynomial)
-	m.polynomial = nil
+	m.DestroyPolynomial()
 	m.commitments = nil
+	m.proof = nil
 	if m.localShare != nil {
 		m.localShare.Destroy()
 		m.localShare = nil
@@ -42,6 +55,7 @@ func (m *frostKeygenLocalMaterial) Destroy() {
 
 type frostKeygenRound1Slot struct {
 	commitments     *keygenCommitments
+	proof           *schnorred25519.Proof
 	share           *secret.Scalar
 	chainCodeCommit []byte
 }
@@ -73,16 +87,36 @@ func (in *frostKeygenRound1Inbox) slot(id tss.PartyID) (*frostKeygenRound1Slot, 
 	return slot, nil
 }
 
-func (in *frostKeygenRound1Inbox) recordLocalFor(party tss.PartyID, commitments keygenCommitments, share *secret.Scalar, chainCodeCommit []byte) error {
+func (in *frostKeygenRound1Inbox) recordLocalFor(party tss.PartyID, commitments keygenCommitments, proof *schnorred25519.Proof, share *secret.Scalar, chainCodeCommit []byte) error {
 	slot, err := in.slot(party)
 	if err != nil {
 		return err
 	}
+	if proof == nil || share == nil {
+		return errors.New("missing local keygen proof or share")
+	}
 	clone := commitments.Clone()
 	slot.commitments = &clone
+	slot.proof = proof.Clone()
 	slot.share = share.Clone()
 	slot.chainCodeCommit = bytes.Clone(chainCodeCommit)
 	return nil
+}
+
+func (in *frostKeygenRound1Inbox) commitmentsReady() (bool, error) {
+	if in == nil {
+		return false, errors.New("nil keygen commitment inbox")
+	}
+	for _, id := range in.parties {
+		slot, ok := in.slots[id]
+		if !ok || slot == nil {
+			return false, fmt.Errorf("missing keygen commitment slot for party %d", id)
+		}
+		if slot.commitments == nil || slot.proof == nil || slot.chainCodeCommit == nil {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (in *frostKeygenRound1Inbox) snapshot() (*frostKeygenRound1Snapshot, bool, error) {
@@ -92,6 +126,7 @@ func (in *frostKeygenRound1Inbox) snapshot() (*frostKeygenRound1Snapshot, bool, 
 	snap := &frostKeygenRound1Snapshot{
 		parties:          in.parties.Clone(),
 		commitments:      make(map[tss.PartyID]*keygenCommitments, len(in.parties)),
+		proofs:           make(map[tss.PartyID]*schnorred25519.Proof, len(in.parties)),
 		shares:           make(map[tss.PartyID]*secret.Scalar, len(in.parties)),
 		chainCodeCommits: make(map[tss.PartyID][]byte, len(in.parties)),
 	}
@@ -101,12 +136,13 @@ func (in *frostKeygenRound1Inbox) snapshot() (*frostKeygenRound1Snapshot, bool, 
 			snap.Destroy()
 			return nil, false, fmt.Errorf("missing keygen round1 slot for party %d", id)
 		}
-		if slot.commitments == nil || slot.share == nil || slot.chainCodeCommit == nil {
+		if slot.commitments == nil || slot.proof == nil || slot.share == nil || slot.chainCodeCommit == nil {
 			snap.Destroy()
 			return nil, false, nil
 		}
 		commitments := slot.commitments.Clone()
 		snap.commitments[id] = &commitments
+		snap.proofs[id] = slot.proof.Clone()
 		snap.shares[id] = slot.share.Clone()
 		snap.chainCodeCommits[id] = bytes.Clone(slot.chainCodeCommit)
 	}
@@ -129,6 +165,7 @@ func (in *frostKeygenRound1Inbox) DestroySecrets() {
 type frostKeygenRound1Snapshot struct {
 	parties          tss.PartySet
 	commitments      map[tss.PartyID]*keygenCommitments
+	proofs           map[tss.PartyID]*schnorred25519.Proof
 	shares           map[tss.PartyID]*secret.Scalar
 	chainCodeCommits map[tss.PartyID][]byte
 }

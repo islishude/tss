@@ -14,6 +14,7 @@ the CGGMP24 revision for Πmod and Ring-Pedersen Πprm.
 | Πaff-g (`AffGProof`)       | `zk.paillier.aff-g-proof`         | `internal/zk/paillier/affg.go` `ProveAffG` / `VerifyAffG`                   |
 | Πlog\* (`LogStarProof`)    | `zk.paillier.logstar-proof`       | `internal/zk/paillier/logstar.go` `ProveLogStar` / `VerifyLogStar`          |
 | Schnorr proof              | `zk.schnorr.proof`                | `internal/zk/schnorr/schnorr.go`                                            |
+| Ed25519 Schnorr proof      | `zk.schnorr-ed25519.proof`        | `internal/zk/schnorred25519/schnorr.go`                                     |
 
 The retired `EncryptionProof`, `MTAResponseProof`, and `LogProof` types and
 wire decoders have been removed. Round 1 uses per-verifier `EncProof` (`Πenc`);
@@ -33,6 +34,9 @@ there is no legacy proof fallback.
   `SecurityParams` ranges.
 - Schnorr witnesses and challenges use fixed-width secp256k1 scalar arithmetic;
   `internal/zk/schnorr` contains no `math/big` boundary.
+- Ed25519 Schnorr proofs use canonical prime-order points, canonical scalar
+  responses, and labeled SHA-256 rejection sampling for non-zero challenges;
+  the one-use nonce is owned by `internal/secret.Scalar`.
 - Paillier witnesses, randomness, masks, Ring-Pedersen lambda, private factors,
   and MtA openings use `secret.Scalar` or `secret.SignedInt`. Public moduli,
   ciphertexts, challenges, and proof responses remain `big.Int`.

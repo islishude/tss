@@ -196,6 +196,62 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	assertDifferentPlanDigest(t, "key metadata", plan, otherKey)
 }
 
+func TestFROSTSignPlanSignerCountPolicy(t *testing.T) {
+	shares := frostKeygen(t, 2, 3)
+	sessionID := frostPlanTestSession(0x22)
+	message := []byte("default signer-count policy")
+	context := testFROSTSigningContext()
+
+	defaultPlan, err := NewSignPlan(SignPlanOption{
+		Key:       shares[1],
+		SessionID: sessionID,
+		Signers:   tss.NewPartySet(3, 1, 2),
+		Context:   context,
+		Message:   message,
+	})
+	if err != nil {
+		t.Fatalf("default limits rejected threshold-or-more signer set: %v", err)
+	}
+	defaultSnapshot, ok := defaultPlan.Snapshot()
+	if !ok {
+		t.Fatal("missing default sign plan snapshot")
+	}
+	if !bytes.Equal(partyIDsBytes(defaultSnapshot.Signers), partyIDsBytes(tss.NewPartySet(1, 2, 3))) {
+		t.Fatalf("default signers = %v, want [1 2 3]", defaultSnapshot.Signers)
+	}
+
+	strictLimits := DefaultLimits()
+	strictLimits.Threshold.AllowOversizedSignerSet = false
+	strictPlan, err := NewSignPlan(SignPlanOption{
+		Key:       shares[1],
+		SessionID: sessionID,
+		Signers:   tss.NewPartySet(1, 2, 3),
+		Context:   context,
+		Message:   message,
+		Limits:    &strictLimits,
+	})
+	if err == nil {
+		t.Fatal("explicit exact-threshold policy accepted an oversized signer set")
+	}
+	if strictPlan != nil {
+		t.Fatal("rejected exact-threshold policy returned a sign plan")
+	}
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+
+	exactPlan, err := NewSignPlan(SignPlanOption{
+		Key:       shares[1],
+		SessionID: sessionID,
+		Signers:   tss.NewPartySet(1, 2),
+		Context:   context,
+		Message:   message,
+		Limits:    &strictLimits,
+	})
+	if err != nil {
+		t.Fatalf("explicit exact-threshold policy rejected threshold signers: %v", err)
+	}
+	assertDifferentPlanDigest(t, "signer set", defaultPlan, exactPlan)
+}
+
 func TestFROSTKeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	t.Parallel()
 
@@ -215,9 +271,9 @@ func TestFROSTKeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env, ok := findEnvelopeTo(out2, 1, payloadKeygenShare)
+	env, ok := findEnvelopeTo(out2, tss.BroadcastPartyId, payloadKeygenCommitments)
 	if !ok {
-		t.Fatal("missing keygen share from party 2 to party 1")
+		t.Fatal("missing keygen commitment from party 2")
 	}
 	beforeShares := countNonNilShares(s1.round1)
 	beforeCommits := countNonNilCommits(s1.round1)

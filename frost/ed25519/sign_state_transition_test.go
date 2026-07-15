@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	fed "filippo.io/edwards25519"
@@ -9,6 +10,75 @@ import (
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
 )
+
+func TestFROSTSignGroupCommitmentIdentityAbortsWithoutBlameAndClearsState(t *testing.T) {
+	t.Parallel()
+
+	shares := frostKeygen(t, 2, 2)
+	signers := tss.NewPartySet(1, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sign1, _, err := startFROSTSign(shares[1], sessionID, signers, []byte("identity group commitment"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := startFROSTSign(shares[2], sessionID, signers, []byte("identity group commitment"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dNonce := sign1.dNonce
+	eNonce := sign1.eNonce
+	if dNonce == nil || eNonce == nil {
+		t.Fatal("active signing session did not retain its local nonces")
+	}
+
+	point := fed.NewGeneratorPoint()
+	negated := fed.NewIdentityPoint().Negate(point)
+	R, err := finalizeGroupCommitment([]*fed.Point{point, negated})
+	if R != nil {
+		t.Fatal("identity group commitment returned a point")
+	}
+	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+	if protocolErr.Round != signStartRound || protocolErr.Party != tss.BroadcastPartyId || protocolErr.Blame != nil {
+		t.Fatalf("identity group commitment attribution = round %d party %d blame %#v", protocolErr.Round, protocolErr.Party, protocolErr.Blame)
+	}
+	if !errors.Is(protocolErr.Err, errGroupNonceCommitmentIdentity) {
+		t.Fatalf("identity group commitment error = %v", protocolErr.Err)
+	}
+	if !shouldAbortSession(err) {
+		t.Fatal("identity group commitment was not classified as terminal")
+	}
+
+	// Use the same terminal-error hook as Handle. An identity group commitment is
+	// a whole-transcript failure, so it aborts without attributing one signer.
+	sign1.abortOnProtocolError(err)
+	if !sign1.aborted || sign1.completed {
+		t.Fatal("identity group commitment did not terminally abort signing")
+	}
+	if sign1.dNonce != nil || sign1.eNonce != nil || dNonce.FixedLen() != 0 || eNonce.FixedLen() != 0 {
+		t.Fatal("identity group commitment retained local signing nonces")
+	}
+	if sign1.commitments != nil || sign1.commitMessage.Payload != nil {
+		t.Fatal("identity group commitment retained nonce commitment state")
+	}
+	if len(sign1.partials) != 0 || len(sign1.pendingPartials) != 0 ||
+		sign1.partialEnvelopes != nil || sign1.pendingEnvelopes != nil {
+		t.Fatal("identity group commitment retained partial signature state")
+	}
+	if sign1.derivation != nil || sign1.message != nil || sign1.deltaScalar != nil {
+		t.Fatal("identity group commitment retained signing intent secret state")
+	}
+	if _, ok := sign1.Signature(); ok {
+		t.Fatal("identity group commitment exposed a signature")
+	}
+	if _, err := sign1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
+		t.Fatal("aborted signing session accepted another commitment")
+	} else {
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
+	}
+}
 
 func TestFROSTSignCommitmentPlanHashRejectDoesNotMutate(t *testing.T) {
 	t.Parallel()

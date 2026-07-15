@@ -21,10 +21,13 @@ func (tx *acceptNonceCommitmentTx) apply(s *SignSession) (sessionEffects, error)
 	}
 	s.commitments[tx.from] = tx.commitment
 	if err := s.promotePendingPartials(); err != nil {
-		return sessionEffects{}, err
+		return sessionEffects{}, terminalSignApplyError(signStartRound, err)
 	}
 	out, err := s.tryEmitPartial()
-	return sessionEffects{envelopes: out}, err
+	if err != nil {
+		return sessionEffects{}, terminalSignApplyError(signStartRound, err)
+	}
+	return sessionEffects{envelopes: out}, nil
 }
 
 func (*acceptNonceCommitmentTx) cleanupOnReject() {}
@@ -64,7 +67,7 @@ func (tx *acceptPartialTx) apply(s *SignSession) (sessionEffects, error) {
 	s.partials[tx.from] = tx.partial
 	s.partialEnvelopes[tx.from] = tx.envelope.Clone()
 	if err := s.tryAggregate(); err != nil {
-		return sessionEffects{}, err
+		return sessionEffects{}, terminalSignApplyError(signRound2, err)
 	}
 	return sessionEffects{}, nil
 }
@@ -195,7 +198,7 @@ func (s *SignSession) verifyAcceptedPartial(base tss.Envelope, partial *fed.Scal
 	}
 	R, rhos, err := s.groupCommitment()
 	if err != nil {
-		return tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
+		return terminalSignApplyError(base.Round, err)
 	}
 	verifyKey := s.derivation.VerificationKeyBytes()
 	challenge, _ := edcurve.Ed25519Challenge(R.Bytes(), verifyKey, s.message)
@@ -209,6 +212,17 @@ func (s *SignSession) verifyAcceptedPartial(base tss.Envelope, partial *fed.Scal
 		}
 	}
 	return nil
+}
+
+func terminalSignApplyError(round uint8, err error) error {
+	if err == nil {
+		return nil
+	}
+	var protocolErr *tss.ProtocolError
+	if errors.As(err, &protocolErr) {
+		return err
+	}
+	return tss.NewProtocolError(tss.ErrCodeInvariant, round, tss.BroadcastPartyId, err)
 }
 
 func (s *SignSession) promotePendingPartials() error {

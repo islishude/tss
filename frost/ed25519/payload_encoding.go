@@ -59,6 +59,12 @@ func (p keygenCommitmentsPayload) Validate() error {
 	if err := p.Commitments.Validate(); err != nil {
 		return fmt.Errorf("keygen commitments: %w", err)
 	}
+	if p.Proof == nil {
+		return fmt.Errorf("keygen commitments: missing constant-term proof")
+	}
+	if err := p.Proof.Validate(); err != nil {
+		return fmt.Errorf("keygen commitments proof: %w", err)
+	}
 	return nil
 }
 

@@ -10,6 +10,8 @@ import (
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
+var errGroupNonceCommitmentIdentity = errors.New("group nonce commitment is identity")
+
 func (s *SignSession) tryAggregate() error {
 	prepared, ok, err := s.prepareAggregate()
 	if err != nil {
@@ -153,31 +155,55 @@ func (s *SignSession) verifyPartial(id tss.PartyID, z *fed.Scalar, rho *fed.Scal
 
 func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*fed.Scalar, error) {
 	if len(s.commitments) != len(s.signers) {
-		return nil, nil, errors.New("waiting for complete nonce commitments")
+		return nil, nil, groupCommitmentProtocolError(
+			tss.ErrCodeInvariant,
+			errors.New("group commitment requested before all nonce commitments were available"),
+		)
 	}
 	rhos, err := s.bindingFactors()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, groupCommitmentProtocolError(
+			tss.ErrCodeInvariant,
+			fmt.Errorf("derive group commitment binding factors: %w", err),
+		)
 	}
 	terms := make([]*fed.Point, 0, len(s.signers))
 	for _, id := range s.signers {
 		commitment, ok := s.commitments[id]
 		if !ok {
-			return nil, nil, fmt.Errorf("missing commitment for %d", id)
+			return nil, nil, groupCommitmentProtocolError(
+				tss.ErrCodeInvariant,
+				fmt.Errorf("missing commitment for %d", id),
+			)
 		}
 		D := commitment.D.Point()
 		E := commitment.E.Point()
 		if D == nil || E == nil {
-			return nil, nil, fmt.Errorf("missing commitment point for %d", id)
+			return nil, nil, groupCommitmentProtocolError(
+				tss.ErrCodeInvariant,
+				fmt.Errorf("missing commitment point for %d", id),
+			)
 		}
 		rhoE := fed.NewIdentityPoint().ScalarMult(rhos[id], E)
 		terms = append(terms, edcurve.AddPoints(D, rhoE))
 	}
-	R := edcurve.AddPoints(terms...)
-	if edcurve.IsIdentity(R) {
-		return nil, nil, errors.New("group nonce commitment is identity")
+	R, err := finalizeGroupCommitment(terms)
+	if err != nil {
+		return nil, nil, err
 	}
 	return R, rhos, nil
+}
+
+func finalizeGroupCommitment(terms []*fed.Point) (*fed.Point, error) {
+	R := edcurve.AddPoints(terms...)
+	if edcurve.IsIdentity(R) {
+		return nil, groupCommitmentProtocolError(tss.ErrCodeVerification, errGroupNonceCommitmentIdentity)
+	}
+	return R, nil
+}
+
+func groupCommitmentProtocolError(code string, err error) *tss.ProtocolError {
+	return tss.NewProtocolError(code, signStartRound, tss.BroadcastPartyId, err)
 }
 
 func (s *SignSession) bindingFactors() (map[tss.PartyID]*fed.Scalar, error) {

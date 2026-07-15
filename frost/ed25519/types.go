@@ -12,8 +12,12 @@ import (
 
 // The round numbers with named constants
 const (
-	keygenStartRound        = 1
-	keygenConfirmationRound = 2
+	keygenCommitmentRound   = 1
+	keygenShareRound        = 2
+	keygenConfirmationRound = 3
+	// keygenStartRound remains an internal alias for tests and helpers whose
+	// semantics are specifically the first keygen round.
+	keygenStartRound = keygenCommitmentRound
 
 	signStartRound           = 1
 	signRound2               = 2

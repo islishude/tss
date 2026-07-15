@@ -53,7 +53,7 @@ var manifest = []target{
 		Name:     "wire/zk",
 		Kind:     "wire",
 		Tier:     "0/1",
-		Packages: []string{"./internal/zk/paillier", "./internal/zk/schnorr"},
+		Packages: []string{"./internal/zk/paillier", "./internal/zk/schnorr", "./internal/zk/schnorred25519"},
 		Update:   runSpec{Run: "^TestGolden", Env: map[string]string{"UPDATE_GOLDEN": "1"}},
 		Verify:   runSpec{Run: "^TestGolden"},
 		Outputs: []string{
@@ -66,6 +66,7 @@ var manifest = []target{
 			"wire/v1/zk/AffGProof.golden",
 			"wire/v1/zk/LogStarProof.golden",
 			"wire/v1/zk/SchnorrProof.golden",
+			"wire/v1/zk/Ed25519SchnorrProof.golden",
 		},
 	},
 	{
@@ -102,6 +103,17 @@ var manifest = []target{
 		Outputs: []string{
 			"wire/v1/cggmp21/KeyShare.golden",
 			"wire/v1/cggmp21/Presign.golden",
+		},
+	},
+	{
+		Name:        "protocol/ed25519-bip32",
+		Kind:        "protocol",
+		Tier:        "0",
+		Packages:    []string{"./internal/bip32util"},
+		Verify:      runSpec{Run: "^TestDeriveEd25519KhovratovichLawIndependentPublicVectors$"},
+		Description: "verify-only independent public vectors; no update target",
+		Outputs: []string{
+			"protocol/ed25519-bip32/khovratovich_law_vectors.json",
 		},
 	},
 	{
