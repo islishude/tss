@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -146,7 +147,7 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 	}
 	for _, id := range ids {
 		if sig, ok := signSessions[id].Signature(); ok {
-			return append([]byte(nil), signSessions[id].publicKey...), sig, nil
+			return bytes.Clone(signSessions[id].publicKey), sig, nil
 		}
 	}
 	return nil, nil, errors.New("signature not completed")

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -171,7 +172,7 @@ func topRecords(records []testRecord, topN int, leavesOnly bool) []testRecord {
 	if leavesOnly {
 		records = leafRecords(records)
 	} else {
-		records = append([]testRecord(nil), records...)
+		records = slices.Clone(records)
 	}
 	sort.Slice(records, func(i, j int) bool {
 		if records[i].Elapsed != records[j].Elapsed {

@@ -2,6 +2,7 @@ package tssrun
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/islishude/tss"
@@ -115,7 +116,7 @@ func (s *MemoryUnknownEnvelopeStore) LoadBySession(ctx context.Context, protocol
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	buffered := s.envelopes[unknownIndex{protocol: protocol, sessionID: sessionID}]
-	return append([]tss.InboundEnvelope(nil), buffered...), nil
+	return slices.Clone(buffered), nil
 }
 
 // DeleteBySession deletes buffered envelopes for a protocol/session.

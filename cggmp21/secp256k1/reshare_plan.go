@@ -313,7 +313,7 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		if !ok {
 			return nil, invalidPlanConfig(party, fmt.Errorf("missing verification share for party %d", id))
 		}
-		verificationShares[id] = append([]byte(nil), verificationShare...)
+		verificationShares[id] = bytes.Clone(verificationShare)
 	}
 	oldGroupCommitments, err := secp.CommitmentPointsBytes(oldKey.state.GroupCommitments)
 	if err != nil {
@@ -322,7 +322,7 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 	plan := &ResharePlan{state: &resharePlanState{
 		SessionID:                 option.SessionID,
 		CurveID:                   reshareCurveID,
-		OldGroupPublicKey:         append([]byte(nil), oldKey.state.PublicKey...),
+		OldGroupPublicKey:         bytes.Clone(oldKey.state.PublicKey),
 		OldGroupCommitments:       oldGroupCommitments,
 		OldVerificationShares:     verificationShares,
 		OldParties:                tss.SortParties(oldKey.state.Parties),
@@ -330,7 +330,7 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		DealerParties:             tss.SortParties(option.DealerParties),
 		NewParties:                tss.SortParties(option.NewParties),
 		NewThreshold:              option.NewThreshold,
-		ChainCode:                 append([]byte(nil), oldKey.state.ChainCode...),
+		ChainCode:                 bytes.Clone(oldKey.state.ChainCode),
 		PaillierBits:              paillierBits,
 		SecurityParams:            securityParams,
 		OldPaillierProofSessionID: oldKey.state.PaillierProofSessionID,

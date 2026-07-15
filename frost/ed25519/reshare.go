@@ -279,7 +279,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 	config.Threshold = len(plan.state.oldParties)
 	return &ReshareSession{
 		oldPublicKey:         plan.state.oldPublicKey.Clone(),
-		chainCode:            append([]byte(nil), plan.state.oldChainCode...),
+		chainCode:            bytes.Clone(plan.state.oldChainCode),
 		oldParties:           plan.state.oldParties.Clone(),
 		newParties:           plan.state.newParties.Clone(),
 		newThreshold:         plan.state.newThreshold,
@@ -289,7 +289,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		cfg:                  config,
 		log:                  config.Logger(),
 		limits:               limits,
-		planHash:             append([]byte(nil), planHash...),
+		planHash:             bytes.Clone(planHash),
 		commits:              make(map[tss.PartyID]reshareCommitments),
 		shares:               make(map[tss.PartyID]*secret.Scalar),
 		confirmations:        make(map[tss.PartyID]*KeygenConfirmation),

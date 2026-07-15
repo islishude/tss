@@ -85,7 +85,7 @@ func TestVerificationShareRejectsIdentityEncodings(t *testing.T) {
 	}{
 		{name: "canonical", point: identity},
 		{name: "non-canonical", point: func() []byte {
-			out := append([]byte(nil), identity...)
+			out := bytes.Clone(identity)
 			out[len(out)-1] |= 0x80
 			return out
 		}()},

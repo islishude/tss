@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -77,8 +78,8 @@ func TestFast_KeySharePublicMetadataReturnsCopy(t *testing.T) {
 	attachTestEpoch(t, k)
 
 	meta := mustKeyShareMetadata(t, k)
-	originalShareProof := append([]byte(nil), meta.ShareProof...)
-	originalCommitment := append([]byte(nil), meta.GroupCommitments[0]...)
+	originalShareProof := bytes.Clone(meta.ShareProof)
+	originalCommitment := bytes.Clone(meta.GroupCommitments[0])
 	meta.PublicKey[0] = 0x03
 	meta.ChainCode[0] = 0xbb
 	meta.ShareProof[0] = 0xff

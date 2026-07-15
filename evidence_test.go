@@ -198,7 +198,7 @@ func TestBlameEvidenceRejectsMalformed(t *testing.T) {
 		t.Fatal("malformed evidence decoded")
 	}
 	// Valid TLV magic but wrong type ID.
-	if _, err := DecodeBinary[BlameEvidence](append([]byte("TSS1"), make([]byte, 100)...)); err == nil {
+	if _, err := DecodeBinary[BlameEvidence](slices.Concat([]byte("TSS1"), make([]byte, 100))); err == nil {
 		t.Fatal("malformed evidence with wrong type decoded")
 	}
 	session, err := NewSessionID(nil)
@@ -444,10 +444,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 			{Tag: 2, Value: []byte{}},
 		})
 		// count=1, rec_len, rec_body, then extra trailing byte.
-		malformed := make([]byte, 0, 20)
-		malformed = append(malformed, wire.Uint32(1)...)
-		malformed = append(malformed, wire.Uint32(uint32(len(recBody)))...)
-		malformed = append(malformed, recBody...)
+		malformed := slices.Concat(wire.Uint32(1), wire.Uint32(uint32(len(recBody))), recBody)
 		malformed = append(malformed, 0xFF) // trailing byte
 		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {

@@ -130,7 +130,7 @@ func TestProofDeterministicProveVerifyAndEncoding(t *testing.T) {
 	if _, err := tss.DecodeBinary[Proof]([]byte(`{"commitment":"not-tlv"}`)); err == nil {
 		t.Fatal("JSON proof decoded")
 	}
-	if _, err := tss.DecodeBinary[Proof](append(slices.Clone(raw), 0)); err == nil {
+	if _, err := tss.DecodeBinary[Proof](append(bytes.Clone(raw), 0)); err == nil {
 		t.Fatal("proof with trailing data decoded")
 	}
 

@@ -516,8 +516,7 @@ func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.Ses
 	if err != nil {
 		return nil, nil, err
 	}
-	planHashInput := append(bytes.Clone(sessionID[:]), digest32...)
-	planHashInput = append(planHashInput, presign.state.ContextHash...)
+	planHashInput := slices.Concat(sessionID[:], digest32, presign.state.ContextHash)
 	planHash := sha256.Sum256(planHashInput)
 	publicContext := signAttemptPublicContextFromPresign(presign)
 	defer publicContext.destroy()
@@ -710,7 +709,7 @@ func deliverKeygenMessagesE(sessions map[tss.PartyID]*KeygenSession, parties tss
 			return fmt.Errorf("missing guard for keygen session %d", id)
 		}
 	}
-	queue := append([]tss.Envelope(nil), messages...)
+	queue := slices.Clone(messages)
 	for len(queue) > 0 {
 		env := queue[0]
 		queue = queue[1:]

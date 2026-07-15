@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 
@@ -140,7 +141,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nonCanonical := append([]byte(" "), raw...)
+	nonCanonical := slices.Concat([]byte(" "), raw)
 	if _, err := tss.DecodeBinary[PublicKey](nonCanonical); err == nil {
 		t.Fatal("expected non-canonical public key rejection")
 	}
@@ -150,7 +151,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if _, err := tss.DecodeBinary[PrivateKey]([]byte(`{"public_key":{"n":"01","g":"02"}}`)); err == nil {
 		t.Fatal("expected JSON private key rejection")
 	}
-	withLeadingZero, err := testutil.RewriteWireFieldByName(raw, publicKeyWireType, PublicKey{}, "N", append([]byte{0}, sk.N.Bytes()...))
+	withLeadingZero, err := testutil.RewriteWireFieldByName(raw, publicKeyWireType, PublicKey{}, "N", slices.Concat([]byte{0}, sk.N.Bytes()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 		privateKeyType,
 		PrivateKey{},
 		"P",
-		append([]byte{0}, pBytes...),
+		slices.Concat([]byte{0}, pBytes),
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"context"
+	"slices"
 
 	"github.com/islishude/tss"
 )
@@ -56,7 +57,7 @@ func (l *stagedLifecycleLogger) record(ctx context.Context, level lifecycleLogLe
 		ctx:    ctx,
 		level:  level,
 		msg:    msg,
-		fields: append([]any(nil), fields...),
+		fields: slices.Clone(fields),
 	})
 }
 

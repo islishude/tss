@@ -79,7 +79,7 @@ func TestDeriveEd25519KhovratovichLawIndependentPublicVectors(t *testing.T) {
 			}
 			seen[vector.Name] = struct{}{}
 
-			wantOracleChildPath := append(slices.Clone(vector.OracleParentPath), vector.Path...)
+			wantOracleChildPath := slices.Concat(vector.OracleParentPath, vector.Path)
 			if !slices.Equal(vector.OracleChildPath, wantOracleChildPath) {
 				t.Fatalf("oracle child path = %v, want parent path plus vector path %v", vector.OracleChildPath, wantOracleChildPath)
 			}

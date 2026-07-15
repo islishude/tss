@@ -156,7 +156,7 @@ func TestPointFromBytesAllowIdentityRejectsNonCanonicalIdentity(t *testing.T) {
 		t.Fatalf("canonical identity rejected: %v", err)
 	}
 
-	nonCanonical := append([]byte(nil), canonical...)
+	nonCanonical := bytes.Clone(canonical)
 	nonCanonical[len(nonCanonical)-1] |= 0x80
 	if _, err := PointFromBytesAllowIdentity(nonCanonical); err == nil {
 		t.Fatal("non-canonical identity encoding was accepted")

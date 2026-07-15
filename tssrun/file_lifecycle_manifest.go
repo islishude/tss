@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -512,7 +513,7 @@ func (w *fileLifecycleBlobWriter) rollback(cause error) error {
 	if len(cleanupErrors) == 0 {
 		return cause
 	}
-	return errors.Join(append([]error{cause}, cleanupErrors...)...)
+	return errors.Join(slices.Concat([]error{cause}, cleanupErrors)...)
 }
 
 func (w *fileLifecycleBlobWriter) storeAttempt(record SignAttemptRecord) (fileLifecycleAttempt, error) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/islishude/tss/internal/wire"
@@ -40,7 +41,7 @@ func TestFactorProofRejectsNonCanonicalWire(t *testing.T) {
 	}
 
 	nonMinimalFields := bytesFieldsClone(fields)
-	nonMinimalFields[0].Value = append([]byte{0}, nonMinimalFields[0].Value...)
+	nonMinimalFields[0].Value = slices.Concat([]byte{0}, nonMinimalFields[0].Value)
 	nonMinimal, err := wire.MarshalFields(factorProofWireVersion, factorProofWireType, nonMinimalFields)
 	if err != nil {
 		t.Fatal(err)

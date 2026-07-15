@@ -258,7 +258,7 @@ func TestResharePlanRejectsNonCanonicalEncoding(t *testing.T) {
 		t.Fatal("reshare plan accepted missing tag")
 	}
 
-	nonCanonical := append([]byte(nil), raw...)
+	nonCanonical := bytes.Clone(raw)
 	offsets := resharePlanFieldTagOffsets(t, nonCanonical)
 	binary.BigEndian.PutUint16(nonCanonical[offsets[4]:], 6)
 	binary.BigEndian.PutUint16(nonCanonical[offsets[5]:], 5)
@@ -266,7 +266,7 @@ func TestResharePlanRejectsNonCanonicalEncoding(t *testing.T) {
 		t.Fatal("reshare plan accepted non-canonical tag order")
 	}
 
-	duplicate := append([]byte(nil), raw...)
+	duplicate := bytes.Clone(raw)
 	binary.BigEndian.PutUint16(duplicate[offsets[4]:], 6)
 	if _, err := tss.DecodeBinary[ResharePlan](duplicate); err == nil {
 		t.Fatal("reshare plan accepted duplicate tag")

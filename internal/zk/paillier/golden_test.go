@@ -156,7 +156,7 @@ func assertBinaryProofWireRoundTrip[P binaryProof](t *testing.T, raw []byte, unm
 	if !bytes.Equal(raw, again) {
 		t.Fatal("proof did not remarshal deterministically")
 	}
-	if _, err := unmarshal(append(append([]byte(nil), raw...), 0)); err == nil {
+	if _, err := unmarshal(append(bytes.Clone(raw), 0)); err == nil {
 		t.Fatal("proof accepted trailing byte")
 	}
 }

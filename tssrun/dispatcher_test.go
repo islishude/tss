@@ -3,6 +3,7 @@ package tssrun
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -137,7 +138,7 @@ type testSession struct {
 
 func (s *testSession) Handle(tss.InboundEnvelope) ([]tss.Envelope, error) {
 	s.handled++
-	return append([]tss.Envelope(nil), s.out...), s.err
+	return slices.Clone(s.out), s.err
 }
 
 func (s *testSession) Completed() bool { return s.completed }

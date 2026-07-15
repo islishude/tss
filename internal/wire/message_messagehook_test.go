@@ -229,7 +229,7 @@ func (m *acceptingMessageHook) UnmarshalWireMessage(in []byte, opts ...Unmarshal
 }
 
 func rawHookFrame(version uint16, fields []Field) []byte {
-	out := append([]byte{}, magic...)
+	out := bytes.Clone(magic)
 	out = AppendUint16(out, uint16(len("wire.test.rawhook")))
 	out = append(out, "wire.test.rawhook"...)
 	out = AppendUint16(out, version)

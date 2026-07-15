@@ -155,7 +155,7 @@ func TestFROSTSignInvalidNonceCommitmentAbortsAndBlamesSender(t *testing.T) {
 	t.Parallel()
 	identity := make([]byte, 32)
 	identity[0] = 1
-	nonCanonicalIdentity := append([]byte(nil), identity...)
+	nonCanonicalIdentity := bytes.Clone(identity)
 	nonCanonicalIdentity[len(nonCanonicalIdentity)-1] |= 0x80
 
 	for _, tc := range []struct {

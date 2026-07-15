@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"reflect"
+	"slices"
 )
 
 // ---- big integer -------------------------------------------------------------
@@ -43,9 +44,9 @@ func encodeBigIntSigned(x *big.Int) ([]byte, error) {
 		return []byte{0x00}, nil
 	case -1:
 		// big.Int.Bytes() returns the absolute value — no need for Abs() here.
-		return append([]byte{0x01}, x.Bytes()...), nil
+		return slices.Concat([]byte{0x01}, x.Bytes()), nil
 	default:
-		return append([]byte{0x00}, x.Bytes()...), nil
+		return slices.Concat([]byte{0x00}, x.Bytes()), nil
 	}
 }
 

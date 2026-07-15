@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 )
 
@@ -45,7 +46,7 @@ type PolicySet struct {
 // It clones the input slice so callers cannot mutate the policy entries
 // after construction. Duplicate keys are rejected.
 func NewPolicySet(policies ...DeliveryPolicy) (PolicySet, error) {
-	cloned := append([]DeliveryPolicy(nil), policies...)
+	cloned := slices.Clone(policies)
 	idx := make(map[policyKey]int, len(cloned))
 	for i, p := range cloned {
 		k := policyKey{protocol: p.Protocol, round: p.Round, payloadType: p.PayloadType}
@@ -95,7 +96,7 @@ func MustNewPolicySet(policies ...DeliveryPolicy) PolicySet {
 
 // Entries returns a copy of the policy entries in registration order.
 func (ps PolicySet) Entries() []DeliveryPolicy {
-	return append([]DeliveryPolicy(nil), ps.entries...)
+	return slices.Clone(ps.entries)
 }
 
 // Match returns the policy for a given message kind or ErrUnknownPayloadPolicy.

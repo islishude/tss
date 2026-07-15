@@ -5,6 +5,7 @@ import (
 	stded25519 "crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,7 +43,7 @@ func TestFROSTSecretKeyFromSeedMatchesStandardPublicKey(t *testing.T) {
 }
 
 func TestFROSTTrustedDealerContributionConcurrentClaimHasOneWinner(t *testing.T) {
-	secretKey, _ := ParseSecretScalar(append([]byte{17}, make([]byte, 31)...))
+	secretKey, _ := ParseSecretScalar(slices.Concat([]byte{17}, make([]byte, 31)))
 	defer secretKey.Destroy()
 	limits := testLimits()
 	plan, contributions, err := NewTrustedDealerImport(secretKey, TrustedDealerImportOption{
@@ -75,7 +76,7 @@ func TestFROSTTrustedDealerContributionConcurrentClaimHasOneWinner(t *testing.T)
 
 func TestFROSTTrustedDealerPlanAndContributionRoundTrip(t *testing.T) {
 	t.Parallel()
-	secretKey, err := ParseSecretScalar(append([]byte{7}, make([]byte, 31)...))
+	secretKey, err := ParseSecretScalar(slices.Concat([]byte{7}, make([]byte, 31)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +374,7 @@ func TestFROSTTrustedDealerContributionReplayBoundaries(t *testing.T) {
 }
 
 func TestGoldenFROSTTrustedDealerImportPlanAndContribution(t *testing.T) {
-	secretKey, err := ParseSecretScalar(append([]byte{9}, make([]byte, 31)...))
+	secretKey, err := ParseSecretScalar(slices.Concat([]byte{9}, make([]byte, 31)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +401,7 @@ func TestGoldenFROSTTrustedDealerImportPlanAndContribution(t *testing.T) {
 }
 
 func FuzzFROSTTrustedDealerImportPlan(f *testing.F) {
-	secretKey, _ := ParseSecretScalar(append([]byte{13}, make([]byte, 31)...))
+	secretKey, _ := ParseSecretScalar(slices.Concat([]byte{13}, make([]byte, 31)))
 	limits := testLimits()
 	plan, contributions, err := NewTrustedDealerImport(secretKey, TrustedDealerImportOption{
 		SessionID: testutil.MustSessionID(807), Parties: tss.NewPartySet(1, 2), Threshold: 2,
@@ -426,7 +427,7 @@ func FuzzFROSTTrustedDealerImportPlan(f *testing.F) {
 }
 
 func FuzzFROSTTrustedDealerContribution(f *testing.F) {
-	secretKey, _ := ParseSecretScalar(append([]byte{15}, make([]byte, 31)...))
+	secretKey, _ := ParseSecretScalar(slices.Concat([]byte{15}, make([]byte, 31)))
 	limits := testLimits()
 	_, contributions, err := NewTrustedDealerImport(secretKey, TrustedDealerImportOption{
 		SessionID: testutil.MustSessionID(809), Parties: tss.NewPartySet(1, 2), Threshold: 2,

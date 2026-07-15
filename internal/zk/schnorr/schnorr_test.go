@@ -2,6 +2,7 @@ package schnorr
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,7 +67,7 @@ func TestProof(t *testing.T) {
 		t.Fatal("malformed commitment encoded")
 	}
 	malformed = *proof
-	malformed.Response = append([]byte{0}, proof.Response...)
+	malformed.Response = slices.Concat([]byte{0}, proof.Response)
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed response encoded")
 	}
@@ -249,7 +250,7 @@ func TestProofRejectsInvalidInputs(t *testing.T) {
 			}()},
 			{name: "malformed response", public: public, proof: func() *Proof {
 				malformed := *proof
-				malformed.Response = append([]byte{0}, proof.Response...)
+				malformed.Response = slices.Concat([]byte{0}, proof.Response)
 				return &malformed
 			}()},
 		}

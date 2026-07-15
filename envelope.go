@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/islishude/tss/internal/transcript"
@@ -353,7 +354,7 @@ func OpenEnvelope(raw []byte, info ReceiveInfo, opts ...OpenOption) (InboundEnve
 // OpenEnvelopeWithLimits decodes a wire envelope with explicit limits and binds
 // it to transport-verified receive facts.
 func OpenEnvelopeWithLimits(raw []byte, info ReceiveInfo, limits EnvelopeLimits, opts ...OpenOption) (InboundEnvelope, error) {
-	options := append([]OpenOption{WithEnvelopeLimits(limits)}, opts...)
+	options := slices.Concat([]OpenOption{WithEnvelopeLimits(limits)}, opts)
 	return OpenEnvelope(raw, info, options...)
 }
 

@@ -3,6 +3,7 @@ package ed25519
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"testing"
 
 	fed "filippo.io/edwards25519"
@@ -280,7 +281,7 @@ func routeFROSTKeygenThroughShareRound(
 	messages []tss.Envelope,
 ) []tss.Envelope {
 	t.Helper()
-	queue := append([]tss.Envelope(nil), messages...)
+	queue := slices.Clone(messages)
 	confirmations := make([]tss.Envelope, 0, len(parties))
 	for len(queue) > 0 {
 		env := queue[0]

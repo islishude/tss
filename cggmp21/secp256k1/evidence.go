@@ -461,7 +461,7 @@ func signerEvidenceFields(signers tss.PartySet) []tss.EvidenceField {
 }
 
 func rawEvidenceField(key string, value []byte) tss.EvidenceField {
-	return tss.EvidenceField{Key: key, Value: append([]byte(nil), value...)}
+	return tss.EvidenceField{Key: key, Value: bytes.Clone(value)}
 }
 
 func hashEvidenceField(key string, value []byte) tss.EvidenceField {

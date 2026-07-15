@@ -139,7 +139,7 @@ func TestFast_PresignCodecReceivesCompleteLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	presign.state.EpochID = append([]byte(nil), presign.state.Epoch.EpochID...)
+	presign.state.EpochID = bytes.Clone(presign.state.Epoch.EpochID)
 
 	raw, err := presign.marshalWireMessageWithLimits(testLimits())
 	if err != nil {

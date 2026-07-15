@@ -67,7 +67,7 @@ func (p *EncProof) Clone() *EncProof {
 		Z1:             tss.CloneBigInt(p.Z1),
 		Z2:             tss.CloneBigInt(p.Z2),
 		Z3:             tss.CloneBigInt(p.Z3),
-		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 }
 

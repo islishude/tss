@@ -52,7 +52,7 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	if _, err := tss.DecodeBinary[KeyShare]([]byte(`{"version":1}`)); err == nil {
 		t.Fatal("JSON key share encoding accepted")
 	}
-	trailing := append(append([]byte(nil), raw1...), 0)
+	trailing := append(bytes.Clone(raw1), 0)
 	if _, err := tss.DecodeBinary[KeyShare](trailing); err == nil {
 		t.Fatal("key share with trailing bytes accepted")
 	}
@@ -204,7 +204,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) 
 		t.Fatal(err)
 	}
 	commitments := share.state.GroupCommitments.BytesList()
-	commitments = append(commitments, append([]byte(nil), commitments[0]...))
+	commitments = append(commitments, bytes.Clone(commitments[0]))
 	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 7, wire.EncodeBytesList(commitments))
 	if err != nil {
 		t.Fatal(err)

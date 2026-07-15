@@ -86,7 +86,7 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 			t.Fatalf("party getter does not match Parties at index %d", i)
 		}
 	}
-	trailing := append(append([]byte(nil), raw1...), 0)
+	trailing := append(bytes.Clone(raw1), 0)
 	if _, err := tss.DecodeBinary[KeyShare](trailing); err == nil {
 		t.Fatal("key share with trailing bytes accepted")
 	}
@@ -435,7 +435,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(mustPresignMetadata(t, decoded).TranscriptHash, mustPresignMetadata(t, presigns[1]).TranscriptHash) {
 		t.Fatal("presign transcript mismatch after round trip")
 	}
-	trailing := append(append([]byte(nil), raw1...), 0)
+	trailing := append(bytes.Clone(raw1), 0)
 	if _, err := tss.DecodeBinary[Presign](trailing); err == nil {
 		t.Fatal("presign with trailing bytes accepted")
 	}

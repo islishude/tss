@@ -169,11 +169,11 @@ func auxInfoSchnorrProofFrom(proof *schnorr.Proof) auxInfoSchnorrProof {
 	if proof == nil {
 		return auxInfoSchnorrProof{}
 	}
-	return auxInfoSchnorrProof{Commitment: append([]byte(nil), proof.Commitment...), Response: append([]byte(nil), proof.Response...)}
+	return auxInfoSchnorrProof{Commitment: bytes.Clone(proof.Commitment), Response: bytes.Clone(proof.Response)}
 }
 
 func (p auxInfoSchnorrProof) proof() *schnorr.Proof {
-	return &schnorr.Proof{Commitment: append([]byte(nil), p.Commitment...), Response: append([]byte(nil), p.Response...)}
+	return &schnorr.Proof{Commitment: bytes.Clone(p.Commitment), Response: bytes.Clone(p.Response)}
 }
 
 func (p auxInfoSchnorrProof) validate() error { return p.proof().Validate() }

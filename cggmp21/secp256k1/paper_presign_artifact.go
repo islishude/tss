@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -20,7 +21,7 @@ type normalizedPresignCommitment struct {
 
 func (c normalizedPresignCommitment) clone() normalizedPresignCommitment {
 	return normalizedPresignCommitment{
-		Party: c.Party, DeltaTilde: append([]byte(nil), c.DeltaTilde...), STilde: append([]byte(nil), c.STilde...),
+		Party: c.Party, DeltaTilde: bytes.Clone(c.DeltaTilde), STilde: bytes.Clone(c.STilde),
 	}
 }
 

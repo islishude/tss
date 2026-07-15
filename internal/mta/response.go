@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"bytes"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -35,11 +36,11 @@ type ResponseMessage struct {
 func (m ResponseMessage) Clone() ResponseMessage {
 	proof := m.Proof.Clone()
 	if proof == nil {
-		return ResponseMessage{Ciphertext: append([]byte(nil), m.Ciphertext...), F: append([]byte(nil), m.F...)}
+		return ResponseMessage{Ciphertext: bytes.Clone(m.Ciphertext), F: bytes.Clone(m.F)}
 	}
 	return ResponseMessage{
-		Ciphertext: append([]byte(nil), m.Ciphertext...),
-		F:          append([]byte(nil), m.F...),
+		Ciphertext: bytes.Clone(m.Ciphertext),
+		F:          bytes.Clone(m.F),
 		Proof:      *proof,
 	}
 }

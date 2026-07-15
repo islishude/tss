@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -365,14 +366,14 @@ func TestAckCountReturnsCollectedCount(t *testing.T) {
 func TestNewInMemoryAckSignerAndSignAck(t *testing.T) {
 	t.Parallel()
 	signer := NewInMemoryAckSigner(5, func(digest [32]byte) ([]byte, error) {
-		return append([]byte("sig:"), digest[:4]...), nil
+		return slices.Concat([]byte("sig:"), digest[:4]), nil
 	})
 	digest := sha256.Sum256([]byte("test-digest"))
 	sig, err := signer.SignAck(digest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := append([]byte("sig:"), digest[:4]...)
+	expected := slices.Concat([]byte("sig:"), digest[:4])
 	if string(sig) != string(expected) {
 		t.Fatalf("SignAck returned %x, want %x", sig, expected)
 	}

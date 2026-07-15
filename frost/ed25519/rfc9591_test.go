@@ -6,6 +6,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"io"
+	"slices"
 	"testing"
 
 	fed "filippo.io/edwards25519"
@@ -108,13 +109,14 @@ func TestRFC9591Ed25519BindingFactorVector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedEncoded := append(append(append(append(append([]byte(nil),
-		hexMust(t, "0100000000000000000000000000000000000000000000000000000000000000")...),
-		v.p1HidingCommitment...),
-		v.p1BindingCommitment...),
-		hexMust(t, "0300000000000000000000000000000000000000000000000000000000000000")...),
-		v.p3HidingCommitment...)
-	expectedEncoded = append(expectedEncoded, v.p3BindingCommitment...)
+	expectedEncoded := slices.Concat(
+		hexMust(t, "0100000000000000000000000000000000000000000000000000000000000000"),
+		v.p1HidingCommitment,
+		v.p1BindingCommitment,
+		hexMust(t, "0300000000000000000000000000000000000000000000000000000000000000"),
+		v.p3HidingCommitment,
+		v.p3BindingCommitment,
+	)
 	if !bytes.Equal(encoded, expectedEncoded) {
 		t.Fatal("encoded commitment list does not match RFC sorted format")
 	}
@@ -161,7 +163,7 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 		sessionID,
 		v.signers,
 		v.message,
-		bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...)),
+		bytes.NewReader(slices.Concat(v.p1HidingRandomness, v.p1BindingRandomness)),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +173,7 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 		sessionID,
 		v.signers,
 		v.message,
-		bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...)),
+		bytes.NewReader(slices.Concat(v.p3HidingRandomness, v.p3BindingRandomness)),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -349,7 +351,7 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		t.Fatal(err)
 	}
 	groupCommitments, err := newGroupCommitmentsFromBytesList([][]byte{
-		append([]byte(nil), v.groupPublicKey...),
+		bytes.Clone(v.groupPublicKey),
 		fed.NewIdentityPoint().ScalarBaseMult(coeff1).Bytes(),
 	}, 2)
 	if err != nil {

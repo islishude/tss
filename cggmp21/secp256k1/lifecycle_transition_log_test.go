@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -27,7 +28,7 @@ func (l *captureLifecycleLogger) Error(ctx context.Context, msg string, fields .
 
 func (l *captureLifecycleLogger) record(ctx context.Context, level lifecycleLogLevel, msg string, fields []any) {
 	l.entries = append(l.entries, lifecycleLogEntry{
-		ctx: ctx, level: level, msg: msg, fields: append([]any(nil), fields...),
+		ctx: ctx, level: level, msg: msg, fields: slices.Clone(fields),
 	})
 }
 

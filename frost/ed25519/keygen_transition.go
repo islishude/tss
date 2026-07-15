@@ -264,8 +264,7 @@ func terminalKeygenApplyError(round uint8, err error) error {
 	if err == nil {
 		return nil
 	}
-	var protocolErr *tss.ProtocolError
-	if errors.As(err, &protocolErr) {
+	if _, ok := errors.AsType[*tss.ProtocolError](err); ok {
 		return err
 	}
 	return tss.NewProtocolError(tss.ErrCodeInvariant, round, tss.BroadcastPartyId, err)

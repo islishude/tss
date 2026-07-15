@@ -4,6 +4,7 @@ import (
 	stded25519 "crypto/ed25519"
 	"errors"
 	"fmt"
+	"slices"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
@@ -69,7 +70,7 @@ func (s *SignSession) prepareAggregate() (*preparedAggregateSignature, bool, err
 		z.Add(z, partial)
 	}
 	zBytes := z.Bytes()
-	sig := append(append([]byte(nil), RBytes...), zBytes...)
+	sig := slices.Concat(RBytes, zBytes)
 	if !stded25519.Verify(stded25519.PublicKey(verifyKey), s.message, sig) {
 		// Every partial has already passed its per-signer verification equation.
 		// A final verification failure therefore indicates a local invariant or
@@ -218,10 +219,7 @@ func (s *SignSession) bindingFactors() (map[tss.PartyID]*fed.Scalar, error) {
 	// Bind the actual verification key (shifted for HD, original otherwise)
 	// so that every rho is tied to the key the verifier will use.
 	verifyKey := s.derivation.VerificationKeyBytes()
-	prefix := make([]byte, 0, len(verifyKey)+len(msgHash)+len(commitmentHash)+32)
-	prefix = append(prefix, verifyKey...)
-	prefix = append(prefix, msgHash...)
-	prefix = append(prefix, commitmentHash...)
+	prefix := slices.Concat(verifyKey, msgHash, commitmentHash)
 
 	out := make(map[tss.PartyID]*fed.Scalar, len(s.signers))
 	for _, id := range s.signers {
@@ -229,7 +227,7 @@ func (s *SignSession) bindingFactors() (map[tss.PartyID]*fed.Scalar, error) {
 		if err != nil {
 			return nil, err
 		}
-		input := append(append([]byte(nil), prefix...), idEnc...)
+		input := slices.Concat(prefix, idEnc)
 		rho, err := rfc9591H1(input)
 		if err != nil {
 			return nil, err

@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"testing"
@@ -129,7 +130,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	}
 
 	meta := mustKeyShareMetadata(t, k)
-	originalCommitment := append([]byte(nil), meta.GroupCommitments[0]...)
+	originalCommitment := bytes.Clone(meta.GroupCommitments[0])
 	meta.Parties[0] = 99
 	meta.GroupCommitments[0][0] = 99
 	verificationShare, ok := k.VerificationShare(1)

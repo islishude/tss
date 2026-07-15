@@ -283,18 +283,18 @@ func secpEvidenceContext(share *KeyShare, signers tss.PartySet, presign *Presign
 	ctx := EvidenceContext{
 		Threshold:            share.state.Threshold,
 		Parties:              share.state.Parties.Clone(),
-		PublicKey:            append([]byte(nil), share.state.PublicKey...),
+		PublicKey:            bytes.Clone(share.state.PublicKey),
 		SecurityParams:       &params,
 		VerificationShares:   verificationShares,
 		PaillierPublicKeys:   paillierPublicKeys,
 		RingPedersenParams:   ringPedersenParams,
 		Signers:              signers.Clone(),
-		KeygenTranscriptHash: append([]byte(nil), share.state.KeygenTranscriptHash...),
+		KeygenTranscriptHash: bytes.Clone(share.state.KeygenTranscriptHash),
 	}
 	if presign != nil {
-		ctx.PresignTranscriptHash = append([]byte(nil), presign.state.TranscriptHash...)
-		ctx.ContextHash = append([]byte(nil), presign.state.ContextHash...)
-		ctx.DerivationShift = append([]byte(nil), presign.state.Derivation.AdditiveShift...)
+		ctx.PresignTranscriptHash = bytes.Clone(presign.state.TranscriptHash)
+		ctx.ContextHash = bytes.Clone(presign.state.ContextHash)
+		ctx.DerivationShift = bytes.Clone(presign.state.Derivation.AdditiveShift)
 	}
 	return ctx
 }

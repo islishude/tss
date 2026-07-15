@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/islishude/tss/internal/testutil"
@@ -19,13 +20,13 @@ func TestRepositoryBoundStartSignNonceVector(t *testing.T) {
 	sessionID := testutil.MustSessionID(9591)
 
 	s1, out1, err := startFROSTSignWithOptions(key1, sessionID, v.signers, v.message, SignOptions{
-		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...)),
+		NonceReader: bytes.NewReader(slices.Concat(v.p1HidingRandomness, v.p1BindingRandomness)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s3, out3, err := startFROSTSignWithOptions(key3, sessionID, v.signers, v.message, SignOptions{
-		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...)),
+		NonceReader: bytes.NewReader(slices.Concat(v.p3HidingRandomness, v.p3BindingRandomness)),
 	})
 	if err != nil {
 		t.Fatal(err)

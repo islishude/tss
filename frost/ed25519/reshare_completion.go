@@ -216,7 +216,7 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		PartyData:            partyData,
 		KeygenSessionID:      s.cfg.SessionID,
 		KeygenTranscriptHash: bytes.Clone(binding.transcriptHash),
-		PlanHash:             append([]byte(nil), s.planHash...),
+		PlanHash:             bytes.Clone(s.planHash),
 		ConfirmationMode:     keyShareConfirmationModeLifecycleAggregate,
 	}}
 	prepared.newShare = newShare

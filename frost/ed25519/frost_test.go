@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stded25519 "crypto/ed25519"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 
@@ -760,7 +761,7 @@ func deliverFROSTKeygenMessages(t testing.TB, parties tss.PartySet, sessions map
 			t.Fatalf("missing guard for keygen session %d", id)
 		}
 	}
-	queue := append([]tss.Envelope(nil), messages...)
+	queue := slices.Clone(messages)
 	for len(queue) > 0 {
 		env := queue[0]
 		queue = queue[1:]
@@ -1029,7 +1030,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 // Callers must set guards on all sessions before calling this function.
 func deliverReshareMessages(t *testing.T, receivers tss.PartySet, messages []tss.Envelope, sessions map[tss.PartyID]*ReshareSession) {
 	t.Helper()
-	queue := append([]tss.Envelope(nil), messages...)
+	queue := slices.Clone(messages)
 	for len(queue) > 0 {
 		env := queue[0]
 		queue = queue[1:]

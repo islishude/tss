@@ -1,6 +1,7 @@
 package paillier
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"testing"
@@ -320,7 +321,7 @@ func rewriteProofWireField(raw []byte, wireType string, model any, fieldName str
 	}
 	for i := range fields {
 		if fields[i].Tag == tag {
-			fields[i].Value = append([]byte(nil), value...)
+			fields[i].Value = bytes.Clone(value)
 			return wire.MarshalFields(version, wireType, fields)
 		}
 	}

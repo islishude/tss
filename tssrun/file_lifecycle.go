@@ -1,6 +1,7 @@
 package tssrun
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -117,7 +118,7 @@ func NewFileLifecycleStore(directory string, passphrase []byte, params *tss.Pass
 		params = tss.DefaultPassphraseParams()
 	}
 	paramsCopy := *params
-	passphraseCopy := append([]byte(nil), passphrase...)
+	passphraseCopy := bytes.Clone(passphrase)
 	probe, err := tss.EncryptSignAttemptWithPassphrase([]byte("tssrun-lifecycle-probe"), passphraseCopy, "tssrun-lifecycle-probe", &paramsCopy)
 	if err != nil {
 		clearBytes(passphraseCopy)
@@ -241,7 +242,7 @@ func (s *FileLifecycleStore) CommitSignAttempt(ctx context.Context, binding Gene
 			Binding:      binding,
 			PresignID:    presignID,
 			AttemptID:    intent.AttemptID,
-			IntentDigest: append([]byte(nil), intent.IntentDigest...),
+			IntentDigest: bytes.Clone(intent.IntentDigest),
 		},
 	}
 }

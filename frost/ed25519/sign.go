@@ -266,7 +266,7 @@ func startSignWithNonceGenerator(
 		sessionID:        plan.state.sessionID,
 		log:              tss.NopLogger(),
 		limits:           limits,
-		message:          append([]byte(nil), message...),
+		message:          bytes.Clone(message),
 		signers:          signers,
 		context:          plan.state.context.Clone(),
 		contextHash:      slices.Clone(plan.state.contextHash),

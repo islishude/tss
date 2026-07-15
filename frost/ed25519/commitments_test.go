@@ -152,7 +152,7 @@ func TestGroupCommitmentsWireCodecRejectsInvalidValues(t *testing.T) {
 		},
 		{
 			name: "long item",
-			raw:  wire.EncodeBytesList([][]byte{append(append([]byte(nil), generator...), 0)}),
+			raw:  wire.EncodeBytesList([][]byte{append(bytes.Clone(generator), 0)}),
 		},
 		{
 			name: "trailing data",

@@ -1,6 +1,9 @@
 package wire
 
-import "math/big"
+import (
+	"bytes"
+	"math/big"
+)
 
 // testFieldLimits returns generous field limits for all semantic names used by
 // test message types. Fail-closed wire enforcement requires FieldLimits whenever
@@ -384,7 +387,7 @@ func (c *customCountedList) UnmarshalWireValue(in []byte) error {
 	}
 	c.items = make([][]byte, len(items))
 	for i, item := range items {
-		c.items[i] = append([]byte(nil), item...)
+		c.items[i] = bytes.Clone(item)
 	}
 	return nil
 }

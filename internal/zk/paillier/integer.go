@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 )
 
 // Signed integer encoding uses a canonical signed-magnitude format:
@@ -28,9 +29,9 @@ func EncodeSigned(x *big.Int) []byte {
 	}
 	mag := x.Bytes() // absolute value, minimal big-endian
 	if sign < 0 {
-		return append([]byte{0x01}, mag...)
+		return slices.Concat([]byte{0x01}, mag)
 	}
-	return append([]byte{0x00}, mag...)
+	return slices.Concat([]byte{0x00}, mag)
 }
 
 // DecodeSigned parses a canonical signed-magnitude encoding and returns the

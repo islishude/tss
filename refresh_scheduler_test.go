@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,7 +76,7 @@ func (t *refreshTestTransport) Receive(ctx context.Context) (InboundEnvelope, er
 func (t *refreshTestTransport) sent() []string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return append([]string(nil), t.deliveries...)
+	return slices.Clone(t.deliveries)
 }
 
 type refreshTestSession struct {

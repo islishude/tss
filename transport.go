@@ -1,6 +1,7 @@
 package tss
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -304,7 +305,7 @@ func (m *MaliciousTransport) broadcastEquivocation(env Envelope) error {
 	// Build a tampered clone with a different payload.
 	tampered := env.Clone()
 	if len(tampered.Payload) > 0 {
-		tampered.Payload = append([]byte(nil), tampered.Payload...)
+		tampered.Payload = bytes.Clone(tampered.Payload)
 		tampered.Payload[0] ^= 0xff // flip bits to create a different payload
 	} else {
 		tampered.Payload = []byte{0xde, 0xad}

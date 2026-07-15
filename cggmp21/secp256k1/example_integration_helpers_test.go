@@ -295,7 +295,7 @@ func newExampleCGGMPKeygenJob(option cggmp.KeygenPlanOption) (exampleKeygenJob, 
 		},
 		limits:         option.Limits,
 		securityParams: snapshot.SecurityParams,
-		planHash:       append([]byte(nil), planHash...),
+		planHash:       bytes.Clone(planHash),
 	}, nil
 }
 
