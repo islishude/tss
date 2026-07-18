@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -78,7 +79,7 @@ func (m KeySharePublicMetadata) Clone() KeySharePublicMetadata {
 		Parties:              m.Parties.Clone(),
 		PublicKey:            m.PublicKey.Clone(),
 		ChainCode:            slices.Clone(m.ChainCode),
-		GroupCommitments:     tss.CloneByteSlices(m.GroupCommitments),
+		GroupCommitments:     clone.ByteSlices(m.GroupCommitments),
 		KeygenSessionID:      m.KeygenSessionID,
 		KeygenTranscriptHash: slices.Clone(m.KeygenTranscriptHash),
 		PlanHash:             slices.Clone(m.PlanHash),

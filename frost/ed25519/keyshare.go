@@ -9,6 +9,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -429,7 +430,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		ChainCode:            slices.Clone(k.state.ChainCode),
 		Secret:               k.state.Secret.Clone(),
 		GroupCommitments:     k.state.GroupCommitments.Clone(),
-		PartyData:            tss.CloneMap(k.state.PartyData),
+		PartyData:            clone.Map(k.state.PartyData),
 		KeygenSessionID:      k.state.KeygenSessionID,
 		KeygenTranscriptHash: slices.Clone(k.state.KeygenTranscriptHash),
 		PlanHash:             slices.Clone(k.state.PlanHash),

@@ -6,6 +6,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
@@ -725,7 +726,7 @@ func TestFROSTPreparedReshareDealerStartDestroyClearsOwnedState(t *testing.T) {
 
 	session1, out1, session2, _ := frostTwoPartyRefreshSessions(t)
 	session2.Destroy()
-	ownedOut := tss.CloneSlice(out1)
+	ownedOut := clone.Slice(out1)
 	prepared := &preparedReshareDealerStart{
 		session: session1,
 		out:     ownedOut,

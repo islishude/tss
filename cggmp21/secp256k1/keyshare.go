@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/wire"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -76,8 +77,8 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 		SID:                  epoch.SID,
 		RID:                  epoch.RID,
 		EpochID:              bytes.Clone(epoch.EpochID),
-		Identifiers:          tss.CloneSlice(epoch.Identifiers),
-		PublicShares:         tss.CloneSlice(epoch.PublicShares),
+		Identifiers:          clone.Slice(epoch.Identifiers),
+		PublicShares:         clone.Slice(epoch.PublicShares),
 		AuxiliaryDigest:      bytes.Clone(epoch.AuxiliaryDigest),
 		SourceEpochID:        sourceEpochID,
 		Epoch:                epoch,
@@ -865,7 +866,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		ChainCode:              slices.Clone(k.state.ChainCode),
 		Secret:                 k.state.Secret.Clone(),
 		GroupCommitments:       cloneCommitmentPoints(k.state.GroupCommitments),
-		PartyData:              tss.CloneMap(k.state.PartyData),
+		PartyData:              clone.Map(k.state.PartyData),
 		PaillierPrivateKey:     k.state.PaillierPrivateKey.Clone(),
 		PaillierProofSessionID: k.state.PaillierProofSessionID,
 		PaillierProofDomain:    k.state.PaillierProofDomain,

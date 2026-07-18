@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -49,7 +50,7 @@ func CachedKeygenShares(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShar
 		if !fromFixture {
 			t.Logf("no committed keygen fixture for %d-of-%d; running full DKG fallback", threshold, n)
 		}
-		entry.shares = tss.CloneMap(shares)
+		entry.shares = clone.Map(shares)
 	})
 	if entry.err != nil {
 		keygenFixtureCache.Delete(key)
@@ -59,7 +60,7 @@ func CachedKeygenShares(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShar
 		keygenFixtureCache.Delete(key)
 		t.Fatalf("cached keygen fixture %d-of-%d was not initialized", threshold, n)
 	}
-	return tss.CloneMap(entry.shares)
+	return clone.Map(entry.shares)
 }
 
 // cachedKeygenFixture is a convenience wrapper around CachedKeygenShares for

@@ -8,6 +8,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss/internal/clone"
 )
 
 // StartKeygen starts dealerless DKG from a shared immutable lifecycle plan.
@@ -163,7 +164,7 @@ func emitFROSTKeygenRound1(s *KeygenSession, local *frostKeygenLocalMaterial) (o
 		return nil, err
 	}
 	out = append(out, commitEnv)
-	local.ownMessages = tss.CloneSlice(out)
+	local.ownMessages = clone.Slice(out)
 	return out, nil
 }
 
@@ -201,7 +202,7 @@ func emitFROSTKeygenRound2(s *KeygenSession, local *frostKeygenLocalMaterial) (o
 		}
 		out = append(out, env)
 	}
-	local.ownMessages = append(local.ownMessages, tss.CloneSlice(out)...)
+	local.ownMessages = append(local.ownMessages, clone.Slice(out)...)
 	return out, nil
 }
 

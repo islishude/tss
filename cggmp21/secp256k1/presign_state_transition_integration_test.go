@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -369,7 +370,7 @@ func TestCGGMP21AggregateZeroAbortsWithoutBlameAndDestroysSecrets(t *testing.T) 
 func TestCGGMP21PreparedPresignStartDestroyClearsOwnedState(t *testing.T) {
 	s1, out1, s2, _ := cggmpTwoPartyPresignSessions(t)
 	s2.Destroy()
-	ownedOut := tss.CloneSlice(out1)
+	ownedOut := clone.Slice(out1)
 	kShare := s1.kShare
 	gamma := s1.gamma
 	xBar := s1.xBar

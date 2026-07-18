@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/sessiontx"
@@ -190,7 +191,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if selfShare != nil && dd.share != nil {
 		return nil, errors.New("duplicate local reshare share")
 	}
-	dd.commitments = tss.CloneByteSlices(commitments)
+	dd.commitments = clone.ByteSlices(commitments)
 	if selfShare != nil {
 		dd.share = selfShare
 	}

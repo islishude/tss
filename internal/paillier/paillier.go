@@ -4,7 +4,7 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -35,9 +35,9 @@ func (pk *PublicKey) Clone() *PublicKey {
 		return nil
 	}
 	return &PublicKey{
-		N:        tss.CloneBigInt(pk.N),
-		G:        tss.CloneBigInt(pk.G),
-		NSquared: tss.CloneBigInt(pk.NSquared),
+		N:        clone.BigInt(pk.N),
+		G:        clone.BigInt(pk.G),
+		NSquared: clone.BigInt(pk.NSquared),
 	}
 }
 

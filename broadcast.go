@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/transcript"
 )
 
@@ -63,7 +64,7 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 		PayloadHash:    payloadHash,
 		EnvelopeDigest: envelopeDigest,
 		Recipients:     recipients.Clone(),
-		Acks:           CloneSlice(acks),
+		Acks:           clone.Slice(acks),
 	}
 
 	// Verify internal consistency: every ack covers the same digest and recipient set.
@@ -383,10 +384,10 @@ func (c *BroadcastCertificate) Clone() *BroadcastCertificate {
 	if c == nil {
 		return nil
 	}
-	clone := *c
-	clone.Recipients = c.Recipients.Clone()
-	clone.Acks = CloneSlice(c.Acks)
-	return &clone
+	out := *c
+	out.Recipients = c.Recipients.Clone()
+	out.Acks = clone.Slice(c.Acks)
+	return &out
 }
 
 // VerifyStructure checks that the certificate binds to env and that

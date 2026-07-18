@@ -9,7 +9,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -68,13 +68,13 @@ func (p *AffGStarProof) Clone() *AffGStarProof {
 		return nil
 	}
 	return &AffGStarProof{
-		A:              tss.CloneByteSlices(p.A),
-		B:              tss.CloneByteSlices(p.B),
-		R:              tss.CloneByteSlices(p.R),
-		Z:              tss.CloneByteSlices(p.Z),
-		ZPrime:         tss.CloneByteSlices(p.ZPrime),
-		W:              tss.CloneByteSlices(p.W),
-		Lambda:         tss.CloneByteSlices(p.Lambda),
+		A:              clone.ByteSlices(p.A),
+		B:              clone.ByteSlices(p.B),
+		R:              clone.ByteSlices(p.R),
+		Z:              clone.ByteSlices(p.Z),
+		ZPrime:         clone.ByteSlices(p.ZPrime),
+		W:              clone.ByteSlices(p.W),
+		Lambda:         clone.ByteSlices(p.Lambda),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 }

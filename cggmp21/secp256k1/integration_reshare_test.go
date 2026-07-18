@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -520,7 +521,7 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 			if oldFixture == nil {
 				t.Fatalf("missing old key fixture for %d-of-%d", oldKey.threshold, oldKey.n)
 			}
-			oldShares := tss.CloneMap(oldFixture)
+			oldShares := clone.Map(oldFixture)
 			oldPub := mustKeySharePublicKey(t, oldShares[1])
 
 			var newShares map[tss.PartyID]*KeyShare

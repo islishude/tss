@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/planvalidation"
@@ -425,9 +426,9 @@ func cloneAuxInfoReveal(in *auxInfoRevealPayload) *auxInfoRevealPayload {
 		return nil
 	}
 	out := &auxInfoRevealPayload{
-		PolynomialCommitments: tss.CloneByteSlices(in.PolynomialCommitments),
+		PolynomialCommitments: clone.ByteSlices(in.PolynomialCommitments),
 		DHKeys:                make([]auxInfoDHKey, len(in.DHKeys)),
-		SchnorrCommitments:    tss.CloneByteSlices(in.SchnorrCommitments),
+		SchnorrCommitments:    clone.ByteSlices(in.SchnorrCommitments),
 		ModulusCommitment:     bytes.Clone(in.ModulusCommitment),
 		PaillierPublicKey:     in.PaillierPublicKey.Clone(),
 		RingPedersenParams:    in.RingPedersenParams.Clone(),

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"math/big"
 	"testing"
 	"time"
 )
@@ -372,70 +371,3 @@ func (l *testLogger) Debug(_ context.Context, _ string, _ ...any) {}
 func (l *testLogger) Info(_ context.Context, _ string, _ ...any)  {}
 func (l *testLogger) Warn(_ context.Context, _ string, _ ...any)  {}
 func (l *testLogger) Error(_ context.Context, _ string, _ ...any) {}
-
-func TestCloneBigInt(t *testing.T) {
-	tests := []struct {
-		name string
-		in   *big.Int
-	}{
-		{
-			name: "nil",
-			in:   nil,
-		},
-		{
-			name: "zero",
-			in:   big.NewInt(0),
-		},
-		{
-			name: "positive",
-			in:   big.NewInt(123456789),
-		},
-		{
-			name: "negative",
-			in:   big.NewInt(-123456789),
-		},
-		{
-			name: "large",
-			in: func() *big.Int {
-				x, ok := new(big.Int).SetString("1234567890123456789012345678901234567890", 10)
-				if !ok {
-					t.Fatal("failed to construct test big.Int")
-				}
-				return x
-			}(),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := CloneBigInt(tt.in)
-
-			if tt.in == nil {
-				if got != nil {
-					t.Fatalf("CloneBigInt(nil) = %v, want nil", got)
-				}
-				return
-			}
-
-			if got == nil {
-				t.Fatal("CloneBigInt(non-nil) = nil, want non-nil")
-			}
-
-			if got == tt.in {
-				t.Fatal("CloneBigInt returned the same pointer, want a distinct copy")
-			}
-
-			if got.Cmp(tt.in) != 0 {
-				t.Fatalf("CloneBigInt(%v) = %v, want equal value", tt.in, got)
-			}
-
-			original := new(big.Int).Set(tt.in)
-
-			got.Add(got, big.NewInt(1))
-
-			if tt.in.Cmp(original) != 0 {
-				t.Fatalf("mutating clone changed original: got original %v, want %v", tt.in, original)
-			}
-		})
-	}
-}

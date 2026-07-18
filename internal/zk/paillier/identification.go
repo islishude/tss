@@ -10,6 +10,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -58,7 +59,7 @@ func (p *MulProof) Clone() *MulProof {
 	if p == nil {
 		return nil
 	}
-	return &MulProof{A: tss.CloneBigInt(p.A), B: tss.CloneBigInt(p.B), Z: tss.CloneBigInt(p.Z), U: tss.CloneBigInt(p.U), V: tss.CloneBigInt(p.V), TranscriptHash: bytes.Clone(p.TranscriptHash)}
+	return &MulProof{A: clone.BigInt(p.A), B: clone.BigInt(p.B), Z: clone.BigInt(p.Z), U: clone.BigInt(p.U), V: clone.BigInt(p.V), TranscriptHash: bytes.Clone(p.TranscriptHash)}
 }
 
 // Destroy clears the proof's witness-derived responses.
@@ -391,7 +392,7 @@ func (p *MulStarProof) Clone() *MulStarProof {
 	if p == nil {
 		return nil
 	}
-	return &MulStarProof{A: tss.CloneBigInt(p.A), Bx: secp.Clone(p.Bx), S: tss.CloneBigInt(p.S), E: tss.CloneBigInt(p.E), Z1: tss.CloneBigInt(p.Z1), Z2: tss.CloneBigInt(p.Z2), W: tss.CloneBigInt(p.W), TranscriptHash: bytes.Clone(p.TranscriptHash)}
+	return &MulStarProof{A: clone.BigInt(p.A), Bx: secp.Clone(p.Bx), S: clone.BigInt(p.S), E: clone.BigInt(p.E), Z1: clone.BigInt(p.Z1), Z2: clone.BigInt(p.Z2), W: clone.BigInt(p.W), TranscriptHash: bytes.Clone(p.TranscriptHash)}
 }
 
 // Destroy clears the proof's witness-derived responses.

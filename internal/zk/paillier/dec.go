@@ -9,7 +9,7 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -67,12 +67,12 @@ func (p *DecProof) Clone() *DecProof {
 		return nil
 	}
 	return &DecProof{
-		A:              tss.CloneByteSlices(p.A),
-		B:              tss.CloneByteSlices(p.B),
-		C:              tss.CloneByteSlices(p.C),
-		Z:              tss.CloneByteSlices(p.Z),
-		W:              tss.CloneByteSlices(p.W),
-		Nu:             tss.CloneByteSlices(p.Nu),
+		A:              clone.ByteSlices(p.A),
+		B:              clone.ByteSlices(p.B),
+		C:              clone.ByteSlices(p.C),
+		Z:              clone.ByteSlices(p.Z),
+		W:              clone.ByteSlices(p.W),
+		Nu:             clone.ByteSlices(p.Nu),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 }

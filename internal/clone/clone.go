@@ -1,12 +1,13 @@
-package tss
+// Package clone provides internal helpers for making independently owned copies.
+package clone
 
 import (
 	"math/big"
 	"slices"
 )
 
-// CloneByteSlices returns a deep copy of a [][]byte slice. A nil input returns nil.
-func CloneByteSlices(in [][]byte) [][]byte {
+// ByteSlices returns a deep copy of a [][]byte slice. A nil input returns nil.
+func ByteSlices(in [][]byte) [][]byte {
 	if in == nil {
 		return nil
 	}
@@ -22,26 +23,26 @@ type Cloner[T any] interface {
 	Clone() T
 }
 
-// CloneSlice returns a cloned copy of a slice of Cloner values.
+// Slice returns a cloned copy of a slice of Cloner values.
 //
-// It returns nil when in is nil or empty.
-func CloneSlice[T Cloner[T]](in []T) []T {
+// A nil input returns nil.
+func Slice[T Cloner[T]](in []T) []T {
 	if in == nil {
 		return nil
 	}
 
 	out := make([]T, len(in))
-	for i, share := range in {
-		out[i] = share.Clone()
+	for i, value := range in {
+		out[i] = value.Clone()
 	}
 	return out
 }
 
-// CloneMap returns a cloned copy of a map whose values implement Cloner.
+// Map returns a cloned copy of a map whose values implement Cloner.
 //
 // A nil input returns nil. Map keys are copied as ordinary comparable values;
 // only map values are cloned through Clone.
-func CloneMap[K comparable, V Cloner[V]](in map[K]V) map[K]V {
+func Map[K comparable, V Cloner[V]](in map[K]V) map[K]V {
 	if in == nil {
 		return nil
 	}
@@ -52,11 +53,11 @@ func CloneMap[K comparable, V Cloner[V]](in map[K]V) map[K]V {
 	return out
 }
 
-// CloneBigInt returns a copy of x.
+// BigInt returns a copy of x.
 //
-// If x is nil, CloneBigInt returns nil. The returned *big.Int does not share
+// If x is nil, BigInt returns nil. The returned *big.Int does not share
 // mutable state with x, so modifying the returned value will not modify x.
-func CloneBigInt(x *big.Int) *big.Int {
+func BigInt(x *big.Int) *big.Int {
 	if x == nil {
 		return nil
 	}

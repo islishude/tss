@@ -10,6 +10,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -65,13 +66,13 @@ func (p *LogStarProof) Clone() *LogStarProof {
 		return nil
 	}
 	return &LogStarProof{
-		S:              tss.CloneBigInt(p.S),
-		A:              tss.CloneBigInt(p.A),
+		S:              clone.BigInt(p.S),
+		A:              clone.BigInt(p.A),
 		Y:              secp.Clone(p.Y),
-		D:              tss.CloneBigInt(p.D),
-		Z1:             tss.CloneBigInt(p.Z1),
-		Z2:             tss.CloneBigInt(p.Z2),
-		Z3:             tss.CloneBigInt(p.Z3),
+		D:              clone.BigInt(p.D),
+		Z1:             clone.BigInt(p.Z1),
+		Z2:             clone.BigInt(p.Z2),
+		Z3:             clone.BigInt(p.Z3),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 }

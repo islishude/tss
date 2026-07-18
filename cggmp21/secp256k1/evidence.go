@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -490,7 +491,7 @@ func hashBytes(value []byte) []byte {
 
 func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 	t := transcript.New(paillierPublicSharesHashLabel)
-	sorted := tss.CloneSlice(shares)
+	sorted := clone.Slice(shares)
 	slices.SortFunc(sorted, func(a, b PaillierPublicShare) int {
 		return cmp.Compare(a.Party, b.Party)
 	})

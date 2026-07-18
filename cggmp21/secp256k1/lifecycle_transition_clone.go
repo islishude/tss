@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 )
 
 func (s *ReshareSession) cloneForInboundTransition() *ReshareSession {
@@ -58,7 +59,7 @@ func (s *ReshareSession) cloneForInboundTransition() *ReshareSession {
 			continue
 		}
 		out.dealerData[id] = &reshareDealerPartyData{
-			commitments: tss.CloneByteSlices(source.commitments),
+			commitments: clone.ByteSlices(source.commitments),
 			share:       source.share.Clone(),
 		}
 	}

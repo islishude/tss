@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/islishude/tss/internal/clone"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -381,7 +382,7 @@ func canonicalEvidenceFields(fields []EvidenceField) []EvidenceField {
 	if len(fields) == 0 {
 		return nil
 	}
-	sorted := CloneSlice(fields)
+	sorted := clone.Slice(fields)
 	slices.SortFunc(sorted, func(a, b EvidenceField) int {
 		if a.Key < b.Key {
 			return -1

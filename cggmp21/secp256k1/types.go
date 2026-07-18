@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -161,7 +162,7 @@ func (m KeySharePublicMetadata) Clone() KeySharePublicMetadata {
 		Parties:              m.Parties.Clone(),
 		PublicKey:            bytes.Clone(m.PublicKey),
 		ChainCode:            bytes.Clone(m.ChainCode),
-		GroupCommitments:     tss.CloneByteSlices(m.GroupCommitments),
+		GroupCommitments:     clone.ByteSlices(m.GroupCommitments),
 		PaillierProofSession: m.PaillierProofSession,
 		PaillierProofDomain:  m.PaillierProofDomain,
 		ResharePlanHash:      bytes.Clone(m.ResharePlanHash),
@@ -171,8 +172,8 @@ func (m KeySharePublicMetadata) Clone() KeySharePublicMetadata {
 		SID:                  m.SID,
 		RID:                  m.RID,
 		EpochID:              bytes.Clone(m.EpochID),
-		Identifiers:          tss.CloneSlice(m.Identifiers),
-		PublicShares:         tss.CloneSlice(m.PublicShares),
+		Identifiers:          clone.Slice(m.Identifiers),
+		PublicShares:         clone.Slice(m.PublicShares),
 		AuxiliaryDigest:      bytes.Clone(m.AuxiliaryDigest),
 		SourceEpochID:        bytes.Clone(m.SourceEpochID),
 		Epoch:                m.Epoch.Clone(),
@@ -219,7 +220,7 @@ func (m PresignPublicMetadata) Clone() PresignPublicMetadata {
 		SID:                  m.SID,
 		RID:                  m.RID,
 		EpochID:              bytes.Clone(m.EpochID),
-		Identifiers:          tss.CloneSlice(m.Identifiers),
+		Identifiers:          clone.Slice(m.Identifiers),
 		SourceEpochID:        bytes.Clone(m.SourceEpochID),
 		Epoch:                m.Epoch.Clone(),
 		LifecycleSlot:        m.LifecycleSlot,

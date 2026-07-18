@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"math/big"
 
-	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 )
 
 const proofTranscriptVersion = 1
@@ -50,12 +50,12 @@ func (p *FactorProof) Clone() *FactorProof {
 		return nil
 	}
 	return &FactorProof{
-		P: tss.CloneBigInt(p.P), Q: tss.CloneBigInt(p.Q),
-		A: tss.CloneBigInt(p.A), B: tss.CloneBigInt(p.B),
-		T: tss.CloneBigInt(p.T), Sigma: tss.CloneBigInt(p.Sigma),
-		Z1: tss.CloneBigInt(p.Z1), Z2: tss.CloneBigInt(p.Z2),
-		W1: tss.CloneBigInt(p.W1), W2: tss.CloneBigInt(p.W2),
-		V: tss.CloneBigInt(p.V), TranscriptHash: bytes.Clone(p.TranscriptHash),
+		P: clone.BigInt(p.P), Q: clone.BigInt(p.Q),
+		A: clone.BigInt(p.A), B: clone.BigInt(p.B),
+		T: clone.BigInt(p.T), Sigma: clone.BigInt(p.Sigma),
+		Z1: clone.BigInt(p.Z1), Z2: clone.BigInt(p.Z2),
+		W1: clone.BigInt(p.W1), W2: clone.BigInt(p.W2),
+		V: clone.BigInt(p.V), TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 }
 
@@ -98,10 +98,10 @@ func (p *ModulusProof) Clone() *ModulusProof {
 	cp := &ModulusProof{
 		W:              bytes.Clone(p.W),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
-		X:              tss.CloneByteSlices(p.X),
+		X:              clone.ByteSlices(p.X),
 		A:              bytes.Clone(p.A),
 		B:              bytes.Clone(p.B),
-		Z:              tss.CloneByteSlices(p.Z),
+		Z:              clone.ByteSlices(p.Z),
 	}
 	return cp
 }
@@ -145,9 +145,9 @@ func (params *RingPedersenParams) Clone() *RingPedersenParams {
 		return nil
 	}
 	return &RingPedersenParams{
-		N: tss.CloneBigInt(params.N),
-		S: tss.CloneBigInt(params.S),
-		T: tss.CloneBigInt(params.T),
+		N: clone.BigInt(params.N),
+		S: clone.BigInt(params.S),
+		T: clone.BigInt(params.T),
 	}
 }
 
@@ -174,8 +174,8 @@ func (p *RingPedersenProof) Clone() *RingPedersenProof {
 	cp := &RingPedersenProof{
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 		Challenges:     bytes.Clone(p.Challenges),
-		Commitments:    tss.CloneByteSlices(p.Commitments),
-		Responses:      tss.CloneByteSlices(p.Responses),
+		Commitments:    clone.ByteSlices(p.Commitments),
+		Responses:      clone.ByteSlices(p.Responses),
 	}
 	return cp
 }

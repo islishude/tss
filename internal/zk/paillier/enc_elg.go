@@ -10,6 +10,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -74,15 +75,15 @@ func (p *EncElgProof) Clone() *EncElgProof {
 		return nil
 	}
 	return &EncElgProof{
-		PlaintextCommitment:    tss.CloneBigInt(p.PlaintextCommitment),
-		CiphertextCommitment:   tss.CloneBigInt(p.CiphertextCommitment),
+		PlaintextCommitment:    clone.BigInt(p.PlaintextCommitment),
+		CiphertextCommitment:   clone.BigInt(p.CiphertextCommitment),
 		ElGamalCommitment:      bytes.Clone(p.ElGamalCommitment),
 		ExponentMaskCommitment: bytes.Clone(p.ExponentMaskCommitment),
-		RangeMaskCommitment:    tss.CloneBigInt(p.RangeMaskCommitment),
-		PlaintextResponse:      tss.CloneBigInt(p.PlaintextResponse),
+		RangeMaskCommitment:    clone.BigInt(p.RangeMaskCommitment),
+		PlaintextResponse:      clone.BigInt(p.PlaintextResponse),
 		ExponentResponse:       bytes.Clone(p.ExponentResponse),
-		RandomnessResponse:     tss.CloneBigInt(p.RandomnessResponse),
-		RangeResponse:          tss.CloneBigInt(p.RangeResponse),
+		RandomnessResponse:     clone.BigInt(p.RandomnessResponse),
+		RangeResponse:          clone.BigInt(p.RangeResponse),
 		TranscriptHash:         bytes.Clone(p.TranscriptHash),
 	}
 }

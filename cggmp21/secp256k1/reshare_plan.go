@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/transcript"
@@ -57,7 +58,7 @@ func (s ResharePlanSnapshot) Clone() ResharePlanSnapshot {
 		OldPlanHash:               bytes.Clone(s.OldPlanHash),
 		CurveID:                   s.CurveID,
 		OldGroupPublicKey:         bytes.Clone(s.OldGroupPublicKey),
-		OldGroupCommitments:       tss.CloneByteSlices(s.OldGroupCommitments),
+		OldGroupCommitments:       clone.ByteSlices(s.OldGroupCommitments),
 		OldParties:                s.OldParties.Clone(),
 		OldThreshold:              s.OldThreshold,
 		DealerParties:             s.DealerParties.Clone(),
@@ -136,7 +137,7 @@ func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 		OldPlanHash:               bytes.Clone(p.state.OldPlanHash),
 		CurveID:                   p.state.CurveID,
 		OldGroupPublicKey:         bytes.Clone(p.state.OldGroupPublicKey),
-		OldGroupCommitments:       tss.CloneByteSlices(p.state.OldGroupCommitments),
+		OldGroupCommitments:       clone.ByteSlices(p.state.OldGroupCommitments),
 		OldParties:                p.state.OldParties.Clone(),
 		OldThreshold:              p.state.OldThreshold,
 		DealerParties:             p.state.DealerParties.Clone(),

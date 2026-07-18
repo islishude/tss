@@ -10,6 +10,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -77,19 +78,19 @@ func (p *AffGProof) Clone() *AffGProof {
 		return nil
 	}
 	cp := &AffGProof{
-		A:              tss.CloneBigInt(p.A),
+		A:              clone.BigInt(p.A),
 		Bx:             secp.Clone(p.Bx),
-		By:             tss.CloneBigInt(p.By),
-		E:              tss.CloneBigInt(p.E),
-		S:              tss.CloneBigInt(p.S),
-		F:              tss.CloneBigInt(p.F),
-		T:              tss.CloneBigInt(p.T),
-		Z1:             tss.CloneBigInt(p.Z1),
-		Z2:             tss.CloneBigInt(p.Z2),
-		Z3:             tss.CloneBigInt(p.Z3),
-		Z4:             tss.CloneBigInt(p.Z4),
-		W:              tss.CloneBigInt(p.W),
-		WY:             tss.CloneBigInt(p.WY),
+		By:             clone.BigInt(p.By),
+		E:              clone.BigInt(p.E),
+		S:              clone.BigInt(p.S),
+		F:              clone.BigInt(p.F),
+		T:              clone.BigInt(p.T),
+		Z1:             clone.BigInt(p.Z1),
+		Z2:             clone.BigInt(p.Z2),
+		Z3:             clone.BigInt(p.Z3),
+		Z4:             clone.BigInt(p.Z4),
+		W:              clone.BigInt(p.W),
+		WY:             clone.BigInt(p.WY),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 	return cp

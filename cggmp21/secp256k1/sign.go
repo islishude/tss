@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -141,7 +142,7 @@ func (p *Presign) PublicMetadata() (PresignPublicMetadata, bool) {
 		SID:                  p.state.Epoch.SID,
 		RID:                  p.state.Epoch.RID,
 		EpochID:              bytes.Clone(p.state.EpochID),
-		Identifiers:          tss.CloneSlice(p.state.Epoch.Identifiers),
+		Identifiers:          clone.Slice(p.state.Epoch.Identifiers),
 		SourceEpochID:        sourceEpochID,
 		Epoch:                p.state.Epoch.Clone(),
 		LifecycleSlot:        lifecycleSlot,

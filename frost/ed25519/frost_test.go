@@ -11,6 +11,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/clone"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -734,12 +735,12 @@ func cachedFrostKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare
 				frostKeygenFixtureCache.Delete(key)
 			}
 		}()
-		entry.shares = tss.CloneMap(frostKeygenInner(t, threshold, n))
+		entry.shares = clone.Map(frostKeygenInner(t, threshold, n))
 	})
 	if entry.shares == nil {
 		t.Fatal("cached FROST keygen fixture was not initialized")
 	}
-	return tss.CloneMap(entry.shares)
+	return clone.Map(entry.shares)
 }
 
 func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
