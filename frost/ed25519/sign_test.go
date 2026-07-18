@@ -35,7 +35,7 @@ func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
 		t.Fatal("same secret share with different randomness produced identical commitments")
 	}
 
-	_, _, err = startFROSTSignWithOptions(shares[1], sessionID, signers, message, SignOptions{
+	_, _, err = startFROSTSignWithOptions(shares[1], sessionID, signers, message, testSignOptions{
 		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x44}, 31)),
 	})
 	if err == nil {
@@ -80,13 +80,13 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 	}
 	signers := tss.NewPartySet(1, 2)
 
-	session, _, err := startFROSTSignWithOptions(shares[1], sessionID, signers, []byte("clear nonce"), SignOptions{
+	session, _, err := startFROSTSignWithOptions(shares[1], sessionID, signers, []byte("clear nonce"), testSignOptions{
 		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x11}, 64)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := startFROSTSignWithOptions(shares[2], sessionID, signers, []byte("clear nonce"), SignOptions{
+	_, out2, err := startFROSTSignWithOptions(shares[2], sessionID, signers, []byte("clear nonce"), testSignOptions{
 		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x22}, 64)),
 	})
 	if err != nil {
@@ -198,7 +198,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 	if !ok {
 		t.Fatal("signature did not complete after delayed commitment arrived")
 	}
-	if !stded25519.Verify(stded25519.PublicKey(sessions[1].VerifyKey()), message, sig) {
+	if !stded25519.Verify(stded25519.PublicKey(sessions[1].VerificationKeyBytes()), message, sig) {
 		t.Fatal("signature from out-of-order flow failed verification")
 	}
 	if sessions[1].message != nil {
@@ -273,13 +273,13 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 	signers := tss.NewPartySet(1, 2)
 	message := []byte("bad partial evidence")
 
-	session1, out1, err := startFROSTSignWithOptions(shares[1], sessionID, signers, message, SignOptions{
+	session1, out1, err := startFROSTSignWithOptions(shares[1], sessionID, signers, message, testSignOptions{
 		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x11}, 64)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session2, out2, err := startFROSTSignWithOptions(shares[2], sessionID, signers, message, SignOptions{
+	session2, out2, err := startFROSTSignWithOptions(shares[2], sessionID, signers, message, testSignOptions{
 		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x22}, 64)),
 	})
 	if err != nil {
@@ -331,7 +331,7 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 
 func startSignCommitment(t *testing.T, key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, message, randomness []byte) nonceCommitment {
 	t.Helper()
-	_, out, err := startFROSTSignWithOptions(key, sessionID, signers, message, SignOptions{
+	_, out, err := startFROSTSignWithOptions(key, sessionID, signers, message, testSignOptions{
 		NonceReader: bytes.NewReader(randomness),
 	})
 	if err != nil {

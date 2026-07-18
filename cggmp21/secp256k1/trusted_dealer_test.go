@@ -82,6 +82,58 @@ func TestCGGMPSecretKeySafetyAndPublicKey(t *testing.T) {
 	}
 }
 
+func TestCGGMPTrustedDealerPlanSnapshotDeepCopiesCommitments(t *testing.T) {
+	t.Parallel()
+
+	encoded := make([]byte, 32)
+	encoded[31] = 29
+	secretKey, err := ParseSecretKey(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secretKey.Destroy()
+	limits := testLimits()
+	params := testSecurityParams()
+	plan, contributions, err := NewTrustedDealerImport(secretKey, TrustedDealerImportOption{
+		SessionID: testutil.MustSessionID(924), Parties: tss.NewPartySet(1, 2), Threshold: 2,
+		PaillierBits: int(params.MinPaillierBits), Limits: &limits, SecurityParams: &params,
+	}, testutil.DeterministicReader(925))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer destroyCGGMPContributions(contributions)
+
+	snapshot, ok := plan.Snapshot()
+	if !ok {
+		t.Fatal("trusted-dealer plan snapshot unavailable")
+	}
+	if len(snapshot.Commitments) != len(snapshot.Parties) || len(snapshot.ChainCodeCommitments) != len(snapshot.Parties) {
+		t.Fatal("trusted-dealer snapshot omitted public commitments")
+	}
+	wantConstant := bytes.Clone(snapshot.Commitments[1])
+	wantChainCode := bytes.Clone(snapshot.ChainCodeCommitments[1])
+	defer clear(wantConstant)
+	defer clear(wantChainCode)
+	snapshot.Commitments[1][0] ^= 1
+	snapshot.ChainCodeCommitments[1][0] ^= 1
+	delete(snapshot.Commitments, 2)
+	delete(snapshot.ChainCodeCommitments, 2)
+
+	second, ok := plan.Snapshot()
+	if !ok {
+		t.Fatal("trusted-dealer plan snapshot unavailable after caller mutation")
+	}
+	if !bytes.Equal(second.Commitments[1], wantConstant) {
+		t.Fatal("constant-term commitment snapshot aliases plan state")
+	}
+	if !bytes.Equal(second.ChainCodeCommitments[1], wantChainCode) {
+		t.Fatal("chain-code commitment snapshot aliases plan state")
+	}
+	if len(second.Commitments) != len(second.Parties) || len(second.ChainCodeCommitments) != len(second.Parties) {
+		t.Fatal("snapshot map mutation changed plan state")
+	}
+}
+
 func TestCGGMPTrustedDealerContributionConcurrentClaimHasOneWinner(t *testing.T) {
 	encoded := make([]byte, 32)
 	encoded[31] = 37

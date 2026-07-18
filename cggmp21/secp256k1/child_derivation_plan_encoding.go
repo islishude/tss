@@ -74,12 +74,3 @@ func (p *ChildDerivationPlan) UnmarshalBinaryWithLimits(in []byte, limits Limits
 	*p = *decoded
 	return nil
 }
-
-// UnmarshalChildDerivationPlan decodes a canonical child-derivation plan.
-func UnmarshalChildDerivationPlan(in []byte) (*ChildDerivationPlan, error) {
-	plan := new(ChildDerivationPlan)
-	if err := plan.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return plan, nil
-}

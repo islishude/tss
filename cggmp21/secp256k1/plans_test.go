@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -262,8 +263,8 @@ func TestCGGMP21SignPlanDigestExcludesRuntimeDependencies(t *testing.T) {
 func TestCGGMP21SignPlanMismatchDoesNotAbortSession(t *testing.T) {
 	t.Parallel()
 
-	err := requirePlanHash("sign", bytes.Repeat([]byte{0x44}, 32), bytes.Repeat([]byte{0x43}, 32))
-	if !errors.Is(err, errPlanHashMismatch) {
+	err := planvalidation.RequireHash("sign", bytes.Repeat([]byte{0x44}, 32), bytes.Repeat([]byte{0x43}, 32))
+	if !errors.Is(err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("verifySignPartial() error = %v, want plan mismatch sentinel", err)
 	}
 	if shouldAbortSession(tss.NewProtocolError(tss.ErrCodeVerification, 1, 2, err)) {
@@ -317,7 +318,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	}
 	_, err = s.handlePaperKeygenConfirmationLocked(testutil.DeliverEnvelope(env), newPaperKeygenMessageKey(env))
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
+	if !errors.Is(protocolErr.Err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("confirmation error = %v, want plan mismatch sentinel", protocolErr.Err)
 	}
 	if len(s.paperConfirmations) != 0 || len(s.paperAccepted) != 0 {
@@ -440,7 +441,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		presignPlanHash:   []byte{0x54, 0x55},
 		digest:            []byte{0x60, 0x61},
 		signers:           tss.NewPartySet(1, 2),
-		intent: SignIntent{
+		intent: tss.SignIntent{
 			SessionID: cggmpPlanTestSession(0x53),
 			Context: tss.SigningContext{Derivation: tss.DerivationRequest{
 				Scheme:       tss.DerivationSchemeBIP32Secp256k1,

@@ -100,10 +100,10 @@ func prepareReshareDealerStart(
 		session.shares[oldKey.state.Party] = ownSecretShare
 	}
 
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{
+	commitPayload, err := (reshareCommitmentsPayload{
 		Commitments: commitments.Clone(),
 		PlanHash:    planHash,
-	}, limits)
+	}).MarshalBinaryWithLimits(limits)
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +126,10 @@ func prepareReshareDealerStart(
 				err = shareErr
 				return nil, err
 			}
-			payload, marshalErr := marshalReshareSharePayloadWithLimits(
-				reshareSharePayload{Share: secretShare, PlanHash: planHash},
-				limits,
-			)
+			payload, marshalErr := (reshareSharePayload{
+				Share:    secretShare,
+				PlanHash: planHash,
+			}).MarshalBinaryWithLimits(limits)
 			secretShare.Destroy()
 			if marshalErr != nil {
 				err = marshalErr

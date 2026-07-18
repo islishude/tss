@@ -132,6 +132,12 @@ func (k *SecretKey) validate() error {
 // threshold number of distinct, consistent key shares. Input shares remain
 // owned by the caller and are not modified or destroyed.
 func ReconstructSecretKey(shares ...*KeyShare) (*SecretKey, error) {
+	return ReconstructSecretKeyWithLimits(DefaultLimits(), shares...)
+}
+
+// ReconstructSecretKeyWithLimits reconstructs the FROST group secret using
+// explicit local validation limits.
+func ReconstructSecretKeyWithLimits(limits Limits, shares ...*KeyShare) (*SecretKey, error) {
 	if len(shares) == 0 {
 		return nil, errors.New("no key shares supplied")
 	}
@@ -145,7 +151,7 @@ func ReconstructSecretKey(shares ...*KeyShare) (*SecretKey, error) {
 	ids := make(tss.PartySet, 0, len(shares))
 	seen := make(map[tss.PartyID]struct{}, len(shares))
 	for _, share := range shares {
-		if err := validateFROSTReconstructionShare(reference, share); err != nil {
+		if err := validateFROSTReconstructionShare(reference, share, limits); err != nil {
 			return nil, err
 		}
 		id := share.state.Party
@@ -187,11 +193,11 @@ func ReconstructSecretKey(shares ...*KeyShare) (*SecretKey, error) {
 	return newFROSTSecretKey(acc)
 }
 
-func validateFROSTReconstructionShare(reference, candidate *KeyShare) error {
+func validateFROSTReconstructionShare(reference, candidate *KeyShare, limits Limits) error {
 	if candidate == nil || candidate.state == nil {
 		return errors.New("nil key share")
 	}
-	if err := candidate.ValidateConsistency(); err != nil {
+	if err := candidate.ValidateWithLimits(limits); err != nil {
 		return fmt.Errorf("invalid key share for reconstruction: %w", err)
 	}
 	if candidate.state.Threshold != reference.state.Threshold ||

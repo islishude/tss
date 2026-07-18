@@ -5,10 +5,17 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/islishude/tss"
 	frost "github.com/islishude/tss/frost/ed25519"
 )
+
+type exampleFROSTSignOptions struct {
+	Context     tss.SigningContext
+	NonceReader io.Reader
+	Limits      *frost.Limits
+}
 
 type exampleFROSTSecurity struct {
 	private  map[tss.PartyID]stded25519.PrivateKey
@@ -204,7 +211,7 @@ func runExampleFROSTKeygen(option frost.KeygenPlanOption) (map[tss.PartyID]*fros
 	return shares, nil
 }
 
-func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.PartySet, message []byte, opts frost.SignOptions) ([]byte, []byte, error) {
+func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.PartySet, message []byte, opts exampleFROSTSignOptions) ([]byte, []byte, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
@@ -230,7 +237,13 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.Par
 			ctx = exampleFROSTSigningContext()
 		}
 		plan, err := frost.NewSignPlan(frost.SignPlanOption{
-			Key: shares[id], SessionID: sessionID, Signers: signers, Context: ctx, Message: message,
+			Key: shares[id],
+			Intent: tss.SignIntent{
+				SessionID: sessionID,
+				Signers:   signers,
+				Context:   ctx,
+				Message:   message,
+			},
 			Limits: opts.Limits,
 		})
 		if err != nil {
@@ -257,5 +270,5 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.Par
 	if !ok {
 		return nil, nil, errors.New("signing not complete")
 	}
-	return sessions[signers[0]].VerifyKey(), signature, nil
+	return sessions[signers[0]].VerificationKeyBytes(), signature, nil
 }

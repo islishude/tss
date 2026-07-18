@@ -19,7 +19,8 @@ type RefreshRunConfig struct {
 }
 
 // RefreshSession is the protocol-independent surface needed to drive one
-// key-share refresh session.
+// externally committed key-share refresh session. Implementations must not
+// install or otherwise durably commit their candidate share themselves.
 type RefreshSession[K KeyShare] interface {
 	// Handle validates and applies one inbound refresh envelope.
 	Handle(InboundEnvelope) ([]Envelope, error)
@@ -30,8 +31,10 @@ type RefreshSession[K KeyShare] interface {
 	Destroy()
 }
 
-// RefreshRunner adapts an algorithm-specific refresh protocol to the shared
-// scheduler.
+// RefreshRunner adapts an algorithm-specific, externally committed refresh
+// protocol to the shared scheduler. Protocols whose session owns a durable
+// lifecycle lease or cutover transaction must be driven through their native
+// lifecycle API instead.
 type RefreshRunner[K KeyShare] interface {
 	// Protocol returns the protocol whose replay state the runner uses.
 	Protocol() ProtocolID
@@ -63,16 +66,20 @@ type RefreshSchedulerOptions[K KeyShare] struct {
 	// ClaimSessionID durably and atomically records first use of a session ID.
 	// A claimed ID remains unavailable even if this refresh later fails.
 	ClaimSessionID func(context.Context, SessionID) error
-	// CommitKeyShare atomically persists and installs refreshed if previous is
-	// still current. A nil result transfers ownership of refreshed to the
-	// callback. On a normal error the scheduler destroys refreshed. If the
-	// error wraps ErrRefreshCommitOutcomeUnknown, the callback retains ownership
-	// because the durable commit may have succeeded.
+	// CommitKeyShare is the sole durable commit boundary for a scheduler run. It
+	// atomically persists and installs refreshed if previous is still current.
+	// The Runner and RefreshSession must not perform this commit themselves. A
+	// nil result transfers ownership of refreshed to the callback. On a normal
+	// error the scheduler destroys refreshed. If the error wraps
+	// ErrRefreshCommitOutcomeUnknown, the callback retains ownership because the
+	// durable commit may have succeeded.
 	CommitKeyShare func(context.Context, K, K) error
 }
 
-// RefreshScheduler periodically drives algorithm-specific proactive refresh.
-// A scheduler permits only one active Run or RunOnce call at a time.
+// RefreshScheduler periodically drives proactive refresh protocols that use an
+// external compare-and-swap commit callback. It does not support protocols
+// whose session owns its lifecycle cutover. A scheduler permits only one active
+// Run or RunOnce call at a time.
 type RefreshScheduler[K KeyShare] struct {
 	opts RefreshSchedulerOptions[K]
 

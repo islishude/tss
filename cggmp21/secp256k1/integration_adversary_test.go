@@ -209,7 +209,7 @@ func TestIntegration_PresignRejectsTamperedNormalizedCommitments(t *testing.T) {
 				case "chi":
 					r.state.Commitments[0].STilde = testCurvePointBytes(t, 7)
 				}
-				if err := r.VerifySignMaterial(); err != nil {
+				if err := r.ValidateWithLimits(testLimits()); err != nil {
 					t.Logf("%s tampering correctly detected: %v", tc.field, err)
 					return
 				}

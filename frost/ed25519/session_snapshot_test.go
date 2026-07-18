@@ -38,7 +38,7 @@ type frostReshareSnapshot struct {
 	HasNewShare            bool
 	HasPendingShare        bool
 	HasConfirmationBinding bool
-	IsRecipient            bool
+	IsReceiver             bool
 	RefreshMode            bool
 
 	CommitSenders              tss.PartySet
@@ -114,7 +114,7 @@ func snapshotFROSTReshareSession(s *ReshareSession) frostReshareSnapshot {
 		HasNewShare:                s.newShare != nil,
 		HasPendingShare:            s.pendingShare != nil,
 		HasConfirmationBinding:     s.confirmationBinding != nil,
-		IsRecipient:                s.isRecipient(),
+		IsReceiver:                 s.isReceiver(),
 		RefreshMode:                s.isRefresh(),
 		CommitSenders:              frostSnapshotMapKeys(s.commits),
 		ShareSenders:               frostSnapshotMapKeys(s.shares),

@@ -19,13 +19,13 @@ func TestRepositoryBoundStartSignNonceVector(t *testing.T) {
 	key3 := rfc9591KeyShare(t, 3, v.p3Share, v)
 	sessionID := testutil.MustSessionID(9591)
 
-	s1, out1, err := startFROSTSignWithOptions(key1, sessionID, v.signers, v.message, SignOptions{
+	s1, out1, err := startFROSTSignWithOptions(key1, sessionID, v.signers, v.message, testSignOptions{
 		NonceReader: bytes.NewReader(slices.Concat(v.p1HidingRandomness, v.p1BindingRandomness)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s3, out3, err := startFROSTSignWithOptions(key3, sessionID, v.signers, v.message, SignOptions{
+	s3, out3, err := startFROSTSignWithOptions(key3, sessionID, v.signers, v.message, testSignOptions{
 		NonceReader: bytes.NewReader(slices.Concat(v.p3HidingRandomness, v.p3BindingRandomness)),
 	})
 	if err != nil {

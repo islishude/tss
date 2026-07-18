@@ -13,17 +13,15 @@ import (
 
 const ed25519CommitmentBytes = 32
 
-type keygenCommitments struct {
+type commitmentVector struct {
 	points []*fed.Point
 }
 
-type reshareCommitments struct {
-	points []*fed.Point
-}
+type keygenCommitments commitmentVector
 
-type groupCommitments struct {
-	points []*fed.Point
-}
+type reshareCommitments commitmentVector
+
+type groupCommitments commitmentVector
 
 func clonePoints(points []*fed.Point) []*fed.Point {
 	if points == nil {
@@ -139,278 +137,248 @@ func verifyCommitmentShare(points []*fed.Point, id tss.PartyID, share *fed.Scala
 	return nil
 }
 
-func newKeygenCommitmentsFromBytesList(in [][]byte, threshold int) (keygenCommitments, error) {
-	points, err := parseCommitmentBytes(in, threshold, true)
+func newCommitmentVectorFromBytesList(in [][]byte, threshold int, firstNonIdentity bool) (commitmentVector, error) {
+	points, err := parseCommitmentBytes(in, threshold, firstNonIdentity)
 	if err != nil {
-		return keygenCommitments{}, err
+		return commitmentVector{}, err
 	}
-	return keygenCommitments{points: points}, nil
+	return commitmentVector{points: points}, nil
+}
+
+func newCommitmentVectorFromPoints(in []*fed.Point, threshold int, firstNonIdentity bool) (commitmentVector, error) {
+	points, err := parseCommitmentPoints(in, threshold, firstNonIdentity)
+	if err != nil {
+		return commitmentVector{}, err
+	}
+	return commitmentVector{points: points}, nil
+}
+
+func (c commitmentVector) bytesList() [][]byte { return commitmentBytesList(c.points) }
+
+func (c commitmentVector) equal(other commitmentVector) bool {
+	return equalCommitmentPoints(c.points, other.points)
+}
+
+func (c commitmentVector) clone() commitmentVector {
+	return commitmentVector{points: clonePoints(c.points)}
+}
+
+func (c commitmentVector) marshalWireValue(kind string, firstNonIdentity bool) ([]byte, error) {
+	if err := c.validate(firstNonIdentity); err != nil {
+		return nil, fmt.Errorf("invalid %s commitments: %w", kind, err)
+	}
+	return wire.EncodeBytesListChecked(c.bytesList())
+}
+
+func (c *commitmentVector) unmarshalWireValue(in []byte, kind string, firstNonIdentity bool) error {
+	if c == nil {
+		return fmt.Errorf("nil %s commitments receiver", kind)
+	}
+	encoded, err := wire.DecodeBytesListWithLimit(in, 0, ed25519CommitmentBytes)
+	if err != nil {
+		return fmt.Errorf("decode %s commitments: %w", kind, err)
+	}
+	parsed, err := newCommitmentVectorFromBytesList(encoded, len(encoded), firstNonIdentity)
+	if err != nil {
+		return err
+	}
+	*c = parsed
+	return nil
+}
+
+func (c commitmentVector) validate(firstNonIdentity bool) error {
+	_, err := parseCommitmentPoints(c.points, len(c.points), firstNonIdentity)
+	return err
+}
+
+func (c commitmentVector) validateThreshold(threshold int, firstNonIdentity bool) error {
+	if threshold <= 0 {
+		return errors.New("commitment threshold must be positive")
+	}
+	if len(c.points) != threshold {
+		return fmt.Errorf("got %d commitments, want %d", len(c.points), threshold)
+	}
+	return c.validate(firstNonIdentity)
+}
+
+func (c commitmentVector) pointAt(i int) (*fed.Point, error) {
+	if i < 0 || i >= len(c.points) {
+		return nil, fmt.Errorf("commitment index %d out of range", i)
+	}
+	return clonePoint(c.points[i]), nil
+}
+
+func (c commitmentVector) verifyShare(id tss.PartyID, share *fed.Scalar) error {
+	return verifyCommitmentShare(c.points, id, share)
 }
 
 func newKeygenCommitmentsFromPoints(in []*fed.Point, threshold int) (keygenCommitments, error) {
-	points, err := parseCommitmentPoints(in, threshold, true)
-	if err != nil {
-		return keygenCommitments{}, err
-	}
-	return keygenCommitments{points: points}, nil
+	c, err := newCommitmentVectorFromPoints(in, threshold, true)
+	return keygenCommitments(c), err
 }
 
 // BytesList returns caller-owned canonical encodings of the keygen commitments.
-func (c keygenCommitments) BytesList() [][]byte {
-	return commitmentBytesList(c.points)
-}
+func (c keygenCommitments) BytesList() [][]byte { return commitmentVector(c).bytesList() }
 
 // Equal reports whether two ordered keygen commitment sets are equal.
 func (c keygenCommitments) Equal(other keygenCommitments) bool {
-	return equalCommitmentPoints(c.points, other.points)
+	return commitmentVector(c).equal(commitmentVector(other))
 }
 
 // Clone returns an independent copy of the keygen commitment set.
 func (c keygenCommitments) Clone() keygenCommitments {
-	return keygenCommitments{points: clonePoints(c.points)}
+	return keygenCommitments(commitmentVector(c).clone())
 }
 
 // Len returns the number of keygen commitments.
-func (c keygenCommitments) Len() int {
-	return len(c.points)
-}
+func (c keygenCommitments) Len() int { return len(c.points) }
 
-// MarshalWireValue returns the canonical byteslist-compatible encoding of the
-// ordered keygen commitments.
+// MarshalWireValue returns the canonical encoding of the keygen commitments.
 func (c keygenCommitments) MarshalWireValue() ([]byte, error) {
-	if err := c.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid keygen commitments: %w", err)
-	}
-	return wire.EncodeBytesListChecked(c.BytesList())
+	return commitmentVector(c).marshalWireValue("keygen", true)
 }
 
-// UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
-// validates each point under the keygen commitment identity policy.
+// UnmarshalWireValue decodes and validates canonical keygen commitments.
 func (c *keygenCommitments) UnmarshalWireValue(in []byte) error {
 	if c == nil {
 		return errors.New("nil keygen commitments receiver")
 	}
-	encoded, err := wire.DecodeBytesListWithLimit(in, 0, ed25519CommitmentBytes)
-	if err != nil {
-		return fmt.Errorf("decode keygen commitments: %w", err)
-	}
-	parsed, err := newKeygenCommitmentsFromBytesList(encoded, len(encoded))
-	if err != nil {
+	var parsed commitmentVector
+	if err := parsed.unmarshalWireValue(in, "keygen", true); err != nil {
 		return err
 	}
-	*c = parsed
+	*c = keygenCommitments(parsed)
 	return nil
 }
 
 // Validate checks keygen commitment length-independent point invariants.
-func (c keygenCommitments) Validate() error {
-	_, err := parseCommitmentPoints(c.points, len(c.points), true)
-	return err
-}
+func (c keygenCommitments) Validate() error { return commitmentVector(c).validate(true) }
 
-// ValidateThreshold checks the exact protocol threshold and all point
-// invariants. Wire max_items remains only a resource upper bound.
+// ValidateThreshold checks the exact threshold and all point invariants.
 func (c keygenCommitments) ValidateThreshold(threshold int) error {
-	if threshold <= 0 {
-		return errors.New("commitment threshold must be positive")
-	}
-	if len(c.points) != threshold {
-		return fmt.Errorf("got %d commitments, want %d", len(c.points), threshold)
-	}
-	return c.Validate()
+	return commitmentVector(c).validateThreshold(threshold, true)
 }
 
-// IsZero reports whether the keygen commitment set has not been initialized.
-func (c keygenCommitments) IsZero() bool {
-	return c.points == nil
-}
+// IsZero reports whether the commitment set has not been initialized.
+func (c keygenCommitments) IsZero() bool { return c.points == nil }
 
 // PointAt returns an independent copy of the commitment at index i.
 func (c keygenCommitments) PointAt(i int) (*fed.Point, error) {
-	if i < 0 || i >= len(c.points) {
-		return nil, fmt.Errorf("commitment index %d out of range", i)
-	}
-	return clonePoint(c.points[i]), nil
+	return commitmentVector(c).pointAt(i)
 }
 
-// VerifyShare checks a scalar share against the keygen commitment polynomial.
+// VerifyShare checks a scalar share against the commitment polynomial.
 func (c keygenCommitments) VerifyShare(id tss.PartyID, share *fed.Scalar) error {
-	return verifyCommitmentShare(c.points, id, share)
-}
-
-func newReshareCommitmentsFromBytesList(in [][]byte, threshold int) (reshareCommitments, error) {
-	points, err := parseCommitmentBytes(in, threshold, false)
-	if err != nil {
-		return reshareCommitments{}, err
-	}
-	return reshareCommitments{points: points}, nil
+	return commitmentVector(c).verifyShare(id, share)
 }
 
 func newReshareCommitmentsFromPoints(in []*fed.Point, threshold int) (reshareCommitments, error) {
-	points, err := parseCommitmentPoints(in, threshold, false)
-	if err != nil {
-		return reshareCommitments{}, err
-	}
-	return reshareCommitments{points: points}, nil
+	c, err := newCommitmentVectorFromPoints(in, threshold, false)
+	return reshareCommitments(c), err
 }
 
 // BytesList returns caller-owned canonical encodings of the reshare commitments.
-func (c reshareCommitments) BytesList() [][]byte {
-	return commitmentBytesList(c.points)
-}
+func (c reshareCommitments) BytesList() [][]byte { return commitmentVector(c).bytesList() }
 
 // Equal reports whether two ordered reshare commitment sets are equal.
 func (c reshareCommitments) Equal(other reshareCommitments) bool {
-	return equalCommitmentPoints(c.points, other.points)
+	return commitmentVector(c).equal(commitmentVector(other))
 }
 
 // Clone returns an independent copy of the reshare commitment set.
 func (c reshareCommitments) Clone() reshareCommitments {
-	return reshareCommitments{points: clonePoints(c.points)}
+	return reshareCommitments(commitmentVector(c).clone())
 }
 
 // Len returns the number of reshare commitments.
-func (c reshareCommitments) Len() int {
-	return len(c.points)
-}
+func (c reshareCommitments) Len() int { return len(c.points) }
 
-// MarshalWireValue returns the canonical byteslist-compatible encoding of the
-// ordered reshare commitments.
+// MarshalWireValue returns the canonical encoding of the reshare commitments.
 func (c reshareCommitments) MarshalWireValue() ([]byte, error) {
-	if err := c.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid reshare commitments: %w", err)
-	}
-	return wire.EncodeBytesListChecked(c.BytesList())
+	return commitmentVector(c).marshalWireValue("reshare", false)
 }
 
-// UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
-// validates each point under the reshare commitment identity policy.
+// UnmarshalWireValue decodes and validates canonical reshare commitments.
 func (c *reshareCommitments) UnmarshalWireValue(in []byte) error {
 	if c == nil {
 		return errors.New("nil reshare commitments receiver")
 	}
-	encoded, err := wire.DecodeBytesListWithLimit(in, 0, ed25519CommitmentBytes)
-	if err != nil {
-		return fmt.Errorf("decode reshare commitments: %w", err)
-	}
-	parsed, err := newReshareCommitmentsFromBytesList(encoded, len(encoded))
-	if err != nil {
+	var parsed commitmentVector
+	if err := parsed.unmarshalWireValue(in, "reshare", false); err != nil {
 		return err
 	}
-	*c = parsed
+	*c = reshareCommitments(parsed)
 	return nil
 }
 
 // Validate checks reshare commitment length-independent point invariants.
-func (c reshareCommitments) Validate() error {
-	_, err := parseCommitmentPoints(c.points, len(c.points), false)
-	return err
-}
+func (c reshareCommitments) Validate() error { return commitmentVector(c).validate(false) }
 
-// ValidateThreshold checks the exact protocol threshold and all point
-// invariants. Wire max_items remains only a resource upper bound.
+// ValidateThreshold checks the exact threshold and all point invariants.
 func (c reshareCommitments) ValidateThreshold(threshold int) error {
-	if threshold <= 0 {
-		return errors.New("commitment threshold must be positive")
-	}
-	if len(c.points) != threshold {
-		return fmt.Errorf("got %d commitments, want %d", len(c.points), threshold)
-	}
-	return c.Validate()
+	return commitmentVector(c).validateThreshold(threshold, false)
 }
 
 // PointAt returns an independent copy of the commitment at index i.
 func (c reshareCommitments) PointAt(i int) (*fed.Point, error) {
-	if i < 0 || i >= len(c.points) {
-		return nil, fmt.Errorf("commitment index %d out of range", i)
-	}
-	return clonePoint(c.points[i]), nil
+	return commitmentVector(c).pointAt(i)
 }
 
-// VerifyShare checks a scalar share against the reshare commitment polynomial.
+// VerifyShare checks a scalar share against the commitment polynomial.
 func (c reshareCommitments) VerifyShare(id tss.PartyID, share *fed.Scalar) error {
-	return verifyCommitmentShare(c.points, id, share)
+	return commitmentVector(c).verifyShare(id, share)
 }
 
 func newGroupCommitmentsFromBytesList(in [][]byte, threshold int) (groupCommitments, error) {
-	points, err := parseCommitmentBytes(in, threshold, true)
-	if err != nil {
-		return groupCommitments{}, err
-	}
-	return groupCommitments{points: points}, nil
+	c, err := newCommitmentVectorFromBytesList(in, threshold, true)
+	return groupCommitments(c), err
 }
 
 func newGroupCommitmentsFromPoints(in []*fed.Point, threshold int) (groupCommitments, error) {
-	points, err := parseCommitmentPoints(in, threshold, true)
-	if err != nil {
-		return groupCommitments{}, err
-	}
-	return groupCommitments{points: points}, nil
+	c, err := newCommitmentVectorFromPoints(in, threshold, true)
+	return groupCommitments(c), err
 }
 
 // BytesList returns caller-owned canonical encodings of the group commitments.
-func (c groupCommitments) BytesList() [][]byte {
-	return commitmentBytesList(c.points)
-}
+func (c groupCommitments) BytesList() [][]byte { return commitmentVector(c).bytesList() }
 
 // Equal reports whether two ordered group commitment sets are equal.
 func (c groupCommitments) Equal(other groupCommitments) bool {
-	return equalCommitmentPoints(c.points, other.points)
+	return commitmentVector(c).equal(commitmentVector(other))
 }
 
 // Clone returns an independent copy of the group commitment set.
 func (c groupCommitments) Clone() groupCommitments {
-	return groupCommitments{points: clonePoints(c.points)}
+	return groupCommitments(commitmentVector(c).clone())
 }
 
 // Len returns the number of group commitments.
-func (c groupCommitments) Len() int {
-	return len(c.points)
-}
+func (c groupCommitments) Len() int { return len(c.points) }
 
-// MarshalWireValue returns the canonical byteslist-compatible encoding of the
-// ordered group commitments.
+// MarshalWireValue returns the canonical encoding of the group commitments.
 func (c groupCommitments) MarshalWireValue() ([]byte, error) {
-	if err := c.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid group commitments: %w", err)
-	}
-	return wire.EncodeBytesListChecked(c.BytesList())
+	return commitmentVector(c).marshalWireValue("group", true)
 }
 
-// UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
-// validates each point under the group commitment identity policy.
+// UnmarshalWireValue decodes and validates canonical group commitments.
 func (c *groupCommitments) UnmarshalWireValue(in []byte) error {
 	if c == nil {
 		return errors.New("nil group commitments receiver")
 	}
-	encoded, err := wire.DecodeBytesListWithLimit(in, 0, ed25519CommitmentBytes)
-	if err != nil {
-		return fmt.Errorf("decode group commitments: %w", err)
-	}
-	parsed, err := newGroupCommitmentsFromBytesList(encoded, len(encoded))
-	if err != nil {
+	var parsed commitmentVector
+	if err := parsed.unmarshalWireValue(in, "group", true); err != nil {
 		return err
 	}
-	*c = parsed
+	*c = groupCommitments(parsed)
 	return nil
 }
 
 // Validate checks group commitment length-independent point invariants.
-func (c groupCommitments) Validate() error {
-	_, err := parseCommitmentPoints(c.points, len(c.points), true)
-	return err
-}
+func (c groupCommitments) Validate() error { return commitmentVector(c).validate(true) }
 
-// ValidateThreshold checks the exact protocol threshold and all point
-// invariants. Wire max_items remains only a resource upper bound.
+// ValidateThreshold checks the exact threshold and all point invariants.
 func (c groupCommitments) ValidateThreshold(threshold int) error {
-	if threshold <= 0 {
-		return errors.New("commitment threshold must be positive")
-	}
-	if len(c.points) != threshold {
-		return fmt.Errorf("got %d commitments, want %d", len(c.points), threshold)
-	}
-	return c.Validate()
+	return commitmentVector(c).validateThreshold(threshold, true)
 }
 
 // PointAtAllowIdentity returns an independent copy of the commitment at index i.

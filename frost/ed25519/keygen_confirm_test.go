@@ -39,6 +39,54 @@ func TestFROSTKeygenConfirmationRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFROSTKeygenConfirmationLimits(t *testing.T) {
+	t.Parallel()
+
+	t.Run("explicit limits allow one of one", func(t *testing.T) {
+		share := frostKeygenInner(t, 1, 1)[1]
+		limits := testLimits()
+		if _, err := share.NewConfirmation(); err == nil {
+			t.Fatal("production limits allowed a 1-of-1 confirmation")
+		}
+		confirmation, err := share.NewConfirmationWithLimits(limits)
+		if err != nil {
+			t.Fatalf("explicit test limits rejected a 1-of-1 confirmation: %v", err)
+		}
+		if _, err := confirmation.MarshalBinary(); err == nil {
+			t.Fatal("production encoding allowed a 1-of-1 confirmation")
+		}
+		raw, err := confirmation.MarshalBinaryWithLimits(limits)
+		if err != nil {
+			t.Fatalf("explicit test limits could not encode a 1-of-1 confirmation: %v", err)
+		}
+		if _, err := tss.DecodeBinary[KeygenConfirmation](raw); err == nil {
+			t.Fatal("production decoding allowed a 1-of-1 confirmation")
+		}
+		if _, err := tss.DecodeBinaryWithLimits[KeygenConfirmation](raw, limits); err != nil {
+			t.Fatalf("explicit test limits could not decode a 1-of-1 confirmation: %v", err)
+		}
+	})
+
+	t.Run("party list obeys max items", func(t *testing.T) {
+		confirmation, err := frostKeygen(t, 2, 3)[1].NewConfirmation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		limits := testLimits()
+		limits.Threshold.MaxParties = 2
+		if _, err := confirmation.MarshalBinaryWithLimits(limits); err == nil {
+			t.Fatal("confirmation encoding exceeded the party limit")
+		}
+		raw, err := confirmation.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tss.DecodeBinaryWithLimits[KeygenConfirmation](raw, limits); err == nil {
+			t.Fatal("confirmation decoding exceeded the party limit")
+		}
+	})
+}
+
 func TestFROSTKeygenConfirmationRejectsMismatchedTranscriptHash(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
@@ -87,7 +135,7 @@ func TestFROSTUnmarshalKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalKeyShareWithLimits(mutated, testLimits()); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[KeyShare](mutated, testLimits()); err == nil {
 		t.Fatal("expected tampered aggregate chain code to be rejected during decode")
 	}
 }
@@ -335,10 +383,10 @@ func mustFROSTKeygenShareFromLocal(t *testing.T, session *KeygenSession, recipie
 		t.Fatal(err)
 	}
 	defer secretShare.Destroy()
-	payload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{
+	payload, err := (keygenSharePayload{
 		Share:    secretShare,
 		PlanHash: bytes.Clone(session.planHash),
-	}, session.limits)
+	}).MarshalBinaryWithLimits(session.limits)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -126,10 +126,10 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 	if len(s.commits) != len(s.oldParties) {
 		return nil, false, nil
 	}
-	// Recipients need every secret contribution before they can stage a share.
+	// Receivers need every secret contribution before they can stage a share.
 	// Dealer-only roles need only the public commitment set to derive the exact
 	// confirmation statement expected from target key holders.
-	if s.isRecipient() && len(s.shares) != len(s.oldParties) {
+	if s.isReceiver() && len(s.shares) != len(s.oldParties) {
 		return nil, false, nil
 	}
 
@@ -148,7 +148,7 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		}
 	}()
 
-	if !s.isRecipient() {
+	if !s.isReceiver() {
 		if err := s.copyAndVerifyPendingReshareConfirmations(prepared); err != nil {
 			return nil, false, err
 		}
@@ -220,11 +220,11 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		ConfirmationMode:     keyShareConfirmationModeLifecycleAggregate,
 	}}
 	prepared.newShare = newShare
-	if err := newShare.validateConsistencyWithoutConfirmations(); err != nil {
+	if err := newShare.validateConsistencyWithoutConfirmationsWithLimits(s.limits); err != nil {
 		return nil, false, err
 	}
 	confirmation := binding.confirmation(s.selfID)
-	encoded, err := confirmation.MarshalBinary()
+	encoded, err := confirmation.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		clear(confirmation.ChainCode)
 		return nil, false, err
@@ -249,7 +249,7 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		if err := applyKeygenConfirmationSet(newShare, ordered); err != nil {
 			return nil, false, err
 		}
-		if err := newShare.ValidateConsistency(); err != nil {
+		if err := newShare.ValidateWithLimits(s.limits); err != nil {
 			return nil, false, err
 		}
 	}
@@ -366,10 +366,10 @@ func (s *ReshareSession) commitReshareCompletion(p *preparedReshareCompletion) [
 	s.confirmations = p.confirmations
 	s.clearPendingConfirmations()
 	s.pendingConfirmations = nil
-	if p.finalComplete && s.isRecipient() {
+	if p.finalComplete && s.isReceiver() {
 		s.newShare = p.newShare
 		s.completed = true
-	} else if s.isRecipient() {
+	} else if s.isReceiver() {
 		s.pendingShare = p.newShare
 	} else if p.finalComplete {
 		s.completed = true
@@ -378,7 +378,7 @@ func (s *ReshareSession) commitReshareCompletion(p *preparedReshareCompletion) [
 	message := "reshare confirmation binding ready"
 	if s.completed {
 		message = "reshare complete"
-	} else if s.isRecipient() {
+	} else if s.isReceiver() {
 		message = "reshare local material complete"
 	}
 	s.log.Info(s.cfg.Ctx(), message,
@@ -386,7 +386,7 @@ func (s *ReshareSession) commitReshareCompletion(p *preparedReshareCompletion) [
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
 	p.committed = true
-	if !s.isRecipient() {
+	if !s.isReceiver() {
 		return nil
 	}
 	return []tss.Envelope{p.confirmationEnv}
@@ -441,7 +441,7 @@ func (s *ReshareSession) tryFinalizeReshareConfirmations() error {
 			return err
 		}
 	}
-	if !s.isRecipient() {
+	if !s.isReceiver() {
 		s.completed = true
 		s.log.Info(s.cfg.Ctx(), "reshare complete",
 			"party_id", s.selfID,
@@ -457,7 +457,7 @@ func (s *ReshareSession) tryFinalizeReshareConfirmations() error {
 		candidate.Destroy()
 		return err
 	}
-	if err := candidate.ValidateConsistency(); err != nil {
+	if err := candidate.ValidateWithLimits(s.limits); err != nil {
 		candidate.Destroy()
 		return err
 	}

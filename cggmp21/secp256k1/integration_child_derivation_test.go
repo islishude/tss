@@ -155,7 +155,7 @@ func TestThresholdECDSAChildDerivationRejectsCrossEpochCommitment(t *testing.T) 
 		t.Fatal("cross-epoch sender omitted its Figure 7 commitment")
 	}
 	produced, err := receiver.Handle(testutil.DeliverEnvelope(out[0]))
-	if err == nil || !errors.Is(err, errPlanHashMismatch) {
+	if err == nil || !errors.Is(err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("cross-epoch child commitment error = %v, want plan mismatch", err)
 	}
 	if len(produced) != 0 || receiver.pending != nil || receiver.Completed() {

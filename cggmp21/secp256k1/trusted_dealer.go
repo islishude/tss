@@ -7,12 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/inmemoryrun"
+	"github.com/islishude/tss/internal/oneuse"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
@@ -26,6 +27,8 @@ const (
 	trustedDealerContributionWireVersion uint16 = 1
 	trustedDealerImportPlanDigestLabel          = "cggmp21-secp256k1-trusted-dealer-import-plan-v1"
 )
+
+var errInvalidTrustedDealerContribution = errors.New("invalid trusted-dealer contribution")
 
 // TrustedDealerImportOption configures creation of a trusted-dealer import.
 // ChainCode may be nil to request a fresh random chain code.
@@ -64,14 +67,17 @@ type TrustedDealerImportPlan struct {
 
 // TrustedDealerImportPlanSnapshot is a caller-owned public plan snapshot.
 type TrustedDealerImportPlanSnapshot struct {
-	SessionID      tss.SessionID
-	Threshold      int
-	Parties        tss.PartySet
-	PublicKey      []byte
-	ChainCode      []byte
-	Commitments    map[tss.PartyID][]byte
-	PaillierBits   int
-	SecurityParams SecurityParams
+	SessionID   tss.SessionID
+	Threshold   int
+	Parties     tss.PartySet
+	PublicKey   []byte
+	ChainCode   []byte
+	Commitments map[tss.PartyID][]byte
+	// ChainCodeCommitments contains the per-party public chain-code commitments,
+	// distinct from the constant-term curve commitments in Commitments.
+	ChainCodeCommitments map[tss.PartyID][]byte
+	PaillierBits         int
+	SecurityParams       SecurityParams
 }
 
 type trustedDealerContributionState struct {
@@ -82,16 +88,11 @@ type trustedDealerContributionState struct {
 	PlanHash  []byte         `wire:"5,bytes,len=32"`
 }
 
-type trustedDealerContributionLifecycle struct {
-	mu     sync.Mutex
-	status uint8
-}
-
 // TrustedDealerContribution is one session- and party-bound secret import
 // contribution. It must be distributed only through a confidential channel.
 type TrustedDealerContribution struct {
 	state     *trustedDealerContributionState
-	lifecycle *trustedDealerContributionLifecycle
+	lifecycle *oneuse.ClaimGuard
 }
 
 // NewTrustedDealerImport splits secret into non-zero additive contributions.
@@ -102,21 +103,21 @@ func NewTrustedDealerImport(secretKey *SecretKey, option TrustedDealerImportOpti
 	limits := limitsOrDefault(option.Limits)
 	securityParams := securityParamsOrDefault(option.SecurityParams)
 	if err := securityParams.Validate(); err != nil {
-		return nil, nil, invalidPlanConfig(0, err)
+		return nil, nil, planvalidation.InvalidConfig(0, err)
 	}
 	parties, err := validatePlanParties(option.Parties, option.Threshold, limits)
 	if err != nil {
-		return nil, nil, invalidPlanConfig(0, err)
+		return nil, nil, planvalidation.InvalidConfig(0, err)
 	}
 	if !option.SessionID.Valid() {
-		return nil, nil, invalidPlanConfig(0, tss.ErrInvalidSessionID)
+		return nil, nil, planvalidation.InvalidConfig(0, tss.ErrInvalidSessionID)
 	}
 	paillierBits := option.PaillierBits
 	if paillierBits == 0 {
 		paillierBits = int(securityParams.MinPaillierBits)
 	}
 	if paillierBits < int(securityParams.MinPaillierBits) || (limits.Paillier.MaxModulusBits > 0 && paillierBits > limits.Paillier.MaxModulusBits) {
-		return nil, nil, invalidPlanConfig(0, errors.New("trusted-dealer Paillier key size is outside allowed bounds"))
+		return nil, nil, planvalidation.InvalidConfig(0, errors.New("trusted-dealer Paillier key size is outside allowed bounds"))
 	}
 	if reader == nil {
 		reader = rand.Reader
@@ -143,7 +144,7 @@ func NewTrustedDealerImport(secretKey *SecretKey, option TrustedDealerImportOpti
 		return nil, nil, err
 	}
 	defer clearSecpPolynomial(scalars)
-	chainCodes, err := splitCGGMPDealerChainCode(reader, targetChainCode, parties)
+	chainCodes, err := bip32util.SplitChainCode(reader, targetChainCode, parties)
 	if err != nil {
 		clear(targetChainCode)
 		return nil, nil, err
@@ -209,7 +210,7 @@ func NewTrustedDealerImport(secretKey *SecretKey, option TrustedDealerImportOpti
 				ChainCode: bytes.Clone(chainCodes[party]),
 				PlanHash:  bytes.Clone(planHash),
 			},
-			lifecycle: new(trustedDealerContributionLifecycle),
+			lifecycle: new(oneuse.ClaimGuard),
 		}
 	}
 	return plan, contributions, nil
@@ -221,32 +222,32 @@ func NewTrustedDealerImport(secretKey *SecretKey, option TrustedDealerImportOpti
 // chain-code commitments.
 func StartTrustedDealerImport(plan *TrustedDealerImportPlan, contribution *TrustedDealerContribution, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil trusted-dealer import plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil trusted-dealer import plan"))
 	}
 	if err := plan.ValidateWithLimits(plan.limits); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	config, err := plan.thresholdConfig(local)
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := config.ValidateWithLimits(plan.limits.ThresholdLimits()); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	config.Parties = config.SortedParties()
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	claimedScalar, claimedChainCode, err := contribution.beginClaimForPlan(plan, local.Self)
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	defer claimedScalar.Destroy()
 	defer clear(claimedChainCode)
@@ -357,31 +358,6 @@ func splitCGGMPDealerScalar(reader io.Reader, target secp.Scalar, count int) (sh
 	}
 }
 
-func splitCGGMPDealerChainCode(reader io.Reader, target []byte, parties tss.PartySet) (map[tss.PartyID][]byte, error) {
-	out := make(map[tss.PartyID][]byte, len(parties))
-	remaining := bytes.Clone(target)
-	for i, party := range parties {
-		share := make([]byte, bip32util.ChainCodeSize)
-		if i < len(parties)-1 {
-			if _, err := io.ReadFull(reader, share); err != nil {
-				clear(remaining)
-				for _, value := range out {
-					clear(value)
-				}
-				return nil, err
-			}
-			for j := range remaining {
-				remaining[j] ^= share[j]
-			}
-		} else {
-			copy(share, remaining)
-		}
-		out[party] = share
-	}
-	clear(remaining)
-	return out, nil
-}
-
 func destroyCGGMPContributions(contributions map[tss.PartyID]*TrustedDealerContribution) {
 	for _, contribution := range contributions {
 		contribution.Destroy()
@@ -402,18 +378,21 @@ func (p *TrustedDealerImportPlan) Snapshot() (TrustedDealerImportPlanSnapshot, b
 		return TrustedDealerImportPlanSnapshot{}, false
 	}
 	commitments := make(map[tss.PartyID][]byte, len(p.state.Commitments))
+	chainCodeCommitments := make(map[tss.PartyID][]byte, len(p.state.Commitments))
 	for _, commitment := range p.state.Commitments {
 		commitments[commitment.Party] = bytes.Clone(commitment.ConstantCommitment)
+		chainCodeCommitments[commitment.Party] = bytes.Clone(commitment.ChainCodeCommit)
 	}
 	return TrustedDealerImportPlanSnapshot{
-		SessionID:      p.state.SessionID,
-		Threshold:      p.state.Threshold,
-		Parties:        p.state.Parties.Clone(),
-		PublicKey:      bytes.Clone(p.state.PublicKey),
-		ChainCode:      bytes.Clone(p.state.ChainCode),
-		Commitments:    commitments,
-		PaillierBits:   p.state.PaillierBits,
-		SecurityParams: p.state.SecurityParams,
+		SessionID:            p.state.SessionID,
+		Threshold:            p.state.Threshold,
+		Parties:              p.state.Parties.Clone(),
+		PublicKey:            bytes.Clone(p.state.PublicKey),
+		ChainCode:            bytes.Clone(p.state.ChainCode),
+		Commitments:          commitments,
+		ChainCodeCommitments: chainCodeCommitments,
+		PaillierBits:         p.state.PaillierBits,
+		SecurityParams:       p.state.SecurityParams,
 	}, true
 }
 
@@ -545,9 +524,13 @@ func (c *TrustedDealerContribution) validateForPlan(plan *TrustedDealerImportPla
 	if c == nil || c.state == nil || c.lifecycle == nil {
 		return errors.New("nil trusted-dealer contribution")
 	}
-	c.lifecycle.mu.Lock()
-	defer c.lifecycle.mu.Unlock()
-	return c.validateForPlanLocked(plan, party)
+	err := c.lifecycle.WithAvailable(func() error {
+		return c.validateForPlanLocked(plan, party)
+	})
+	if errors.Is(err, oneuse.ErrUnavailable) {
+		return errors.New("trusted-dealer contribution already claimed or consumed")
+	}
+	return err
 }
 
 func (c *TrustedDealerContribution) validateForPlanLocked(plan *TrustedDealerImportPlan, party tss.PartyID) error {
@@ -606,34 +589,36 @@ func (c *TrustedDealerContribution) beginClaimForPlan(plan *TrustedDealerImportP
 	if c == nil || c.lifecycle == nil {
 		return nil, nil, errors.New("nil trusted-dealer contribution")
 	}
-	c.lifecycle.mu.Lock()
-	defer c.lifecycle.mu.Unlock()
-	if c.lifecycle.status != 0 {
+	var claimedScalar *secret.Scalar
+	var claimedChainCode []byte
+	err := c.lifecycle.Begin(func() error {
+		if err := c.validateForPlanLocked(plan, party); err != nil {
+			return err
+		}
+		claimedScalar = c.state.Scalar.Clone()
+		claimedChainCode = bytes.Clone(c.state.ChainCode)
+		return nil
+	})
+	if errors.Is(err, oneuse.ErrUnavailable) {
 		return nil, nil, errors.New("trusted-dealer contribution already claimed or consumed")
 	}
-	if err := c.validateForPlanLocked(plan, party); err != nil {
+	if err != nil {
 		return nil, nil, err
 	}
-	c.lifecycle.status = 1
-	return c.state.Scalar.Clone(), bytes.Clone(c.state.ChainCode), nil
+	return claimedScalar, claimedChainCode, nil
 }
 
 func (c *TrustedDealerContribution) rollbackClaim() {
-	c.lifecycle.mu.Lock()
-	defer c.lifecycle.mu.Unlock()
-	if c.lifecycle.status == 1 {
-		c.lifecycle.status = 0
+	if c != nil && c.lifecycle != nil {
+		c.lifecycle.Rollback()
 	}
 }
 
 func (c *TrustedDealerContribution) commitClaim() {
-	c.lifecycle.mu.Lock()
-	defer c.lifecycle.mu.Unlock()
-	if c.lifecycle.status == 1 {
-		c.lifecycle.status = 2
-		c.state.Scalar.Destroy()
-		clear(c.state.ChainCode)
+	if c == nil || c.lifecycle == nil {
+		return
 	}
+	c.lifecycle.Commit(func() { c.destroySecretState() })
 }
 
 // Destroy clears the contribution and permanently prevents its use.
@@ -641,9 +626,10 @@ func (c *TrustedDealerContribution) Destroy() {
 	if c == nil || c.lifecycle == nil {
 		return
 	}
-	c.lifecycle.mu.Lock()
-	defer c.lifecycle.mu.Unlock()
-	c.lifecycle.status = 2
+	c.lifecycle.Destroy(func() { c.destroySecretState() })
+}
+
+func (c *TrustedDealerContribution) destroySecretState() {
 	if c.state != nil {
 		if c.state.Scalar != nil {
 			c.state.Scalar.Destroy()
@@ -732,12 +718,18 @@ func (c *TrustedDealerContribution) MarshalBinaryWithLimits(limits Limits) ([]by
 	if c == nil || c.state == nil || c.lifecycle == nil {
 		return nil, errors.New("nil trusted-dealer contribution")
 	}
-	c.lifecycle.mu.Lock()
-	defer c.lifecycle.mu.Unlock()
-	if c.lifecycle.status != 0 || !c.state.SessionID.Valid() || c.state.Party == 0 || len(c.state.PlanHash) != sha256.Size || len(c.state.ChainCode) != bip32util.ChainCodeSize || validateSecretScalarStrict(c.state.Scalar) != nil {
+	var raw []byte
+	err := c.lifecycle.WithAvailable(func() error {
+		if !c.state.SessionID.Valid() || c.state.Party == 0 || len(c.state.PlanHash) != sha256.Size || len(c.state.ChainCode) != bip32util.ChainCodeSize || validateSecretScalarStrict(c.state.Scalar) != nil {
+			return errInvalidTrustedDealerContribution
+		}
+		var marshalErr error
+		raw, marshalErr = wire.Marshal(c.state, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+		return marshalErr
+	})
+	if errors.Is(err, oneuse.ErrUnavailable) || errors.Is(err, errInvalidTrustedDealerContribution) {
 		return nil, errors.New("invalid, claimed, or consumed trusted-dealer contribution")
 	}
-	raw, err := wire.Marshal(c.state, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 	if err != nil {
 		return nil, err
 	}
@@ -776,7 +768,7 @@ func (c *TrustedDealerContribution) UnmarshalBinaryWithLimits(in []byte, limits 
 		return errors.New("invalid trusted-dealer contribution")
 	}
 	c.Destroy()
-	*c = TrustedDealerContribution{state: &state, lifecycle: new(trustedDealerContributionLifecycle)}
+	*c = TrustedDealerContribution{state: &state, lifecycle: new(oneuse.ClaimGuard)}
 	return nil
 }
 

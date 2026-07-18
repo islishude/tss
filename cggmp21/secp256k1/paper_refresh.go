@@ -7,15 +7,16 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
 func startPaperRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil old key share"))
 	}
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil refresh plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil refresh plan"))
 	}
 	config, err := plan.thresholdConfig(local)
 	if err != nil {
@@ -23,35 +24,35 @@ func startPaperRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfi
 	}
 	config.Parties = config.SortedParties()
 	if local.Self != oldKey.state.Party {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("local self must match the old key's party ID"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("local self must match the old key's party ID"))
 	}
 	if err := config.ValidateWithLimits(plan.limits.ThresholdLimits()); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := validateRefreshSourceKey(oldKey, plan); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	oldSecret, err := secpScalarFromSecret(oldKey.state.Secret)
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	lagrange, err := epochLagrangeCoefficient(oldKey.state.Epoch, oldKey.state.Party, oldKey.state.Parties)
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, fmt.Errorf("derive all-party additive refresh share: %w", err))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, fmt.Errorf("derive all-party additive refresh share: %w", err))
 	}
 	contribution, err := secpSecretScalarFromScalar(secp.ScalarMul(lagrange, oldSecret))
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	defer contribution.Destroy()
 	auxInfo, out, err := startAuxInfo(auxInfoStartOption{

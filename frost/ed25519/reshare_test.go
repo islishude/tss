@@ -11,7 +11,7 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
+func TestReshareHDChainCodePreservedForNewReceiver(t *testing.T) {
 	t.Parallel()
 	oldShares := frostKeygenHD(t, 2, 3)
 	oldParties := tss.NewPartySet(1, 2, 3)
@@ -40,7 +40,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 		messages = append(messages, out...)
 	}
 
-	recipient, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, newThreshold, tss.ThresholdConfig{
+	receiver, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, newThreshold, tss.ThresholdConfig{
 		Threshold: newThreshold,
 		Parties:   oldParties,
 		Self:      4,
@@ -49,7 +49,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reshareSessions[4] = recipient
+	reshareSessions[4] = receiver
 
 	deliverReshareMessages(t, tss.NewPartySet(1, 2, 3, 4), messages, reshareSessions)
 	newShares := collectReshareShares(t, newParties, reshareSessions)
@@ -73,11 +73,11 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(r2.ChildPublicKey, r4.ChildPublicKey) || !bytes.Equal(r2.AdditiveShift, r4.AdditiveShift) || !bytes.Equal(r2.ChildChainCode, r4.ChildChainCode) {
-		t.Fatal("HD derivation diverged across reshared recipients")
+		t.Fatal("HD derivation diverged across reshared receivers")
 	}
 
-	message := []byte("HD reshare recipient signing")
-	pub, sig, err := signFROSTSimulationWithOptions(message, []*KeyShare{newShares[2], newShares[4]}, SignOptions{Context: testFROSTSigningContext(path)})
+	message := []byte("HD reshare receiver signing")
+	pub, sig, err := signFROSTSimulationWithOptions(message, []*KeyShare{newShares[2], newShares[4]}, testSignOptions{Context: testFROSTSigningContext(path)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestStartReshareRejectsProductionOneOfOneTarget(t *testing.T) {
 	}
 }
 
-func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
+func TestStartReshareReceiverValidatesAgainstNewParties(t *testing.T) {
 	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
 	oldParties := tss.NewPartySet(1, 2, 3)
@@ -169,43 +169,43 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   oldParties,
 		Self:      4,
 		SessionID: sessionID,
 	}); err != nil {
-		t.Fatalf("recipient with config.Parties=oldParties should succeed: %v", err)
+		t.Fatalf("receiver with config.Parties=oldParties should succeed: %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
 		SessionID: sessionID,
 	}); err != nil {
-		t.Fatalf("recipient with config.Parties=newParties should succeed: %v", err)
+		t.Fatalf("receiver with config.Parties=newParties should succeed: %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      5,
 		SessionID: sessionID,
-	}); err == nil || !strings.Contains(err.Error(), "local party is not in new receiver set") {
+	}); err == nil || !strings.Contains(err.Error(), "role does not match") {
 		t.Fatalf("expected self-not-in-newParties failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      2,
 		SessionID: sessionID,
-	}); err == nil || !strings.Contains(err.Error(), "use StartReshare") {
-		t.Fatalf("expected old-party recipient failure, got %v", err)
+	}); err == nil || !strings.Contains(err.Error(), "role does not match") {
+		t.Fatalf("expected overlap-party receiver failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1], tss.NewPartySet(1, 1, 2), newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareReceiver(oldShares[1], tss.NewPartySet(1, 1, 2), newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -214,7 +214,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("expected duplicate old-party failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1], tss.NewPartySet(0, 1, 2), newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareReceiver(oldShares[1], tss.NewPartySet(0, 1, 2), newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -224,7 +224,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 	}
 }
 
-func TestReshareNewRecipientBindsGuard(t *testing.T) {
+func TestStartReshareRoleEntryPointsRejectMismatchedRoles(t *testing.T) {
 	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
 	oldParties := tss.NewPartySet(1, 2, 3)
@@ -233,7 +233,88 @@ func TestReshareNewRecipientBindsGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipient, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
+	limits := testLimits()
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey: oldShares[1], SessionID: sessionID, NewParties: newParties,
+		NewThreshold: 2, Limits: &limits,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allParties := reshareGuardParties(oldParties, newParties)
+	tests := []struct {
+		name  string
+		start func() (*ReshareSession, []tss.Envelope, error)
+	}{
+		{
+			name: "dealer rejects overlap party",
+			start: func() (*ReshareSession, []tss.Envelope, error) {
+				return StartReshareDealer(oldShares[2], plan, tss.LocalConfig{Self: 2}, testFROSTGuard(2, allParties, sessionID))
+			},
+		},
+		{
+			name: "dealer rejects receiver-only party",
+			start: func() (*ReshareSession, []tss.Envelope, error) {
+				return StartReshareDealer(oldShares[1], plan, tss.LocalConfig{Self: 4}, testFROSTGuard(4, allParties, sessionID))
+			},
+		},
+		{
+			name: "overlap rejects dealer-only party",
+			start: func() (*ReshareSession, []tss.Envelope, error) {
+				return StartReshareOverlap(oldShares[1], plan, tss.LocalConfig{Self: 1}, testFROSTGuard(1, allParties, sessionID))
+			},
+		},
+		{
+			name: "overlap rejects receiver-only party",
+			start: func() (*ReshareSession, []tss.Envelope, error) {
+				return StartReshareOverlap(oldShares[1], plan, tss.LocalConfig{Self: 4}, testFROSTGuard(4, allParties, sessionID))
+			},
+		},
+		{
+			name: "receiver rejects overlap party",
+			start: func() (*ReshareSession, []tss.Envelope, error) {
+				return StartReshareReceiver(plan, tss.LocalConfig{Self: 2}, testFROSTGuard(2, allParties, sessionID))
+			},
+		},
+		{
+			name: "receiver rejects dealer-only party",
+			start: func() (*ReshareSession, []tss.Envelope, error) {
+				return StartReshareReceiver(plan, tss.LocalConfig{Self: 1}, testFROSTGuard(1, allParties, sessionID))
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			session, out, err := tc.start()
+			if err == nil || !strings.Contains(err.Error(), "role does not match") {
+				t.Fatalf("error = %v, want role mismatch", err)
+			}
+			if session != nil || out != nil {
+				t.Fatal("role mismatch produced a session or outbound messages")
+			}
+		})
+	}
+
+	receiver, out, err := StartReshareReceiver(plan, tss.LocalConfig{Self: 4}, testFROSTGuard(4, allParties, sessionID))
+	if err != nil {
+		t.Fatalf("new-only receiver start failed: %v", err)
+	}
+	defer receiver.Destroy()
+	if len(out) != 0 {
+		t.Fatalf("receiver start emitted %d envelopes, want none", len(out))
+	}
+}
+
+func TestReshareNewReceiverBindsGuard(t *testing.T) {
+	t.Parallel()
+	oldShares := frostKeygen(t, 2, 3)
+	oldParties := tss.NewPartySet(1, 2, 3)
+	newParties := tss.NewPartySet(2, 3, 4)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiver, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -242,7 +323,7 @@ func TestReshareNewRecipientBindsGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := recipient.Guard()
+	guard := receiver.Guard()
 	if guard.Self != 4 {
 		t.Fatalf("guard self = %d, want 4", guard.Self)
 	}

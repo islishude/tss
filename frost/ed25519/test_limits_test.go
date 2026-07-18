@@ -14,7 +14,7 @@ func testLimits() Limits {
 }
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
-	return marshalKeygenCommitmentsPayloadWithLimits(p, testLimits())
+	return p.MarshalBinaryWithLimits(testLimits())
 }
 
 func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, error) {
@@ -22,7 +22,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 }
 
 func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, error) {
-	return marshalReshareCommitmentsPayloadWithLimits(p, testLimits())
+	return p.MarshalBinaryWithLimits(testLimits())
 }
 
 func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, error) {
@@ -30,7 +30,7 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
-	return marshalKeygenSharePayloadWithLimits(p, testLimits())
+	return p.MarshalBinaryWithLimits(testLimits())
 }
 
 func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
@@ -38,7 +38,7 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 }
 
 func marshalNonceCommitmentPayload(p nonceCommitment) ([]byte, error) {
-	return marshalNonceCommitmentPayloadWithLimits(p, testLimits())
+	return p.MarshalBinaryWithLimits(testLimits())
 }
 
 func unmarshalNonceCommitmentPayload(in []byte) (nonceCommitment, error) {
@@ -46,7 +46,7 @@ func unmarshalNonceCommitmentPayload(in []byte) (nonceCommitment, error) {
 }
 
 func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
-	return marshalSignPartialPayloadWithLimits(p, testLimits())
+	return p.MarshalBinaryWithLimits(testLimits())
 }
 
 func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
@@ -54,7 +54,7 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
-	return marshalReshareSharePayloadWithLimits(p, testLimits())
+	return p.MarshalBinaryWithLimits(testLimits())
 }
 
 func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {

@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/planvalidation"
 )
 
 func (s *ReshareSession) handleReshareConfirmationInbound(in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
@@ -37,7 +38,7 @@ func (s *ReshareSession) handleReshareConfirmationInbound(in tss.InboundEnvelope
 	if !bytes.Equal(canonical, env.Payload) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical reshare confirmation"))
 	}
-	if err := requirePlanHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 	if err := s.verifyReshareConfirmationPublicBinding(confirmation); err != nil {

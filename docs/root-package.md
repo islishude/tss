@@ -400,7 +400,7 @@ encrypted, _ := tss.EncryptKeyShareWithPassphrase(raw, passphrase, "key-1", nil)
 // store encrypted...
 
 raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase, "key-1")
-share, _ := secp256k1.UnmarshalKeyShare(raw)
+share, _ := tss.DecodeBinary[secp256k1.KeyShare](raw)
 ```
 
 Decrypt helpers require the expected key ID and compare it only after AEAD

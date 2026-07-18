@@ -382,16 +382,16 @@ func runCrashRecoveryReshare(
 		if oldParties.Contains(party) {
 			continue
 		}
-		recipient, err := startFROSTReshareRecipient(source[oldParties[0]], oldParties, newParties, 2, tss.ThresholdConfig{
+		receiver, err := startFROSTReshareReceiver(source[oldParties[0]], oldParties, newParties, 2, tss.ThresholdConfig{
 			Threshold: 2,
 			Parties:   newParties,
 			Self:      party,
 			SessionID: sessionID,
 		})
 		if err != nil {
-			t.Fatalf("start reshare recipient %d: %v", party, err)
+			t.Fatalf("start reshare receiver %d: %v", party, err)
 		}
-		sessions[party] = recipient
+		sessions[party] = receiver
 	}
 	defer destroyCrashRecoverySessions(sessions)
 	deliverReshareMessages(t, allParties, messages, sessions)

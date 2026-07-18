@@ -108,7 +108,7 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 			plan, planErr := NewSignPlan(SignPlanOption{
 				Key:     shares[id],
 				Presign: metadata,
-				Intent: SignIntent{
+				Intent: tss.SignIntent{
 					SessionID: signID,
 					Context:   ctx,
 					Message:   input,

@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+func TestErrPlanHashMismatch(t *testing.T) {
+	t.Parallel()
+	if ErrPlanHashMismatch == nil {
+		t.Fatal("ErrPlanHashMismatch is nil")
+	}
+	if got := ErrPlanHashMismatch.Error(); got != "lifecycle plan hash mismatch" {
+		t.Fatalf("ErrPlanHashMismatch.Error() = %q", got)
+	}
+	if !errors.Is(fmt.Errorf("plan: %w", ErrPlanHashMismatch), ErrPlanHashMismatch) {
+		t.Fatal("wrapped ErrPlanHashMismatch is not discoverable with errors.Is")
+	}
+}
+
 func TestProtocolErrorError(t *testing.T) {
 	t.Parallel()
 	t.Run("nil receiver", func(t *testing.T) {

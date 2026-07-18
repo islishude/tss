@@ -116,22 +116,6 @@ func validateSecp256k1DerivationBinding(parent *secp.Point, result *tss.Derivati
 	return nil
 }
 
-func appendDerivationResultTranscript(t *transcript.Builder, result *tss.DerivationResult) {
-	if result == nil {
-		t.AppendString("derivation_scheme", "")
-		return
-	}
-	t.AppendString("derivation_scheme", string(result.Scheme))
-	t.AppendUint32List("requested_path", result.RequestedPath)
-	t.AppendUint32List("resolved_path", result.ResolvedPath)
-	t.AppendBytes("child_public_key", result.ChildPublicKey)
-	t.AppendBytes("child_chain_code", result.ChildChainCode)
-	t.AppendUint32("derivation_depth", uint32(result.Depth))
-	t.AppendBytes("parent_fingerprint", result.ParentFingerprint[:])
-	t.AppendUint32("child_number", result.ChildNumber)
-	t.AppendBytes("additive_shift", result.AdditiveShift)
-}
-
 func signMessageDigest(contextHash []byte, messageDomain string, message []byte) []byte {
 	t := transcript.New(signMessageDigestLabel)
 	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))

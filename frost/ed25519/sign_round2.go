@@ -103,7 +103,7 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 	if err != nil {
 		return tss.Envelope{}
 	}
-	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: zWire, PlanHash: s.planHash}, s.limits)
+	payload, err := (signPartialPayload{Z: zWire, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return tss.Envelope{}
 	}

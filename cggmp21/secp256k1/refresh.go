@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/tssrun"
 )
 
@@ -67,41 +68,41 @@ type RefreshRuntime struct {
 func StartRefresh(plan *RefreshPlan, runtime RefreshRuntime) (*RefreshSession, []tss.Envelope, error) {
 	local := runtime.Local
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil refresh plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil refresh plan"))
 	}
 	if local.Self == tss.BroadcastPartyId {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("RefreshRuntime.Local.Self is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("RefreshRuntime.Local.Self is required"))
 	}
 	if runtime.LifecycleStore == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("RefreshRuntime.LifecycleStore is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("RefreshRuntime.LifecycleStore is required"))
 	}
 	if err := runtime.Binding.Validate(); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	targetProbe := runtime.Binding
 	targetProbe.KeyGeneration = runtime.TargetKeyGeneration
 	if err := targetProbe.Validate(); err != nil || runtime.TargetKeyGeneration == runtime.Binding.KeyGeneration {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("invalid refresh target key generation"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid refresh target key generation"))
 	}
 	config, err := plan.thresholdConfig(local)
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	config.Parties = config.SortedParties()
 	if err := config.ValidateWithLimits(plan.limits.ThresholdLimits()); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if plan.SourceEpochID() != runtime.Binding.EpochID {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("refresh plan source epoch does not match lifecycle binding"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("refresh plan source epoch does not match lifecycle binding"))
 	}
 	if _, err := plan.Digest(); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 
 	ctx := local.Ctx()
@@ -117,10 +118,10 @@ func StartRefresh(plan *RefreshPlan, runtime RefreshRuntime) (*RefreshSession, [
 		}
 	}()
 	if oldKey.state.Party != local.Self {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("local self does not match lifecycle key share party"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("local self does not match lifecycle key share party"))
 	}
 	if err := validateRefreshSourceKey(oldKey, plan); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	storeCtx, cancel := durableStoreContext(ctx, timeout)
 	lease, err := runtime.LifecycleStore.AcquireRunLease(storeCtx, runtime.Binding, tssrun.RunRefresh, plan.state.sessionID)

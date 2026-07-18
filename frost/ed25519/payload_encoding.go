@@ -16,10 +16,6 @@ const (
 	reshareSharePayloadWireType       = "frost.ed25519.payload.reshare.share"
 )
 
-func marshalKeygenCommitmentsPayloadWithLimits(p keygenCommitmentsPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the keygen commitments payload.
 func (p keygenCommitmentsPayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -68,10 +64,6 @@ func (p keygenCommitmentsPayload) Validate() error {
 	return nil
 }
 
-func marshalKeygenSharePayloadWithLimits(p keygenSharePayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the keygen share payload.
 func (p keygenSharePayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -109,10 +101,6 @@ func (p keygenSharePayload) Validate() error {
 		return fmt.Errorf("keygen share plan hash must be 32 bytes")
 	}
 	return nil
-}
-
-func marshalNonceCommitmentPayloadWithLimits(p nonceCommitment, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the nonce commitment payload.
@@ -157,10 +145,6 @@ func (p nonceCommitment) Validate() error {
 	return nil
 }
 
-func marshalSignPartialPayloadWithLimits(p signPartialPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the partial signature payload.
 func (p signPartialPayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -200,10 +184,6 @@ func (p signPartialPayload) Validate() error {
 	return nil
 }
 
-func marshalReshareCommitmentsPayloadWithLimits(p reshareCommitmentsPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the reshare commitments payload.
 func (p reshareCommitmentsPayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -241,10 +221,6 @@ func (p reshareCommitmentsPayload) Validate() error {
 		return fmt.Errorf("reshare commitments: %w", err)
 	}
 	return nil
-}
-
-func marshalReshareSharePayloadWithLimits(p reshareSharePayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the reshare share payload.

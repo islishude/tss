@@ -82,13 +82,13 @@ func (s *KeygenSession) buildFinalKeyShare(snap *frostKeygenConfirmationSnapshot
 		final.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
-	if err := final.ValidateConsistency(); err != nil {
+	if err := final.ValidateWithLimits(s.limits); err != nil {
 		final.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
 	return &preparedFinalKeyShare{
 		share:               final,
-		confirmationSetHash: keygenConfirmationSetHash(snap.confirmations),
+		confirmationSetHash: keygenConfirmationSetHash(snap.confirmations, s.limits),
 	}, nil
 }
 

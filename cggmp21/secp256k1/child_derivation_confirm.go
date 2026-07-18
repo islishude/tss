@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/planvalidation"
 )
 
 func (s *ChildDerivationSession) handleChildConfirmationLocked(in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
@@ -37,7 +38,7 @@ func (s *ChildDerivationSession) handleChildConfirmationLocked(in tss.InboundEnv
 	if !bytes.Equal(canonical, env.Payload) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical child confirmation"))
 	}
-	if err := requirePlanHash("child confirmation", confirmation.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("child confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 	if err := s.validateChildConfirmationPublicBinding(confirmation); err != nil {

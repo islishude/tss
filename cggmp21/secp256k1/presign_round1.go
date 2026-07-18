@@ -10,6 +10,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/tssrun"
 )
@@ -23,25 +24,25 @@ import (
 func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession, out []tss.Envelope, err error) {
 	local := runtime.Local
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil presign plan"))
 	}
 	if runtime.LifecycleStore == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("PresignRuntime.LifecycleStore is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("PresignRuntime.LifecycleStore is required"))
 	}
 	if err := runtime.Binding.Validate(); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if local.Self == tss.BroadcastPartyId {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("PresignRuntime.Local.Self is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("PresignRuntime.Local.Self is required"))
 	}
 	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if runtime.Binding.KeyID != plan.state.context.KeyID {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("presign runtime key id does not match plan context"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("presign runtime key id does not match plan context"))
 	}
 
 	timeout := durableStoreTimeout(runtime.DurableStoreTimeout)
@@ -57,11 +58,11 @@ func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession,
 	}()
 	limits := plan.limits
 	if err := plan.validateKey(key, local); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	sessionID := plan.state.sessionID
 	storeCtx, cancel := durableStoreContext(local.Ctx(), timeout)
@@ -423,7 +424,7 @@ func (s *PresignSession) buildAcceptPresignRound1PayloadTx(env tss.Envelope) (*a
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round, broadcast, duplicate, transport checks done in dispatcher)
-	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("presign", p.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
@@ -491,7 +492,7 @@ func (s *PresignSession) buildAcceptPresignRound1ProofTx(env tss.Envelope) (*acc
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round, direct-confidential, self-send, duplicate checks done in dispatcher)
-	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("presign", p.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {

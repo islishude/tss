@@ -8,6 +8,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
@@ -388,7 +389,7 @@ func (s *figure6State) prepareCommitment(env tss.Envelope) (*preparedFigure6Inbo
 	if err != nil {
 		return nil, figure6MalformedPayload(err)
 	}
-	if err := requirePlanHash("Figure 6 commitment", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("Figure 6 commitment", payload.PlanHash, s.planHash); err != nil {
 		return nil, figure6AttributableFailure(err)
 	}
 	complete := true
@@ -429,7 +430,7 @@ func (s *figure6State) prepareReveal(env tss.Envelope) (*preparedFigure6Inbound,
 	if err != nil {
 		return nil, figure6MalformedPayload(err)
 	}
-	if err := requirePlanHash("Figure 6 reveal", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("Figure 6 reveal", payload.PlanHash, s.planHash); err != nil {
 		return nil, figure6AttributableFailure(err)
 	}
 	commitment, err := figure6Commitment(s.cfg.SessionID, env.From, payload.Rho, payload.PublicShare, payload.SchnorrCommitment, payload.Decommitment, s.planHash)
@@ -502,7 +503,7 @@ func (s *figure6State) prepareProof(env tss.Envelope) (*preparedFigure6Inbound, 
 	if err != nil {
 		return nil, figure6MalformedPayload(err)
 	}
-	if err := requirePlanHash("Figure 6 proof", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("Figure 6 proof", payload.PlanHash, s.planHash); err != nil {
 		return nil, figure6AttributableFailure(err)
 	}
 	if payload.Rho != s.rho {

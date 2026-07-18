@@ -70,7 +70,7 @@ func TestHDSignScenarios(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		pub, sig, err := signFROSTSimulationWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext([]uint32{0})})
+		pub, sig, err := signFROSTSimulationWithOptions(msg, []*KeyShare{share}, testSignOptions{Context: testFROSTSigningContext([]uint32{0})})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func TestHDSignScenarios(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		pub, sig, err := signFROSTSimulationWithOptions(msg, []*KeyShare{key1, key2}, SignOptions{Context: testFROSTSigningContext([]uint32{5})})
+		pub, sig, err := signFROSTSimulationWithOptions(msg, []*KeyShare{key1, key2}, testSignOptions{Context: testFROSTSigningContext([]uint32{5})})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +118,7 @@ func TestHDSignScenarios(t *testing.T) {
 		share := shares[1]
 		msg := []byte("zero shift test")
 
-		pub1, sig1, err := signFROSTSimulationWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext()})
+		pub1, sig1, err := signFROSTSimulationWithOptions(msg, []*KeyShare{share}, testSignOptions{Context: testFROSTSigningContext()})
 		if err != nil {
 			t.Fatal(err)
 		}

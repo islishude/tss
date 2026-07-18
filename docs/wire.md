@@ -390,7 +390,7 @@ The CGGMP21 private `Presign` record contains only the normalized Figure 8
 artifact and its complete public binding. Availability is runtime/store state,
 not a wire field. Decoding is structural and restores an available artifact
 only for the lifecycle store or explicit import path; callers use
-`VerifyCryptographicMaterialWithLimits` before use.
+`ValidateWithLimits` before use.
 
 `Envelope` and `BlameEvidence` carry their schema version only in the TLV frame
 header. Their field tags are contiguous and do not include a duplicate body

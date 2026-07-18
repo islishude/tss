@@ -58,6 +58,61 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	}
 }
 
+func TestFROSTKeyShareBinaryDecodersRejectNilReceiver(t *testing.T) {
+	t.Parallel()
+
+	raw, err := frostKeygen(t, 2, 3)[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var key *KeyShare
+	for name, decode := range map[string]func() error{
+		"default limits":  func() error { return key.UnmarshalBinary(raw) },
+		"explicit limits": func() error { return key.UnmarshalBinaryWithLimits(raw, DefaultLimits()) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := decode(); err == nil || !strings.Contains(err.Error(), "nil key share") {
+				t.Fatalf("decode error = %v, want nil key share", err)
+			}
+		})
+	}
+}
+
+func TestFROSTKeyShareDefaultLimitsRejectOneOfOne(t *testing.T) {
+	t.Parallel()
+
+	share := frostKeygenInner(t, 1, 1)[1]
+	limits := testLimits()
+	if err := share.ValidateWithLimits(limits); err != nil {
+		t.Fatalf("explicit test limits rejected 1-of-1 key share: %v", err)
+	}
+	if err := share.Validate(); err == nil {
+		t.Fatal("production validation accepted 1-of-1 key share")
+	}
+	if err := share.ValidateConsistency(); err == nil {
+		t.Fatal("production consistency validation accepted 1-of-1 key share")
+	}
+	if _, err := share.MarshalBinary(); err == nil {
+		t.Fatal("production encoding accepted 1-of-1 key share")
+	}
+
+	raw, err := share.MarshalBinaryWithLimits(limits)
+	if err != nil {
+		t.Fatalf("explicit test limits could not encode 1-of-1 key share: %v", err)
+	}
+	if _, err := tss.DecodeBinary[KeyShare](raw); err == nil {
+		t.Fatal("production decoding accepted 1-of-1 key share")
+	}
+	decoded, err := tss.DecodeBinaryWithLimits[KeyShare](raw, limits)
+	if err != nil {
+		t.Fatalf("explicit test limits could not decode 1-of-1 key share: %v", err)
+	}
+	defer decoded.Destroy()
+	if err := decoded.ValidateWithLimits(limits); err != nil {
+		t.Fatalf("explicitly decoded 1-of-1 key share is invalid: %v", err)
+	}
+}
+
 func TestFROSTKeyShareStateRejectsJSON(t *testing.T) {
 	t.Parallel()
 
@@ -211,7 +266,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) 
 	}
 	limits := testLimits()
 	limits.Threshold.MaxThreshold = 2
-	_, err = UnmarshalKeyShareWithLimits(mutated, limits)
+	_, err = tss.DecodeBinaryWithLimits[KeyShare](mutated, limits)
 	if err == nil {
 		t.Fatal("key share accepted group commitments over resource limit")
 	}

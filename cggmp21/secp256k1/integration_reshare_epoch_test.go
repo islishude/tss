@@ -124,7 +124,7 @@ func testReshareRejectsCrossEpochHandoff(t *testing.T, oldShares map[tss.PartyID
 		t.Fatal("source epoch sender omitted temporary receiver material")
 	}
 	produced, err := receiver.Handle(testutil.DeliverEnvelope(out[0]))
-	if err == nil || !errors.Is(err, errPlanHashMismatch) {
+	if err == nil || !errors.Is(err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("cross-epoch handoff error = %v, want plan mismatch", err)
 	}
 	if len(produced) != 0 || receiver.newShare != nil {

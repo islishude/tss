@@ -79,8 +79,8 @@ lifecycle session ID, transcript hash, lifecycle plan hash, and group
 commitments hash, so shares from different source generations cannot enter the
 same run. Each party reconstructs
 `NewRefreshPlan` from its current local `KeyShare`, calls `StartRefresh`, routes
-`ReshareSession.Handle`, and obtains the staged output through
-`ReshareSession.KeyShare()`.
+`RefreshSession.Handle`, and obtains the staged output through
+`RefreshSession.KeyShare()`.
 
 Refresh preserves party set, threshold, group public key, and chain code.
 Install the refreshed `KeyShare` with compare-and-swap semantics against the
@@ -89,10 +89,11 @@ expected current key generation.
 ### FROST ReshareRun
 
 Public run metadata includes a fresh reshare session ID, old key generation ID,
-old parties, new parties, and new threshold. Old parties act as dealers and call
-`StartReshare`. New-only recipients call `StartReshareRecipient`. New-only
-recipients need public reshare metadata out of band before starting the
-recipient flow: old public key, chain code, party set, group commitments,
+old parties, new parties, and new threshold. Old-only parties call
+`StartReshareDealer`, new-only parties call `StartReshareReceiver`, and parties
+in both committees call `StartReshareOverlap`. New-only receivers need public
+reshare metadata out of band before starting the receiver flow: old public key,
+chain code, party set, group commitments,
 lifecycle session ID, transcript hash, and lifecycle plan hash. All roles route
 `ReshareSession.Handle`, including the round-2 confirmations returned by it.
 An old-only dealer remains active after round 1: it derives the public
@@ -145,7 +146,9 @@ requires every share to belong to the exact same lifecycle generation, and
 interpolates the secret at zero without consuming the inputs. The returned
 `SecretKey` exports a canonical 32-byte little-endian group scalar. It is not an
 RFC 8032 seed: `NewSecretKeyFromSeed` is one-way and reconstruction cannot
-recover the original seed.
+recover the original seed. `ReconstructSecretKey` applies `DefaultLimits`;
+tests or explicitly authorized non-production profiles use
+`ReconstructSecretKeyWithLimits`.
 
 ## KeyShare API and Ownership
 
@@ -178,6 +181,12 @@ superseded receiver secret and chain code only after the replacement has fully
 decoded and validated; failed decoding leaves the receiver unchanged.
 `KeygenSession.KeyShare()` and reshare completion accessors return independently
 owned shares that must each be destroyed separately.
+
+`Validate`, `ValidateConsistency`, `MarshalBinary`, and `UnmarshalBinary` apply
+`DefaultLimits`, which reject 1-of-1 key shares. Explicit test profiles that
+allow 1-of-1 must consistently use the corresponding `WithLimits` validation,
+encoding, decoding, confirmation, and reconstruction entry points. The limits
+select local policy and resource caps; they do not change canonical wire bytes.
 
 ## Distributed Key Generation
 
@@ -343,8 +352,8 @@ e_i = H3(random32 || SerializeScalar(x_i) || nonce_context("binding"))
 sign-plan hash, and nonce role. This prevents repeated `NonceReader` output from
 reusing the same nonce across different signing intents. `random32` comes from
 `SignRuntime.Local.Rand` or `crypto/rand.Reader`; custom readers must still be
-CSPRNGs and must not intentionally repeat output. `SignOptions.NonceReader`
-serves the in-memory simulation helper.
+CSPRNGs and must not intentionally repeat output. Test and simulation helpers
+pass deterministic readers directly through `SignRuntime.Local.Rand`.
 The session stores the canonical nonce bytes only until the round-2 partial is
 constructed. After that point the nonce bytes are cleared and set to `nil`.
 The public commitment map and retained local commitment envelope remain only
@@ -477,7 +486,10 @@ ctx := tss.SigningContext{
     PolicyDomain: "policy", MessageDomain: "app",
 }
 plan, err := ed25519.NewSignPlan(ed25519.SignPlanOption{
-    Key: share, SessionID: sessionID, Signers: signers, Context: ctx, Message: message,
+	Key: share,
+	Intent: tss.SignIntent{
+		SessionID: sessionID, Signers: signers, Context: ctx, Message: message,
+	},
 })
 session, out, err := ed25519.StartSign(share, plan, ed25519.SignRuntime{
     Local: tss.LocalConfig{Self: self},
@@ -516,18 +528,19 @@ refresh shares to the existing local share.
 
 New group commitments are the sum of all reshare commitments, plus the old
 commitments in refresh mode. The chain code is preserved from the original key
-metadata. The reshare/refresh transcript hash is global across recipients and
+metadata. The reshare/refresh transcript hash is global across receivers and
 binds old and new party sets, the old public key, chain code, refresh mode, all
 dealer commitments, new commitments, and verification shares. `StartRefresh`
-requires `config.Self` to match the supplied old key's party id. A new recipient
+requires `config.Self` to match the supplied old key's party id. A new receiver
 that does not hold an old `KeyShare` must receive the authenticated source
 metadata listed under FROST ReshareRun and pass it to `NewPublicResharePlan`.
 
 After round 1, each target key holder stages its locally derived share and
 broadcasts a round-2 confirmation binding the reshare session, plan, target
 party set and threshold, preserved public key and chain code, transcript hash,
-and new commitments hash. `ReshareSession.KeyShare()` remains unavailable until
-confirmations from every target key holder agree. Serialized key shares require
+and new commitments hash. `ReshareSession.KeyShare()` and
+`RefreshSession.KeyShare()` remain unavailable until confirmations from every
+target key holder agree. Serialized key shares require
 this complete confirmation set; removing every confirmation is rejected rather
 than treated as an older valid shape. Removed old dealers derive the same
 confirmation binding from public commitments and remain incomplete until they
@@ -544,6 +557,8 @@ The package implements non-hardened BIP32-Ed25519 derivation following the
 Use `KeyShare.Derive(path)` or `DeriveNonHardenedBIP32(pubKey, chainCode, path)`
 to resolve a path into a `tss.DerivationResult` containing the child public key,
 child chain code, resolved path, and internal additive shift.
+`KeyShare.Derive` validates the share with `DefaultLimits`; callers using an
+explicit non-production threshold profile must call `KeyShare.DeriveWithLimits`.
 
 For path level `j` with non-hardened index `i_j`:
 
@@ -582,8 +597,11 @@ ctx := tss.SigningContext{
     PolicyDomain: "policy", MessageDomain: "app",
 }
 plan, err := NewSignPlan(SignPlanOption{
-    Key: share, SessionID: sessionID, Signers: signers,
-    Context: ctx, Message: message,
+	Key: share,
+	Intent: tss.SignIntent{
+		SessionID: sessionID, Signers: signers,
+		Context: ctx, Message: message,
+	},
 })
 runtime := SignRuntime{
     Local: tss.LocalConfig{Self: share.PartyID()},
@@ -868,8 +886,11 @@ parties := metadata.Parties
 
 ```go
 plan, err := NewSignPlan(SignPlanOption{
-    Key: share, SessionID: sessionID, Signers: signers,
-    Context: ctx, Message: message,
+	Key: share,
+	Intent: tss.SignIntent{
+		SessionID: sessionID, Signers: signers,
+		Context: ctx, Message: message,
+	},
 })
 runtime := SignRuntime{
     Local: tss.LocalConfig{Self: share.PartyID(), Rand: nonceReader},
@@ -887,8 +908,13 @@ plan, err := NewResharePlan(ResharePlanOption{
     OldKey: oldShare, SessionID: sessionID,
     NewParties: newParties, NewThreshold: newThreshold,
 })
-sess, out, err := StartReshare(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
-recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
+var sess *ReshareSession
+if plan.IsOverlap(oldShare.PartyID()) {
+    sess, out, err = StartReshareOverlap(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
+} else {
+    sess, out, err = StartReshareDealer(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
+}
+receiverPlan, err := NewPublicResharePlan(PublicResharePlanOption{
     OldPublicKey: oldPublicKey, OldChainCode: oldChainCode, OldParties: oldParties,
     OldGroupCommitments: oldGroupCommitments,
     OldKeygenSessionID: oldKeygenSessionID,
@@ -896,18 +922,21 @@ recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
     OldPlanHash: oldPlanHash,
     SessionID: sessionID, NewParties: newParties, NewThreshold: newThreshold,
 })
-recipient, err := StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: self}, guard)
+receiver, out, err := StartReshareReceiver(receiverPlan, tss.LocalConfig{Self: self}, guard)
 refreshPlan, err := NewRefreshPlan(RefreshPlanOption{OldKey: oldShare, SessionID: sessionID})
 refresh, out, err := StartRefresh(oldShare, refreshPlan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
-out, err := sess.Handle(env)
-newShare, ok := sess.KeyShare()
+out, err = receiver.Handle(env)
+newShare, ok := receiver.KeyShare()
+out, err = refresh.Handle(env)
+refreshedShare, ok := refresh.KeyShare()
 ```
 
-Old committee members call `StartReshare` and act as dealers. A participant
-that is only in the new committee calls `StartReshareRecipient` with the old
-authenticated source-generation public metadata so the completed share can verify
-`oldPK == newPK` and preserve HD derivation metadata. Same-party proactive
-refresh uses `StartRefresh`, which preserves the participant set and threshold.
+Old-only committee members call `StartReshareDealer`; overlap members call
+`StartReshareOverlap`. A participant that is only in the new committee calls
+`StartReshareReceiver` with the old authenticated source-generation public
+metadata so the completed share can verify `oldPK == newPK` and preserve HD
+derivation metadata. Same-party proactive refresh uses `StartRefresh`, which
+returns a `RefreshSession` and preserves the participant set and threshold.
 
 ### BIP32 HD
 
@@ -921,7 +950,8 @@ childChain := result.ChildChainCode
 ### Convenience
 
 ```go
-share, err := UnmarshalKeyShare(raw)
+share, err := tss.DecodeBinary[ed25519.KeyShare](raw)
+customShare, err := tss.DecodeBinaryWithLimits[ed25519.KeyShare](raw, limits)
 ```
 
 ## Scope and Limitations

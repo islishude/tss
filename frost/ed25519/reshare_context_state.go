@@ -11,26 +11,26 @@ type frostReshareRole uint8
 
 const (
 	frostReshareRoleDealerOnly frostReshareRole = iota + 1
-	frostReshareRoleRecipientOnly
-	frostReshareRoleDealerAndRecipient
+	frostReshareRoleReceiverOnly
+	frostReshareRoleDealerAndReceiver
 )
 
 func (s *ReshareSession) isDealer() bool {
 	if s == nil {
 		return false
 	}
-	return s.role == frostReshareRoleDealerOnly || s.role == frostReshareRoleDealerAndRecipient
+	return s.role == frostReshareRoleDealerOnly || s.role == frostReshareRoleDealerAndReceiver
 }
 
-func (s *ReshareSession) isRecipient() bool {
+func (s *ReshareSession) isReceiver() bool {
 	if s == nil {
 		return false
 	}
-	return s.role == frostReshareRoleRecipientOnly || s.role == frostReshareRoleDealerAndRecipient
+	return s.role == frostReshareRoleReceiverOnly || s.role == frostReshareRoleDealerAndReceiver
 }
 
 func (s *ReshareSession) requiresInboundShares() bool {
-	return s.isRecipient()
+	return s.isReceiver()
 }
 
 func (s *ReshareSession) requiresOutboundShares() bool {

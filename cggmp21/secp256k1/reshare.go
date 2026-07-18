@@ -10,6 +10,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -238,7 +239,7 @@ func (s *ReshareSession) validateInbound(env tss.InboundEnvelope, allowedParties
 // different local roles. Old dealers call StartReshareDealer, new-only
 // receivers call StartReshareReceiver, and overlap parties call
 // StartReshareOverlap when applicable.
-func StartReshareDealer(plan *ResharePlan, runtime ReshareRuntime) (*ReshareDealerSession, []tss.Envelope, error) {
+func StartReshareDealer(plan *ResharePlan, runtime ReshareRuntime) (*ReshareSession, []tss.Envelope, error) {
 	return startLifecycleReshare(plan, runtime, true, false)
 }
 
@@ -247,7 +248,7 @@ func StartReshareDealer(plan *ResharePlan, runtime ReshareRuntime) (*ReshareDeal
 // different local roles. Old dealers call StartReshareDealer, new-only
 // receivers call StartReshareReceiver, and overlap parties call
 // StartReshareOverlap when applicable.
-func StartReshareReceiver(plan *ResharePlan, runtime ReshareRuntime) (*ReshareReceiverSession, []tss.Envelope, error) {
+func StartReshareReceiver(plan *ResharePlan, runtime ReshareRuntime) (*ReshareSession, []tss.Envelope, error) {
 	return startLifecycleReshare(plan, runtime, false, true)
 }
 
@@ -256,47 +257,47 @@ func StartReshareReceiver(plan *ResharePlan, runtime ReshareRuntime) (*ReshareRe
 // but parties start different local roles. Old dealers call StartReshareDealer,
 // new-only receivers call StartReshareReceiver, and overlap parties call
 // StartReshareOverlap when applicable.
-func StartReshareOverlap(plan *ResharePlan, runtime ReshareRuntime) (*ReshareOverlapSession, []tss.Envelope, error) {
+func StartReshareOverlap(plan *ResharePlan, runtime ReshareRuntime) (*ReshareSession, []tss.Envelope, error) {
 	return startLifecycleReshare(plan, runtime, true, true)
 }
 
 func startLifecycleReshare(plan *ResharePlan, runtime ReshareRuntime, dealer, receiver bool) (*ReshareSession, []tss.Envelope, error) {
 	local := runtime.Local
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil reshare plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil reshare plan"))
 	}
 	if local.Self == tss.BroadcastPartyId {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("ReshareRuntime.Local.Self is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("ReshareRuntime.Local.Self is required"))
 	}
 	if runtime.LifecycleStore == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("ReshareRuntime.LifecycleStore is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("ReshareRuntime.LifecycleStore is required"))
 	}
 	if err := runtime.Binding.Validate(); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	targetProbe := runtime.Binding
 	targetProbe.KeyGeneration = runtime.TargetKeyGeneration
 	if err := targetProbe.Validate(); err != nil || runtime.TargetKeyGeneration == runtime.Binding.KeyGeneration {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("invalid reshare target key generation"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid reshare target key generation"))
 	}
 	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.SessionID, local.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := plan.ValidateWithLimits(plan.limits); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if plan.SourceEpochID() != runtime.Binding.EpochID {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("reshare plan source epoch does not match lifecycle binding"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("reshare plan source epoch does not match lifecycle binding"))
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if dealer != plan.IsDealer(local.Self) || receiver != plan.IsReceiver(local.Self) {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("local party role does not match reshare start function"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("local party role does not match reshare start function"))
 	}
 
 	ctx := local.Ctx()
@@ -309,11 +310,11 @@ func startLifecycleReshare(plan *ResharePlan, runtime ReshareRuntime, dealer, re
 		}
 		if oldKey.state.Party != local.Self {
 			oldKey.Destroy()
-			return nil, nil, invalidPlanConfig(local.Self, errors.New("local self does not match lifecycle key share party"))
+			return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("local self does not match lifecycle key share party"))
 		}
 		if err := validateOldKeyMatchesResharePlan(oldKey, plan); err != nil {
 			oldKey.Destroy()
-			return nil, nil, invalidPlanConfig(local.Self, err)
+			return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 		}
 	}
 	keyOwned := oldKey != nil
@@ -326,7 +327,7 @@ func startLifecycleReshare(plan *ResharePlan, runtime ReshareRuntime, dealer, re
 	if receiver && !dealer {
 		sourceEpochDigest, digestErr := reshareSourceEpochDigest(plan)
 		if digestErr != nil {
-			return nil, nil, invalidPlanConfig(local.Self, digestErr)
+			return nil, nil, planvalidation.InvalidConfig(local.Self, digestErr)
 		}
 		anchor := tssrun.ReshareReceiverAnchor{
 			Source:              runtime.Binding,
@@ -376,7 +377,7 @@ func reshareSourceEpochDigest(plan *ResharePlan) ([]byte, error) {
 func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, dealer, receiver bool, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	localParty := local.Self
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(localParty, errors.New("nil reshare plan"))
+		return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("nil reshare plan"))
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.SessionID, localParty); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
@@ -403,26 +404,26 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 	}
 	if dealer {
 		if oldKey == nil || oldKey.state == nil {
-			return nil, nil, invalidPlanConfig(localParty, errors.New("dealer requires old key share"))
+			return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("dealer requires old key share"))
 		}
 		if oldKey.state.Party != localParty {
-			return nil, nil, invalidPlanConfig(localParty, errors.New("old key party does not match local party"))
+			return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("old key party does not match local party"))
 		}
 		if !plan.IsDealer(localParty) {
-			return nil, nil, invalidPlanConfig(localParty, errors.New("local party is not in dealer set"))
+			return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("local party is not in dealer set"))
 		}
 		if err := validateOldKeyMatchesResharePlan(oldKey, plan); err != nil {
-			return nil, nil, invalidPlanConfig(localParty, err)
+			return nil, nil, planvalidation.InvalidConfig(localParty, err)
 		}
 		if err := oldKey.requireMPCMaterial(plan.limits); err != nil {
 			return nil, nil, err
 		}
 	}
 	if receiver && !plan.IsReceiver(localParty) {
-		return nil, nil, invalidPlanConfig(localParty, errors.New("local party is not in new receiver set"))
+		return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("local party is not in new receiver set"))
 	}
 	if !dealer && !receiver {
-		return nil, nil, invalidPlanConfig(localParty, errors.New("reshare session requires dealer or receiver role"))
+		return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("reshare session requires dealer or receiver role"))
 	}
 	config := tss.ThresholdConfig{
 		Threshold:      plan.state.NewThreshold,
@@ -669,7 +670,7 @@ func (s *ReshareSession) applyValidatedInbound(env tss.Envelope) (out []tss.Enve
 				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
 				hashEvidenceField("reshare_commitment_payload_hash", env.Payload))
 		}
-		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		if err := s.validateDealerCommitments(env.From, p.Commitments); err != nil {
@@ -690,7 +691,7 @@ func (s *ReshareSession) applyValidatedInbound(env tss.Envelope) (out []tss.Enve
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		dd, ok := s.dealerData[env.From]
@@ -721,7 +722,7 @@ func (s *ReshareSession) applyValidatedInbound(env tss.Envelope) (out []tss.Enve
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		if err := s.verifyAndStoreReceiverMaterial(env, p); err != nil {
@@ -751,7 +752,7 @@ func (s *ReshareSession) applyValidatedInbound(env tss.Envelope) (out []tss.Enve
 				"reshare factor proof identity mismatch", tss.NewPartySet(env.From), errors.New("reshare factor proof identity mismatch"),
 				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
 		}
-		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, protocolErrorWithEvidence(tss.ErrCodeVerification, env, tss.EvidenceKindPaillierAux,
 				"reshare factor proof plan mismatch", tss.NewPartySet(env.From), err,
 				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
@@ -795,15 +796,6 @@ func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
 		return nil, false
 	}
 	return cloneKeyShareValue(s.newShare), true
-}
-
-// Result returns the completed receiver key share.
-func (s *ReshareSession) Result() (*KeyShare, error) {
-	share, ok := s.KeyShare()
-	if !ok {
-		return nil, errors.New("reshare result is not available")
-	}
-	return share, nil
 }
 
 func validateOldKeyMatchesResharePlan(oldKey *KeyShare, plan *ResharePlan) error {

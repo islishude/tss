@@ -239,7 +239,8 @@ store commit is part of completion rather than a caller-performed follow-up.
 | ------------------------ | --------------------------- | ------------------------------------------------------------------------------------------------- |
 | FROST Keygen             | `KeygenSession.KeyShare()`  | Encrypted local key-share write.                                                                  |
 | FROST Sign               | `SignSession.Signature()`   | Signature result visibility or request completion.                                                |
-| FROST Refresh/Reshare    | `ReshareSession.KeyShare()` | Application compare-and-swap and retirement policy.                                               |
+| FROST Refresh            | `RefreshSession.KeyShare()` | Application compare-and-swap and retirement policy.                                               |
+| FROST Reshare            | `ReshareSession.KeyShare()` | Application compare-and-swap and retirement policy.                                               |
 | CGGMP21 Keygen           | confirmed `KeyShare`        | Install one exact initial `GenerationBinding` only after Figure 6 and Figure 7/F.1 complete.      |
 | CGGMP21 Presign          | public `PersistedPresign`   | `CommitAvailablePresignFromLease` stores the normalized tuple and completes the lease atomically. |
 | CGGMP21 Sign             | `SignSession.Signature()`   | `CommitSignAttempt` before outbound release; `CompleteAttempt` before signature visibility.       |
@@ -317,9 +318,10 @@ against the expected current generation.
 ### FROST Ed25519 Reshare
 
 Public metadata includes a fresh reshare session ID, old key generation ID, old
-dealer set, new recipient set, and new threshold. Old parties call
-`ed25519.StartReshare`; new-only recipients call
-`ed25519.StartReshareRecipient`. All parties dispatch inbound envelopes to the
+dealer set, new receiver set, and new threshold. Old-only parties call
+`ed25519.StartReshareDealer`; new-only parties call
+`ed25519.StartReshareReceiver`; overlap parties call
+`ed25519.StartReshareOverlap`. All parties dispatch inbound envelopes to the
 session's `Handle` method and route any returned envelopes.
 
 The control plane owns the cutover. It must not retire the old generation until
@@ -365,7 +367,7 @@ there is no cross-machine or caller-owned secret presign object.
 
 Public metadata includes a fresh signing session ID, exact generation binding,
 canonical public presign slot, unique attempt ID, signer set exactly matching
-the Figure 8 artifact, delivery policy, and `SignIntent`. The session ID belongs
+the Figure 8 artifact, delivery policy, and `tss.SignIntent`. The session ID belongs
 to this online attempt, not to the earlier presign run.
 
 Each signer constructs `NewSignPlan` from its public persisted metadata and

@@ -18,8 +18,12 @@ func TestDeriveNonHardenedBIP32MatchesPublicMetadata(t *testing.T) {
 		t.Fatal("missing public metadata")
 	}
 	path := tss.DerivationPath{0, 7}
+	limits := testLimits()
+	if _, err := share.Derive(path); err == nil {
+		t.Fatal("production derivation accepted a 1-of-1 key share")
+	}
 
-	fromShare, err := share.Derive(path)
+	fromShare, err := share.DeriveWithLimits(path, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +44,7 @@ func TestDeriveNonHardenedBIP32HardenedPathRejected(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygenHD(t, 1, 1)
-	_, err := shares[1].Derive(tss.DerivationPath{0, tss.HardenedKeyStart})
+	_, err := shares[1].DeriveWithLimits(tss.DerivationPath{0, tss.HardenedKeyStart}, testLimits())
 	if !errors.Is(err, tss.ErrHardenedDerivationUnsupported) {
 		t.Fatalf("expected hardened path rejection, got %v", err)
 	}
@@ -49,11 +53,12 @@ func TestDeriveNonHardenedBIP32HardenedPathRejected(t *testing.T) {
 func TestKeyShareDeriveRejectsDestroyedOrInconsistentShare(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
+	limits := testLimits()
 
 	t.Run("destroyed", func(t *testing.T) {
 		share := cloneKeyShareValue(shares[1])
 		share.Destroy()
-		if _, err := share.Derive(tss.DerivationPath{0}); err == nil {
+		if _, err := share.DeriveWithLimits(tss.DerivationPath{0}, limits); err == nil {
 			t.Fatal("destroyed key share derived a child key")
 		}
 	})
@@ -62,7 +67,7 @@ func TestKeyShareDeriveRejectsDestroyedOrInconsistentShare(t *testing.T) {
 		share := cloneKeyShareValue(shares[1])
 		defer share.Destroy()
 		share.state.ChainCode[0] ^= 0xff
-		if _, err := share.Derive(tss.DerivationPath{0}); err == nil {
+		if _, err := share.DeriveWithLimits(tss.DerivationPath{0}, limits); err == nil {
 			t.Fatal("inconsistent key share derived a child key")
 		}
 	})

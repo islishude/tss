@@ -70,7 +70,7 @@ func TestCGGMP21RefreshMixedSourceGenerationsRejectsWithoutStateMutation(t *test
 		t.Fatalf("mixed-generation commitment emitted %d envelopes", len(out))
 	}
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
+	if !errors.Is(protocolErr.Err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("mixed-generation commitment error = %v, want plan mismatch", protocolErr.Err)
 	}
 	remote := newGenerationSession.auxInfo.slots[2]

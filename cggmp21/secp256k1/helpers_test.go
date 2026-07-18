@@ -297,21 +297,21 @@ func loadPersistedPresignForTest(session *PresignSession) (*Presign, error) {
 	if err := presign.UnmarshalBinaryWithLimits(candidate.Blob, session.limits); err != nil {
 		return nil, err
 	}
-	if err := presign.VerifyCryptographicMaterialWithLimits(session.limits); err != nil {
+	if err := presign.ValidateWithLimits(session.limits); err != nil {
 		presign.Destroy()
 		return nil, err
 	}
 	return &presign, nil
 }
 
-func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request tss.SignRequest, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(key.state.Party, testCGGMP21GuardParties(key.state.Parties, key.state.Party), sessionID)
 	})
 	return startCGGMP21SignWithLocal(key, presign, sessionID, request, tss.LocalConfig{Self: key.state.Party}, guard)
 }
 
-func startCGGMP21SignWithLocal(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+func startCGGMP21SignWithLocal(key *KeyShare, presign *Presign, sessionID tss.SessionID, request tss.SignRequest, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	metadata, ok := presign.PublicMetadata()
 	if !ok {
 		return nil, nil, errors.New("invalid public presign metadata")
@@ -319,7 +319,7 @@ func startCGGMP21SignWithLocal(key *KeyShare, presign *Presign, sessionID tss.Se
 	plan, err := NewSignPlan(SignPlanOption{
 		Key:     key,
 		Presign: metadata,
-		Intent: SignIntent{
+		Intent: tss.SignIntent{
 			SessionID: sessionID,
 			Context:   request.Context,
 			Message:   request.Message,
@@ -358,7 +358,7 @@ func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ..
 	return StartRefresh(plan, runtime)
 }
 
-func startCGGMP21ReshareDealer(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
+func startCGGMP21ReshareDealer(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(oldKey.state.Party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), oldKey.state.Party), plan.state.SessionID)
 	})
@@ -369,7 +369,7 @@ func startCGGMP21ReshareDealer(oldKey *KeyShare, plan *ResharePlan, rng io.Reade
 	return StartReshareDealer(plan, runtime)
 }
 
-func startCGGMP21ReshareReceiver(plan *ResharePlan, localParty tss.PartyID, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
+func startCGGMP21ReshareReceiver(plan *ResharePlan, localParty tss.PartyID, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(localParty, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), localParty), plan.state.SessionID)
 	})
@@ -380,7 +380,7 @@ func startCGGMP21ReshareReceiver(plan *ResharePlan, localParty tss.PartyID, rng 
 	return StartReshareReceiver(plan, runtime)
 }
 
-func startCGGMP21ReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
+func startCGGMP21ReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(oldKey.state.Party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), oldKey.state.Party), plan.state.SessionID)
 	})
@@ -774,7 +774,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		tb.Fatal("chi share: " + err.Error())
 	}
 	return &Presign{state: &presignState{
-		Consumed:       NewAtomicBoolWire(false),
+		Consumed:       newAtomicBool(),
 		attempt:        newPresignAttemptBinding(false),
 		SecurityParams: testSecurityParams(),
 		Party:          1,

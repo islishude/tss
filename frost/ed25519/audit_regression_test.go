@@ -19,7 +19,7 @@ func TestFROSTReshareStartRejectsNilPlan(t *testing.T) {
 		{
 			name: "dealer",
 			start: func() error {
-				_, out, err := StartReshare(shares[1], nil, tss.LocalConfig{Self: 1}, nil)
+				_, out, err := StartReshareDealer(shares[1], nil, tss.LocalConfig{Self: 1}, nil)
 				if out != nil {
 					t.Fatal("nil reshare plan produced outbound messages")
 				}
@@ -27,9 +27,12 @@ func TestFROSTReshareStartRejectsNilPlan(t *testing.T) {
 			},
 		},
 		{
-			name: "recipient",
+			name: "receiver",
 			start: func() error {
-				_, err := StartReshareRecipient(nil, tss.LocalConfig{Self: 3}, nil)
+				_, out, err := StartReshareReceiver(nil, tss.LocalConfig{Self: 3}, nil)
+				if out != nil {
+					t.Fatal("nil reshare plan produced outbound messages")
+				}
 				return err
 			},
 		},
@@ -100,7 +103,7 @@ func TestFROSTRefreshPlanRejectsMixedSourceGenerations(t *testing.T) {
 	defer oldGenerationSession.Destroy()
 
 	oldCommitment := mustFROSTEnvelope(t, oldOut, payloadReshareCommitments, tss.BroadcastPartyId)
-	if _, err := newGenerationSession.Handle(testutil.DeliverEnvelope(oldCommitment)); err == nil || !errors.Is(err, errPlanHashMismatch) {
+	if _, err := newGenerationSession.Handle(testutil.DeliverEnvelope(oldCommitment)); err == nil || !errors.Is(err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("expected mixed source generation plan mismatch, got %v", err)
 	}
 	if _, ok := newGenerationSession.commits[2]; ok {

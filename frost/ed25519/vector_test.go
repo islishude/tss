@@ -125,6 +125,7 @@ func TestFROSTProtocolFormatRegressionVectors(t *testing.T) {
 		t.Run(v.Description, func(t *testing.T) {
 			// Regenerate key shares from the same seed and verify consistency.
 			shares := frostVectorKeygen(t, v.Seed, v.Threshold, v.N)
+			limits := testLimits()
 
 			// Verify group public key matches.
 			if hex.EncodeToString(shares[0].state.PublicKey.Bytes()) != v.GroupPublicKey {
@@ -133,7 +134,7 @@ func TestFROSTProtocolFormatRegressionVectors(t *testing.T) {
 
 			// Verify key share round-trip: serialized form must match stored vectors.
 			for i, share := range shares {
-				raw, err := share.MarshalBinary()
+				raw, err := share.MarshalBinaryWithLimits(limits)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -142,11 +143,11 @@ func TestFROSTProtocolFormatRegressionVectors(t *testing.T) {
 					t.Fatalf("key share %d encoding changed — possible wire format regression", i+1)
 				}
 				// Verify deserialized share validates.
-				restored, err := tss.DecodeBinary[KeyShare](raw)
+				restored, err := tss.DecodeBinaryWithLimits[KeyShare](raw, limits)
 				if err != nil {
 					t.Fatalf("UnmarshalKeyShare: %v", err)
 				}
-				if err := restored.Validate(); err != nil {
+				if err := restored.ValidateWithLimits(limits); err != nil {
 					t.Fatalf("restored key share validation: %v", err)
 				}
 				if !restored.state.PublicKey.Equal(share.state.PublicKey) {
@@ -164,8 +165,7 @@ func TestFROSTProtocolFormatRegressionVectors(t *testing.T) {
 			for j, pid := range v.Signers {
 				signerShares[j] = shares[pid-1]
 			}
-			limits := testLimits()
-			pub, sig, err := signFROSTSimulationWithOptions(msg, signerShares, SignOptions{Context: testFROSTSigningContext(), Limits: &limits})
+			pub, sig, err := signFROSTSimulationWithOptions(msg, signerShares, testSignOptions{Context: testFROSTSigningContext(), Limits: &limits})
 			if err != nil {
 				t.Fatalf("Sign: %v", err)
 			}

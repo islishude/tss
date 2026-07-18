@@ -135,7 +135,7 @@ func TestFROSTReshareDealerOnlyAcceptsTargetScopedConfirmationCertificate(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _, err := StartReshare(oldShares[1], plan, tss.LocalConfig{Self: 1}, guard)
+	session, _, err := StartReshareDealer(oldShares[1], plan, tss.LocalConfig{Self: 1}, guard)
 	if err != nil {
 		t.Fatal(err)
 	}

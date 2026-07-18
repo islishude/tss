@@ -13,6 +13,14 @@ import (
 	"github.com/islishude/tss/internal/testvectors"
 )
 
+func scalarBytes(x *big.Int) ([]byte, error) {
+	s, err := edcurve.ScalarFromBig(x)
+	if err != nil {
+		return nil, err
+	}
+	return s.Bytes(), nil
+}
+
 func TestGoldenKeyShare(t *testing.T) {
 	t.Parallel()
 	rng := rand.New(rand.NewSource(700)) //nolint:gosec // deterministic for golden test

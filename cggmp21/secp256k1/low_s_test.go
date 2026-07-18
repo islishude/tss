@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -46,7 +47,7 @@ func TestFast_VerifySignatureRejectsHighS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := SignRequest{
+	request := tss.SignRequest{
 		Context: testPresignContext(),
 		Message: []byte("canonical context-bound verification"),
 	}

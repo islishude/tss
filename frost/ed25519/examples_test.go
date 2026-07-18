@@ -55,7 +55,7 @@ func ExampleSign() {
 	}
 
 	message := []byte("hello frost")
-	publicKey, signature, err := runExampleFROSTSign(shares, parties, message, frost.SignOptions{})
+	publicKey, signature, err := runExampleFROSTSign(shares, parties, message, exampleFROSTSignOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -77,7 +77,7 @@ func ExampleSign_multiParty() {
 
 	signers := tss.NewPartySet(1, 3)
 	message := []byte("hello frost multi-party")
-	publicKey, signature, err := runExampleFROSTSign(shares, signers, message, frost.SignOptions{})
+	publicKey, signature, err := runExampleFROSTSign(shares, signers, message, exampleFROSTSignOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -108,7 +108,7 @@ func ExampleKeyShare() {
 	shares[1] = loaded
 
 	message := []byte("roundtrip test")
-	publicKey, signature, err := runExampleFROSTSign(shares, parties, message, frost.SignOptions{})
+	publicKey, signature, err := runExampleFROSTSign(shares, parties, message, exampleFROSTSignOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -139,7 +139,7 @@ func ExampleStartRefresh() {
 		panic(err)
 	}
 	security := newExampleFROSTSecurity(partySet)
-	sessions := make(map[tss.PartyID]*frost.ReshareSession, len(parties))
+	sessions := make(map[tss.PartyID]*frost.RefreshSession, len(parties))
 	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
 		guard, err := security.guard(id, partySet, sessionID)
@@ -180,7 +180,7 @@ func ExampleStartRefresh() {
 	fmt.Println("public key preserved:", oldPublicKey.Equal(refreshedMetadata.PublicKey))
 
 	message := []byte("post-refresh signing")
-	publicKey, signature, err := runExampleFROSTSign(refreshed, tss.NewPartySet(1, 2), message, frost.SignOptions{})
+	publicKey, signature, err := runExampleFROSTSign(refreshed, tss.NewPartySet(1, 2), message, exampleFROSTSignOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -190,8 +190,8 @@ func ExampleStartRefresh() {
 	// true
 }
 
-// ExampleStartReshare demonstrates adding a party while preserving the group key.
-func ExampleStartReshare() {
+// ExampleStartReshareOverlap demonstrates adding a party while preserving the group key.
+func ExampleStartReshareOverlap() {
 	oldParties := tss.NewPartySet(1, 2, 3)
 	newParties := tss.NewPartySet(1, 2, 3, 4)
 	allParties := tss.MergePartySet(oldParties, newParties)
@@ -227,7 +227,7 @@ func ExampleStartReshare() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := frost.StartReshare(shares[id], plan, tss.LocalConfig{Self: id}, guard)
+		session, out, err := frost.StartReshareOverlap(shares[id], plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			panic(err)
 		}
@@ -247,7 +247,7 @@ func ExampleStartReshare() {
 	if err != nil {
 		panic(err)
 	}
-	sessions[4], err = frost.StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: 4}, guard)
+	sessions[4], _, err = frost.StartReshareReceiver(recipientPlan, tss.LocalConfig{Self: 4}, guard)
 	if err != nil {
 		panic(err)
 	}
@@ -277,7 +277,7 @@ func ExampleStartReshare() {
 	fmt.Println("public key preserved:", oldPublicKey.Equal(resharedMetadata.PublicKey))
 
 	message := []byte("post-reshare signing")
-	publicKey, signature, err := runExampleFROSTSign(reshared, tss.NewPartySet(2, 4), message, frost.SignOptions{})
+	publicKey, signature, err := runExampleFROSTSign(reshared, tss.NewPartySet(2, 4), message, exampleFROSTSignOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -307,7 +307,7 @@ func ExampleDeriveNonHardenedBIP32() {
 	}
 
 	message := []byte("bip32 derived signing")
-	_, signature, err := runExampleFROSTSign(shares, parties, message, frost.SignOptions{
+	_, signature, err := runExampleFROSTSign(shares, parties, message, exampleFROSTSignOptions{
 		Context: exampleFROSTSigningContext([]uint32{0, 1}),
 	})
 	if err != nil {

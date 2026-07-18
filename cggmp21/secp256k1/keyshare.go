@@ -17,6 +17,8 @@ import (
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
+var _ tss.KeyShare = (*KeyShare)(nil)
+
 // Algorithm returns the common algorithm identifier.
 func (k *KeyShare) Algorithm() tss.Algorithm {
 	return tss.AlgorithmCGGMP21Secp256k1

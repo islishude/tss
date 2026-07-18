@@ -12,6 +12,8 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+var _ tss.KeyShare = (*KeyShare)(nil)
+
 // Algorithm returns the common algorithm identifier.
 func (k *KeyShare) Algorithm() tss.Algorithm {
 	return tss.AlgorithmFROSTEd25519
@@ -56,10 +58,16 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 // derivation path of at most [tss.MaxDerivationDepth] indices. Destroyed or
 // inconsistent shares are rejected.
 func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
+	return k.DeriveWithLimits(path, DefaultLimits(), opts...)
+}
+
+// DeriveWithLimits validates the key share against explicit local resource
+// limits and resolves a non-hardened Ed25519-BIP32 derivation path.
+func (k *KeyShare) DeriveWithLimits(path tss.DerivationPath, limits Limits, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	if k == nil || k.state == nil {
 		return nil, errors.New("nil key share")
 	}
-	if err := k.ValidateConsistency(); err != nil {
+	if err := k.ValidateWithLimits(limits); err != nil {
 		return nil, fmt.Errorf("cannot derive from invalid key share: %w", err)
 	}
 	return DeriveNonHardenedBIP32(k.state.PublicKey.Bytes(), k.state.ChainCode, path.Clone(), opts...)
@@ -99,10 +107,7 @@ func (k *KeyShare) MarshalBinary() ([]byte, error) {
 // MarshalBinaryWithLimits encodes the share using canonical TLV wire format
 // with explicit local resource limits.
 func (k *KeyShare) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
-	if err := k.ValidateWithLimits(limits); err != nil {
-		return nil, err
-	}
-	return k.MarshalWireMessage(wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return k.marshalWireMessageWithLimits(limits)
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing key shares.
@@ -155,12 +160,6 @@ func (k KeyShare) redactedString() string {
 	)
 }
 
-// UnmarshalKeyShareWithLimits decodes a canonical FROST key-share record using
-// explicit local resource limits.
-func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
-	return tss.DecodeBinaryWithLimits[KeyShare](in, limits)
-}
-
 // UnmarshalBinary decodes a canonical FROST key-share record with size caps.
 func (k *KeyShare) UnmarshalBinary(in []byte) error {
 	return k.UnmarshalBinaryWithLimits(in, DefaultLimits())
@@ -169,15 +168,17 @@ func (k *KeyShare) UnmarshalBinary(in []byte) error {
 // UnmarshalBinaryWithLimits decodes a canonical FROST key-share record into the
 // receiver using explicit local resource limits.
 func (k *KeyShare) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	if k == nil {
+		return errors.New("nil key share")
+	}
 	if len(in) == 0 {
 		return errors.New("empty key share")
 	}
 	if len(in) > limits.State.MaxSerializedKeyShareBytes {
 		return fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
 	}
-	return k.UnmarshalWireMessage(in,
+	return k.unmarshalWireMessageWithLimits(in, limits,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
-		wire.WithFieldLimits(limits.fieldLimits()),
 	)
 }
 
@@ -236,9 +237,23 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	return nil
 }
 
+func (k *KeyShare) validateWithoutConfirmationsWithLimits(limits Limits) error {
+	if err := k.validateResourceLimits(limits); err != nil {
+		return err
+	}
+	if err := limits.Threshold.ValidateThreshold(k.state.Threshold, len(k.state.Parties)); err != nil {
+		return err
+	}
+	return k.validateWithoutConfirmations()
+}
+
 // Validate checks share structure, canonical scalar/point encodings, and the
-// mandatory complete lifecycle confirmation set.
+// mandatory complete lifecycle confirmation set against production limits.
 func (k *KeyShare) Validate() error {
+	return k.ValidateWithLimits(DefaultLimits())
+}
+
+func (k *KeyShare) validateConfirmationSet() error {
 	if err := k.validateWithoutConfirmations(); err != nil {
 		return err
 	}
@@ -264,19 +279,34 @@ func (k *KeyShare) Validate() error {
 // ValidateConsistency checks that the key share's cryptographic invariants hold:
 // the public key matches the group commitments, each verification share is derived
 // from those commitments, and the local secret share is consistent with its
-// verification share. Call this after UnmarshalKeyShare or before using a key
-// share recovered from persistent storage.
+// verification share. Call this after decoding or before using a key share
+// recovered from persistent storage.
 func (k *KeyShare) ValidateConsistency() error {
-	if err := k.Validate(); err != nil {
+	return k.ValidateWithLimits(DefaultLimits())
+}
+
+func (k *KeyShare) validateConsistency() error {
+	if err := k.validateConfirmationSet(); err != nil {
 		return err
 	}
 	return k.validateConsistencyWithoutConfirmations()
+}
+
+func (k *KeyShare) validateConsistencyWithoutConfirmationsWithLimits(limits Limits) error {
+	if err := k.validateWithoutConfirmationsWithLimits(limits); err != nil {
+		return err
+	}
+	return k.validateConsistencyMaterial()
 }
 
 func (k *KeyShare) validateConsistencyWithoutConfirmations() error {
 	if err := k.validateWithoutConfirmations(); err != nil {
 		return err
 	}
+	return k.validateConsistencyMaterial()
+}
+
+func (k *KeyShare) validateConsistencyMaterial() error {
 	if !k.state.GroupCommitments.PublicKey().Equal(k.state.PublicKey) {
 		return errors.New("group public key does not match first group commitment")
 	}

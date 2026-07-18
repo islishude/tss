@@ -71,8 +71,8 @@ func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err
 	return s.handlePaperKeygenLocked(env)
 }
 
-// Complete returns a defensive copy of the confirmed local key share.
-func (s *KeygenSession) Complete() (*KeyShare, bool) {
+// KeyShare returns a defensive copy of the confirmed local key share.
+func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
 	if s == nil {
 		return nil, false
 	}
@@ -83,9 +83,6 @@ func (s *KeygenSession) Complete() (*KeyShare, bool) {
 	}
 	return cloneKeyShareValue(s.keyShare), true
 }
-
-// KeyShare returns a defensive copy of the confirmed local key share.
-func (s *KeygenSession) KeyShare() (*KeyShare, bool) { return s.Complete() }
 
 // Figure7Failure returns a public-only terminal Figure 7 accusation result.
 func (s *KeygenSession) Figure7Failure() (Figure7Failure, bool) {
@@ -103,7 +100,7 @@ func (s *KeygenSession) Figure7Failure() (Figure7Failure, bool) {
 func (s *KeygenSession) terminalFigure7Failure(failure *Figure7Failure) {
 	s.abort()
 	s.figure7Failure = cloneFigure7Failure(failure)
-	// tssrun.Completed is a terminal-disposition signal. Complete/KeyShare still
+	// tssrun.Completed is a terminal-disposition signal. KeyShare still
 	// reject this aborted outcome because state is keygenAborted.
 	s.completed = true
 }

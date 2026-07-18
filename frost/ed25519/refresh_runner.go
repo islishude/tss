@@ -24,6 +24,8 @@ type refreshRunner struct {
 	limits       *Limits
 }
 
+var _ tss.RefreshRunner[*KeyShare] = (*refreshRunner)(nil)
+
 // NewRefreshRunner constructs a FROST adapter for [tss.RefreshScheduler].
 func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare] {
 	runner := &refreshRunner{
@@ -79,24 +81,5 @@ func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, con
 	if err != nil {
 		return nil, nil, err
 	}
-	return frostRefreshSession{session}, out, nil
-}
-
-type frostRefreshSession struct {
-	session *ReshareSession
-}
-
-// Handle applies one inbound FROST refresh envelope.
-func (s frostRefreshSession) Handle(in tss.InboundEnvelope) ([]tss.Envelope, error) {
-	return s.session.Handle(in)
-}
-
-// KeyShare returns the refreshed FROST key share after completion.
-func (s frostRefreshSession) KeyShare() (*KeyShare, bool) {
-	return s.session.KeyShare()
-}
-
-// Destroy clears secret material retained by the FROST refresh session.
-func (s frostRefreshSession) Destroy() {
-	s.session.Destroy()
+	return session, out, nil
 }

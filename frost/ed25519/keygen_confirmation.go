@@ -21,7 +21,7 @@ type KeygenConfirmation struct {
 	SessionID       tss.SessionID  `wire:"1,bytes,len=32"`
 	Sender          tss.PartyID    `wire:"2,u32"`
 	Threshold       int            `wire:"3,u32"`
-	Parties         tss.PartySet   `wire:"4,u32list"`
+	Parties         tss.PartySet   `wire:"4,u32list,max_items=parties"`
 	PublicKey       PublicKeyPoint `wire:"5,custom,len=32"`
 	TranscriptHash  []byte         `wire:"6,bytes,len=32"`
 	CommitmentsHash []byte         `wire:"7,bytes,len=32"`
@@ -37,7 +37,13 @@ func (KeygenConfirmation) WireVersion() uint16 { return keygenConfirmationWireVe
 
 // NewConfirmation constructs a confirmation message from the local key share.
 func (k *KeyShare) NewConfirmation() (*KeygenConfirmation, error) {
-	if err := k.validateWithoutConfirmations(); err != nil {
+	return k.NewConfirmationWithLimits(DefaultLimits())
+}
+
+// NewConfirmationWithLimits constructs a confirmation using explicit local
+// validation limits.
+func (k *KeyShare) NewConfirmationWithLimits(limits Limits) (*KeygenConfirmation, error) {
+	if err := k.validateWithoutConfirmationsWithLimits(limits); err != nil {
 		return nil, fmt.Errorf("cannot build keygen confirmation: %w", err)
 	}
 	if k.state.ConfirmationMode == keyShareConfirmationModeKeygenContributions {
@@ -106,6 +112,9 @@ func (c KeygenConfirmation) Validate() error {
 	if len(c.Parties) == 0 {
 		return errors.New("keygen confirmation: empty party set")
 	}
+	if c.Threshold > len(c.Parties) {
+		return errors.New("keygen confirmation: threshold exceeds party count")
+	}
 	if err := c.PublicKey.Validate(); err != nil {
 		return fmt.Errorf("keygen confirmation: invalid public key: %w", err)
 	}
@@ -130,12 +139,32 @@ func (c KeygenConfirmation) Validate() error {
 	return nil
 }
 
+// ValidateWithLimits checks the confirmation against explicit local resource
+// and threshold-policy limits.
+func (c KeygenConfirmation) ValidateWithLimits(limits Limits) error {
+	if len(c.Parties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("keygen confirmation: too many parties: %d > %d", len(c.Parties), limits.Threshold.MaxParties)
+	}
+	if c.Threshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("keygen confirmation: threshold too large: %d > %d", c.Threshold, limits.Threshold.MaxThreshold)
+	}
+	if err := limits.Threshold.ValidateThreshold(c.Threshold, len(c.Parties)); err != nil {
+		return fmt.Errorf("keygen confirmation: %w", err)
+	}
+	return c.Validate()
+}
+
 // MarshalBinary encodes the confirmation using the object-level wire codec.
 func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
-	if err := c.Validate(); err != nil {
+	return c.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the confirmation with explicit local limits.
+func (c KeygenConfirmation) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	if err := c.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(c)
+	return wire.Marshal(c, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 // UnmarshalBinary decodes a canonical TLV keygen confirmation.
@@ -153,7 +182,7 @@ func (c *KeygenConfirmation) UnmarshalBinaryWithLimits(in []byte, limits Limits)
 	); err != nil {
 		return err
 	}
-	if err := decoded.Validate(); err != nil {
+	if err := decoded.ValidateWithLimits(limits); err != nil {
 		return err
 	}
 	*c = *decoded.Clone()
@@ -166,10 +195,10 @@ func keygenGroupCommitmentsHash(commitments [][]byte) []byte {
 	return t.Sum()
 }
 
-func keygenConfirmationSetHash(confirmations []*KeygenConfirmation) []byte {
+func keygenConfirmationSetHash(confirmations []*KeygenConfirmation, limits Limits) []byte {
 	t := transcript.New(keygenConfirmationWireType)
 	for _, confirmation := range confirmations {
-		encoded, err := confirmation.MarshalBinary()
+		encoded, err := confirmation.MarshalBinaryWithLimits(limits)
 		if err != nil {
 			return nil
 		}

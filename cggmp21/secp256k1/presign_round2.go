@@ -9,6 +9,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -31,7 +32,7 @@ func (s *PresignSession) buildAcceptPresignRound2Tx(env tss.Envelope) (*acceptPr
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round and duplicate checks done in dispatcher)
-	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("presign", p.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {

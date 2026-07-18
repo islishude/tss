@@ -38,7 +38,7 @@ func Example_full_lifecycle() {
 	if err != nil {
 		panic(err)
 	}
-	request := cggmp.SignRequest{
+	request := tss.SignRequest{
 		Context: ctx,
 		Message: []byte("example full lifecycle"),
 	}
@@ -69,7 +69,7 @@ func Example_multiParty() {
 	if err != nil {
 		panic(err)
 	}
-	request := cggmp.SignRequest{
+	request := tss.SignRequest{
 		Context: ctx,
 		Message: []byte("multi-party threshold signature"),
 	}
@@ -165,7 +165,7 @@ func ExampleStartRefresh() {
 	if err != nil {
 		panic(err)
 	}
-	request := cggmp.SignRequest{
+	request := tss.SignRequest{
 		Context: ctx,
 		Message: []byte("post-refresh signing"),
 	}
@@ -278,9 +278,9 @@ func ExampleStartReshareDealer() {
 
 	reshared := make(map[tss.PartyID]*cggmp.KeyShare, len(newParties))
 	for _, id := range newParties {
-		share, err := sessions[id].Result()
-		if err != nil {
-			panic(err)
+		share, ok := sessions[id].KeyShare()
+		if !ok {
+			panic("reshare key share is not available")
 		}
 		reshared[id] = share
 	}
@@ -296,7 +296,7 @@ func ExampleStartReshareDealer() {
 	if err != nil {
 		panic(err)
 	}
-	request := cggmp.SignRequest{
+	request := tss.SignRequest{
 		Context: ctx,
 		Message: []byte("post-reshare signing"),
 	}

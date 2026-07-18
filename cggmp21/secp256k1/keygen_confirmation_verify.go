@@ -32,7 +32,7 @@ func compareKeygenConfirmationBindingFields(local, confirmation *KeygenConfirmat
 		return fmt.Errorf("keygen confirmation commitments mismatch from party %d", confirmation.Sender)
 	}
 	if !bytes.Equal(confirmation.PlanHash, local.PlanHash) {
-		return fmt.Errorf("keygen confirmation from party %d: %w", confirmation.Sender, errPlanHashMismatch)
+		return fmt.Errorf("keygen confirmation from party %d: %w", confirmation.Sender, tss.ErrPlanHashMismatch)
 	}
 	if !bytes.Equal(confirmation.EpochID, local.EpochID) {
 		return fmt.Errorf("keygen confirmation epoch mismatch from party %d", confirmation.Sender)

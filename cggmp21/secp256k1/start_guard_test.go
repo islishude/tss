@@ -26,7 +26,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	minimalPresign := func() *Presign {
-		return &Presign{state: &presignState{Consumed: NewAtomicBoolWire(false), attempt: newPresignAttemptBinding(false)}}
+		return &Presign{state: &presignState{Consumed: newAtomicBool(), attempt: newPresignAttemptBinding(false)}}
 	}
 	keygenPlan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,

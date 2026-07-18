@@ -119,6 +119,15 @@ func TestFROSTRefreshAndResharePlanSnapshotsReturnOwnedCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !reshare.IsDealer(1) || reshare.IsReceiver(1) || reshare.IsOverlap(1) {
+		t.Fatal("old-only party has inconsistent reshare roles")
+	}
+	if !reshare.IsDealer(2) || !reshare.IsReceiver(2) || !reshare.IsOverlap(2) {
+		t.Fatal("overlap party has inconsistent reshare roles")
+	}
+	if reshare.IsDealer(4) || !reshare.IsReceiver(4) || reshare.IsOverlap(4) {
+		t.Fatal("new-only party has inconsistent reshare roles")
+	}
 	reshareSnapshot, ok := reshare.Snapshot()
 	if !ok {
 		t.Fatal("missing reshare plan snapshot")
@@ -149,13 +158,27 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 
 	limits := testLimits()
 	plan, err := NewSignPlan(SignPlanOption{
-		Key: shares[1], SessionID: sessionID, Signers: signers, Context: testFROSTSigningContext(), Message: message, Limits: &limits,
+		Key: shares[1],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   signers,
+			Context:   testFROSTSigningContext(),
+			Message:   message,
+		},
+		Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	same, err := NewSignPlan(SignPlanOption{
-		Key: shares[2], SessionID: sessionID, Signers: tss.NewPartySet(1, 2), Context: testFROSTSigningContext(), Message: message, Limits: &limits,
+		Key: shares[2],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   tss.NewPartySet(1, 2),
+			Context:   testFROSTSigningContext(),
+			Message:   message,
+		},
+		Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -168,18 +191,25 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	if !ok {
 		t.Fatal("missing sign plan snapshot")
 	}
-	snapshot.Signers[0] = 99
-	snapshot.Message[0] ^= 0xff
+	snapshot.Intent.Signers[0] = 99
+	snapshot.Intent.Message[0] ^= 0xff
 	again, ok := plan.Snapshot()
-	if !ok || !bytes.Equal(partyIDsBytes(again.Signers), partyIDsBytes(tss.NewPartySet(1, 2))) {
+	if !ok || !bytes.Equal(partyIDsBytes(again.Intent.Signers), partyIDsBytes(tss.NewPartySet(1, 2))) {
 		t.Fatal("sign plan signer snapshot or constructor aliases caller memory")
 	}
-	if !bytes.Equal(again.Message, []byte("plan-bound message")) {
+	if !bytes.Equal(again.Intent.Message, []byte("plan-bound message")) {
 		t.Fatal("sign plan message snapshot or constructor aliases caller memory")
 	}
 
 	otherMessage, err := NewSignPlan(SignPlanOption{
-		Key: shares[1], SessionID: sessionID, Signers: tss.NewPartySet(1, 2), Context: testFROSTSigningContext(), Message: []byte("other message"), Limits: &limits,
+		Key: shares[1],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   tss.NewPartySet(1, 2),
+			Context:   testFROSTSigningContext(),
+			Message:   []byte("other message"),
+		},
+		Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +218,14 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 
 	otherShares := frostKeygen(t, 2, 4)
 	otherKey, err := NewSignPlan(SignPlanOption{
-		Key: otherShares[1], SessionID: sessionID, Signers: tss.NewPartySet(1, 2), Context: testFROSTSigningContext(), Message: []byte("plan-bound message"), Limits: &limits,
+		Key: otherShares[1],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   tss.NewPartySet(1, 2),
+			Context:   testFROSTSigningContext(),
+			Message:   []byte("plan-bound message"),
+		},
+		Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,11 +240,13 @@ func TestFROSTSignPlanSignerCountPolicy(t *testing.T) {
 	context := testFROSTSigningContext()
 
 	defaultPlan, err := NewSignPlan(SignPlanOption{
-		Key:       shares[1],
-		SessionID: sessionID,
-		Signers:   tss.NewPartySet(3, 1, 2),
-		Context:   context,
-		Message:   message,
+		Key: shares[1],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   tss.NewPartySet(3, 1, 2),
+			Context:   context,
+			Message:   message,
+		},
 	})
 	if err != nil {
 		t.Fatalf("default limits rejected threshold-or-more signer set: %v", err)
@@ -216,19 +255,21 @@ func TestFROSTSignPlanSignerCountPolicy(t *testing.T) {
 	if !ok {
 		t.Fatal("missing default sign plan snapshot")
 	}
-	if !bytes.Equal(partyIDsBytes(defaultSnapshot.Signers), partyIDsBytes(tss.NewPartySet(1, 2, 3))) {
-		t.Fatalf("default signers = %v, want [1 2 3]", defaultSnapshot.Signers)
+	if !bytes.Equal(partyIDsBytes(defaultSnapshot.Intent.Signers), partyIDsBytes(tss.NewPartySet(1, 2, 3))) {
+		t.Fatalf("default signers = %v, want [1 2 3]", defaultSnapshot.Intent.Signers)
 	}
 
 	strictLimits := DefaultLimits()
 	strictLimits.Threshold.AllowOversizedSignerSet = false
 	strictPlan, err := NewSignPlan(SignPlanOption{
-		Key:       shares[1],
-		SessionID: sessionID,
-		Signers:   tss.NewPartySet(1, 2, 3),
-		Context:   context,
-		Message:   message,
-		Limits:    &strictLimits,
+		Key: shares[1],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   tss.NewPartySet(1, 2, 3),
+			Context:   context,
+			Message:   message,
+		},
+		Limits: &strictLimits,
 	})
 	if err == nil {
 		t.Fatal("explicit exact-threshold policy accepted an oversized signer set")
@@ -239,12 +280,14 @@ func TestFROSTSignPlanSignerCountPolicy(t *testing.T) {
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
 
 	exactPlan, err := NewSignPlan(SignPlanOption{
-		Key:       shares[1],
-		SessionID: sessionID,
-		Signers:   tss.NewPartySet(1, 2),
-		Context:   context,
-		Message:   message,
-		Limits:    &strictLimits,
+		Key: shares[1],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   tss.NewPartySet(1, 2),
+			Context:   context,
+			Message:   message,
+		},
+		Limits: &strictLimits,
 	})
 	if err != nil {
 		t.Fatalf("explicit exact-threshold policy rejected threshold signers: %v", err)
@@ -305,6 +348,7 @@ func TestFROSTEarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	}
 	s := &KeygenSession{
 		cfg:           tss.ThresholdConfig{SessionID: confirmation.SessionID},
+		limits:        testLimits(),
 		planHash:      mustKeyShareMetadata(t, shares[1]).PlanHash,
 		round1:        newFROSTKeygenRound1Inbox(tss.NewPartySet(confirmation.Sender)),
 		confirmations: newFROSTKeygenConfirmationInbox(tss.NewPartySet(confirmation.Sender)),
@@ -315,7 +359,7 @@ func TestFROSTEarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		Payload: payload,
 	})
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
+	if !errors.Is(protocolErr.Err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("confirmation error = %v, want plan mismatch sentinel", protocolErr.Err)
 	}
 	if countNonNilConfirmations(s.confirmations) != 0 || countNonNilChainCodes(s.confirmations) != 0 {

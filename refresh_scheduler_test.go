@@ -367,6 +367,50 @@ func TestRefreshSchedulerCommitOwnership(t *testing.T) {
 	}
 }
 
+func TestRefreshSchedulerReloadsCurrentShareBeforeEveryExternalCommit(t *testing.T) {
+	t.Parallel()
+	current := &refreshTestShare{name: "generation-1"}
+	var starts, commits int
+	runner := &refreshTestRunner{start: func(_ context.Context, loaded *refreshTestShare, _ RefreshRunConfig) (RefreshSession[*refreshTestShare], []Envelope, error) {
+		starts++
+		if loaded != current {
+			t.Fatalf("run %d loaded stale share %q, current is %q", starts, loaded.name, current.name)
+		}
+		refreshed := &refreshTestShare{name: fmt.Sprintf("generation-%d", starts+1)}
+		return &refreshTestSession{refreshed: refreshed, complete: true}, nil, nil
+	}}
+	options := refreshTestOptions(runner, &refreshTestTransport{})
+	options.LoadKeyShare = func(context.Context) (*refreshTestShare, error) {
+		return current, nil
+	}
+	options.SessionIDSource = func(context.Context, *refreshTestShare) (SessionID, error) {
+		return SessionID{byte(starts + 1)}, nil
+	}
+	options.CommitKeyShare = func(_ context.Context, previous, refreshed *refreshTestShare) error {
+		commits++
+		if previous != current {
+			t.Fatalf("commit %d previous share %q is not current %q", commits, previous.name, current.name)
+		}
+		current = refreshed
+		return nil
+	}
+	scheduler, err := NewRefreshScheduler(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for run := 1; run <= 2; run++ {
+		if err := scheduler.RunOnce(context.Background()); err != nil {
+			t.Fatalf("RunOnce %d: %v", run, err)
+		}
+	}
+	if starts != 2 || commits != 2 {
+		t.Fatalf("starts = %d, commits = %d, want 2 each", starts, commits)
+	}
+	if current.name != "generation-3" {
+		t.Fatalf("current generation = %q, want generation-3", current.name)
+	}
+}
+
 func TestRefreshSchedulerRejectsConcurrentRuns(t *testing.T) {
 	t.Parallel()
 	receiveStarted := make(chan struct{})

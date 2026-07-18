@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/zk/schnorr"
@@ -555,7 +556,7 @@ func (s *KeygenSession) handlePaperKeygenConfirmationLocked(env tss.InboundEnvel
 	if received.msg.Sender != base.From {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("paper keygen confirmation sender mismatch"))
 	}
-	if err := requirePlanHash("paper keygen confirmation", received.msg.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("paper keygen confirmation", received.msg.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if received.msg.SessionID != s.cfg.SessionID || received.msg.Threshold != s.cfg.Threshold ||

@@ -41,9 +41,10 @@ func generateFROSTVectors(t *testing.T, name string) {
 	for i := range vectors {
 		v := &vectors[i]
 		shares := frostVectorKeygen(t, v.Seed, v.Threshold, v.N)
+		limits := testLimits()
 		v.GroupPublicKey = hex.EncodeToString(mustKeyShareMetadata(t, shares[0]).PublicKey.Bytes())
 		for _, s := range shares {
-			raw, err := s.MarshalBinary()
+			raw, err := s.MarshalBinaryWithLimits(limits)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -58,8 +59,7 @@ func generateFROSTVectors(t *testing.T, name string) {
 		for j, pid := range v.Signers {
 			signerShares[j] = shares[pid-1]
 		}
-		limits := testLimits()
-		_, sig, err := signFROSTSimulationWithOptions(msg, signerShares, SignOptions{Context: testFROSTSigningContext(), Limits: &limits})
+		_, sig, err := signFROSTSimulationWithOptions(msg, signerShares, testSignOptions{Context: testFROSTSigningContext(), Limits: &limits})
 		if err != nil {
 			t.Fatal(err)
 		}

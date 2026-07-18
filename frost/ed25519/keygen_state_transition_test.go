@@ -514,12 +514,12 @@ func maliciousFROSTIdentityVerificationShareEnvelopes(t *testing.T, session *Key
 	chainCode := bytes.Repeat([]byte{0x6a}, 32)
 	t.Cleanup(func() { clear(chainCode) })
 	chainCodeCommitment := bip32util.ChainCodeCommitment(frostChainCodeCommitLabel, session.cfg.SessionID, dealer, chainCode)
-	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
+	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:     commitments,
 		ChainCodeCommit: chainCodeCommitment,
 		PlanHash:        bytes.Clone(session.planHash),
 		Proof:           mustFROSTKeygenProof(t, session, dealer, commitments, chainCodeCommitment, constantScalar),
-	}, session.limits)
+	}).MarshalBinaryWithLimits(session.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,10 +533,10 @@ func maliciousFROSTIdentityVerificationShareEnvelopes(t *testing.T, session *Key
 	if err != nil {
 		t.Fatal(err)
 	}
-	sharePayload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{
+	sharePayload, err := (keygenSharePayload{
 		Share:    secretShare,
 		PlanHash: bytes.Clone(session.planHash),
-	}, session.limits)
+	}).MarshalBinaryWithLimits(session.limits)
 	secretShare.Destroy()
 	if err != nil {
 		t.Fatal(err)
@@ -580,12 +580,12 @@ func maliciousFROSTIdentityAggregateEnvelopes(t *testing.T, session *KeygenSessi
 	chainCode := bytes.Repeat([]byte{0x5a}, 32)
 	t.Cleanup(func() { clear(chainCode) })
 	chainCodeCommitment := bip32util.ChainCodeCommitment(frostChainCodeCommitLabel, session.cfg.SessionID, dealer, chainCode)
-	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
+	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:     commitments,
 		ChainCodeCommit: chainCodeCommitment,
 		PlanHash:        bytes.Clone(session.planHash),
 		Proof:           mustFROSTKeygenProof(t, session, dealer, commitments, chainCodeCommitment, constantScalar),
-	}, session.limits)
+	}).MarshalBinaryWithLimits(session.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,10 +599,10 @@ func maliciousFROSTIdentityAggregateEnvelopes(t *testing.T, session *KeygenSessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	sharePayload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{
+	sharePayload, err := (keygenSharePayload{
 		Share:    secretShare,
 		PlanHash: bytes.Clone(session.planHash),
-	}, session.limits)
+	}).MarshalBinaryWithLimits(session.limits)
 	secretShare.Destroy()
 	if err != nil {
 		t.Fatal(err)

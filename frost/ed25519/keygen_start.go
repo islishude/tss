@@ -148,12 +148,12 @@ func emitFROSTKeygenRound1(s *KeygenSession, local *frostKeygenLocalMaterial) (o
 			clearEnvelopePayloads(out)
 		}
 	}()
-	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
+	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:     local.commitments.Clone(),
 		ChainCodeCommit: bytes.Clone(local.chainCodeCommit),
 		PlanHash:        bytes.Clone(s.planHash),
 		Proof:           local.proof.Clone(),
-	}, s.limits)
+	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -186,10 +186,10 @@ func emitFROSTKeygenRound2(s *KeygenSession, local *frostKeygenLocalMaterial) (o
 		if convertErr != nil {
 			return nil, convertErr
 		}
-		payload, marshalErr := marshalKeygenSharePayloadWithLimits(keygenSharePayload{
+		payload, marshalErr := (keygenSharePayload{
 			Share:    secretShare,
 			PlanHash: bytes.Clone(s.planHash),
-		}, s.limits)
+		}).MarshalBinaryWithLimits(s.limits)
 		secretShare.Destroy()
 		if marshalErr != nil {
 			return nil, marshalErr

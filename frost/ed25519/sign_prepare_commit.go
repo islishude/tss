@@ -84,7 +84,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	if err != nil {
 		return nil, false, err
 	}
-	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: zWire, PlanHash: s.planHash}, s.limits)
+	payload, err := (signPartialPayload{Z: zWire, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, false, err
 	}

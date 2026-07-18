@@ -11,7 +11,7 @@ import (
 
 const signContextHashLabel = "frost-ed25519-sign-context-v1"
 
-func prepareSignContext(key *KeyShare, ctx tss.SigningContext) (tss.SigningContext, []byte, *tss.DerivationResult, error) {
+func prepareSignContext(key *KeyShare, ctx tss.SigningContext, limits Limits) (tss.SigningContext, []byte, *tss.DerivationResult, error) {
 	if err := ctx.Validate(); err != nil {
 		return tss.SigningContext{}, nil, nil, err
 	}
@@ -21,7 +21,7 @@ func prepareSignContext(key *KeyShare, ctx tss.SigningContext) (tss.SigningConte
 	if key == nil || key.state == nil {
 		return tss.SigningContext{}, nil, nil, errors.New("nil key share")
 	}
-	derivation, err := key.Derive(ctx.Derivation.Path, tss.WithInvalidChildMode(ctx.Derivation.InvalidChildMode))
+	derivation, err := key.DeriveWithLimits(ctx.Derivation.Path, limits, tss.WithInvalidChildMode(ctx.Derivation.InvalidChildMode))
 	if err != nil {
 		return tss.SigningContext{}, nil, nil, err
 	}
@@ -52,20 +52,4 @@ func signContextHash(ctx tss.SigningContext) []byte {
 	t.AppendString("policy_domain", ctx.PolicyDomain)
 	t.AppendString("message_domain", ctx.MessageDomain)
 	return t.Sum()
-}
-
-func appendDerivationResultTranscript(t *transcript.Builder, result *tss.DerivationResult) {
-	if result == nil {
-		t.AppendString("derivation_scheme", "")
-		return
-	}
-	t.AppendString("derivation_scheme", string(result.Scheme))
-	t.AppendUint32List("requested_path", result.RequestedPath)
-	t.AppendUint32List("resolved_path", result.ResolvedPath)
-	t.AppendBytes("child_public_key", result.ChildPublicKey)
-	t.AppendBytes("child_chain_code", result.ChildChainCode)
-	t.AppendUint32("derivation_depth", uint32(result.Depth))
-	t.AppendBytes("parent_fingerprint", result.ParentFingerprint[:])
-	t.AppendUint32("child_number", result.ChildNumber)
-	t.AppendBytes("additive_shift", result.AdditiveShift)
 }

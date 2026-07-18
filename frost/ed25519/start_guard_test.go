@@ -24,8 +24,14 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 	}
 	limits := testLimits()
 	signPlan, err := NewSignPlan(SignPlanOption{
-		Key: shares[1], SessionID: sessionID, Signers: tss.NewPartySet(1, 2),
-		Context: testFROSTSigningContext(), Message: []byte("guard"), Limits: &limits,
+		Key: shares[1],
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   tss.NewPartySet(1, 2),
+			Context:   testFROSTSigningContext(),
+			Message:   []byte("guard"),
+		},
+		Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +46,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
+	receiverPlan, err := NewPublicResharePlan(PublicResharePlanOption{
 		OldPublicKey: shares[1].state.PublicKey.Bytes(), OldChainCode: shares[1].state.ChainCode, OldParties: parties, SessionID: sessionID,
 		OldGroupCommitments: shares[1].state.GroupCommitments.BytesList(), OldKeygenSessionID: shares[1].state.KeygenSessionID,
 		OldKeygenTranscriptHash: shares[1].state.KeygenTranscriptHash, OldPlanHash: shares[1].state.PlanHash,
@@ -89,21 +95,21 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			},
 		},
 		{
-			name:    "reshare dealer",
+			name:    "reshare overlap",
 			self:    1,
 			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, out, err := StartReshare(shares[1], resharePlan, tss.LocalConfig{Self: 1}, guard)
+				_, out, err := StartReshareOverlap(shares[1], resharePlan, tss.LocalConfig{Self: 1}, guard)
 				return out, err
 			},
 		},
 		{
-			name:    "reshare recipient",
+			name:    "reshare receiver",
 			self:    3,
 			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, err := StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: 3}, guard)
-				return nil, err
+				_, out, err := StartReshareReceiver(receiverPlan, tss.LocalConfig{Self: 3}, guard)
+				return out, err
 			},
 		},
 	}

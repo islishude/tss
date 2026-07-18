@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 
@@ -37,48 +36,6 @@ const (
 var ErrSignAttemptCorrupt = errors.New("sign attempt record corrupt")
 
 var errPresignSignerMissing = errors.New("sender is not in signer set")
-
-// SignRequest is the context-bound message to verify against a signature.
-// Message is hashed with the signing context before ECDSA verification.
-type SignRequest struct {
-	Context tss.SigningContext `json:"context"`
-	Message []byte             `json:"message"`
-}
-
-// Clone returns a caller-owned copy of the sign request.
-func (r SignRequest) Clone() SignRequest {
-	return SignRequest{
-		Context: r.Context.Clone(),
-		Message: slices.Clone(r.Message),
-	}
-}
-
-// SignIntent is the shared online signing intent all CGGMP21 signers must
-// accept before producing a partial signature.
-type SignIntent struct {
-	SessionID tss.SessionID
-	Context   tss.SigningContext
-	Message   []byte
-	Signers   tss.PartySet
-}
-
-// Clone returns a caller-owned copy of the sign intent.
-func (i SignIntent) Clone() SignIntent {
-	return SignIntent{
-		SessionID: i.SessionID,
-		Context:   i.Context.Clone(),
-		Message:   slices.Clone(i.Message),
-		Signers:   i.Signers.Clone(),
-	}
-}
-
-// Request returns the context-bound request represented by the intent.
-func (i SignIntent) Request() SignRequest {
-	return SignRequest{
-		Context: i.Context.Clone(),
-		Message: slices.Clone(i.Message),
-	}
-}
 
 // SignRuntime contains this process's local execution dependencies for
 // CGGMP21 online signing. These values are not shared intent and are not part
@@ -130,7 +87,7 @@ type presignState struct {
 	Derivation           *tss.DerivationResult         `wire:"19,record"` // Empty-path binding to the exact lifecycle generation public key and chain code.
 	Epoch                *EpochContext                 `wire:"20,record"` // Full public auxiliary epoch, including SID, RID, dynamic identifiers, and source epoch.
 
-	Consumed AtomicBoolWire         `wire:"-"`
+	Consumed atomicBool             `wire:"-"`
 	attempt  *presignAttemptBinding `wire:"-"`
 }
 
@@ -287,7 +244,8 @@ func (p *Presign) verificationKey() []byte {
 	return encoded
 }
 
-// Validate checks local presign structure and scalar/point encodings.
+// Validate checks the complete normalized Figure 8 artifact, including local
+// secret openings and aggregate commitment equations, under production limits.
 func (p *Presign) Validate() error {
 	if p == nil || p.state == nil {
 		return errors.New("nil presign")
@@ -298,8 +256,9 @@ func (p *Presign) Validate() error {
 	return p.ValidateWithLimits(DefaultLimits())
 }
 
-// ValidateWithLimits validates a presign using explicit local limits and the
-// security profile persisted in the artifact.
+// ValidateWithLimits checks the complete normalized Figure 8 artifact using
+// explicit local limits and the security profile persisted in the artifact.
+// Validation does not change one-use lifecycle state.
 func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if p == nil || p.state == nil {
 		return errors.New("nil presign")
@@ -385,18 +344,6 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 		return fmt.Errorf("invalid normalized presign artifact: %w", err)
 	}
 	return nil
-}
-
-// VerifySignMaterial performs complete cryptographic self-verification of the
-// persisted presign material.
-func (p *Presign) VerifySignMaterial() error {
-	return p.VerifySignMaterialWithLimits(DefaultLimits())
-}
-
-// VerifySignMaterialWithLimits is an alias for
-// [Presign.VerifyCryptographicMaterialWithLimits].
-func (p *Presign) VerifySignMaterialWithLimits(limits Limits) error {
-	return p.VerifyCryptographicMaterialWithLimits(limits)
 }
 
 // Destroy marks the presign consumed and clears its local secret shares.

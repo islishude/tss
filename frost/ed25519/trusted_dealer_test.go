@@ -297,7 +297,7 @@ func TestFROSTTrustedDealerCommitmentBindingsRejectBeforeAcceptance(t *testing.T
 				t.Fatal(err)
 			}
 			tc.mutate(&payload)
-			mutated, err := marshalKeygenCommitmentsPayloadWithLimits(payload, session1.limits)
+			mutated, err := payload.MarshalBinaryWithLimits(session1.limits)
 			if err != nil {
 				t.Fatal(err)
 			}

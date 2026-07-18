@@ -98,6 +98,10 @@ func (k *KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
+	return k.marshalWireMessageWithLimits(limits, opts...)
+}
+
+func (k *KeyShare) marshalWireMessageWithLimits(limits Limits, opts ...wire.MarshalOption) ([]byte, error) {
 	if err := k.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
@@ -115,6 +119,10 @@ func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption)
 	if err != nil {
 		return err
 	}
+	return k.unmarshalWireMessageWithLimits(in, limits, opts...)
+}
+
+func (k *KeyShare) unmarshalWireMessageWithLimits(in []byte, limits Limits, opts ...wire.UnmarshalOption) error {
 	opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
 	var state keyShareState
 	if err := wire.Unmarshal(in, &state, opts...); err != nil {
@@ -133,6 +141,16 @@ func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption)
 
 // ValidateWithLimits checks KeyShare against explicit local resource limits.
 func (k *KeyShare) ValidateWithLimits(limits Limits) error {
+	if err := k.validateResourceLimits(limits); err != nil {
+		return err
+	}
+	if err := limits.Threshold.ValidateThreshold(k.state.Threshold, len(k.state.Parties)); err != nil {
+		return err
+	}
+	return k.validateConsistency()
+}
+
+func (k *KeyShare) validateResourceLimits(limits Limits) error {
 	if k == nil || k.state == nil {
 		return errors.New("nil key share")
 	}
@@ -184,7 +202,7 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 			limits.Threshold.MaxParties,
 		)
 	}
-	return k.ValidateConsistency()
+	return nil
 }
 
 // Clone returns an independently owned deep copy of the key share.

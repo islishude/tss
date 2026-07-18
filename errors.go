@@ -130,6 +130,9 @@ var ErrReplayCacheFull = errors.New("replay cache full")
 // ErrInvalidSessionID is returned when a session is created with a zero or invalid session ID.
 var ErrInvalidSessionID = errors.New("invalid session id")
 
+// ErrPlanHashMismatch is returned when protocol input is bound to a different lifecycle plan.
+var ErrPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
+
 // ErrRefreshSchedulerRunning is returned when Run or RunOnce is called while
 // another scheduler run is active.
 var ErrRefreshSchedulerRunning = errors.New("refresh scheduler is already running")

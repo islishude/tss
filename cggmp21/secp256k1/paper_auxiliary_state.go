@@ -8,6 +8,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/sessiontx"
 	"github.com/islishude/tss/internal/shamir"
@@ -611,7 +612,7 @@ func (s *auxInfoState) prepareCommitment(env tss.Envelope) (*preparedAuxInfoInbo
 	if err != nil {
 		return nil, err
 	}
-	if err := requirePlanHash("auxinfo commitment", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("auxinfo commitment", payload.PlanHash, s.planHash); err != nil {
 		return nil, err
 	}
 	complete := true
@@ -656,7 +657,7 @@ func (s *auxInfoState) prepareReveal(env tss.Envelope) (*preparedAuxInfoInbound,
 	if err != nil {
 		return nil, err
 	}
-	if err := requirePlanHash("auxinfo reveal", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("auxinfo reveal", payload.PlanHash, s.planHash); err != nil {
 		return nil, err
 	}
 	if len(payload.PolynomialCommitments) != s.cfg.Threshold {
@@ -990,7 +991,7 @@ func (s *auxInfoState) prepareProofs(env tss.Envelope) (*preparedAuxInfoInbound,
 	if err != nil {
 		return nil, err
 	}
-	if err := requirePlanHash("auxinfo proofs", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("auxinfo proofs", payload.PlanHash, s.planHash); err != nil {
 		return nil, err
 	}
 	if payload.RID != s.rid || !bytes.Equal(payload.EpochID, s.epoch.EpochID) {
@@ -1044,7 +1045,7 @@ func (s *auxInfoState) prepareDirect(env tss.Envelope) (*preparedAuxInfoInbound,
 	if err != nil {
 		return nil, err
 	}
-	if err := requirePlanHash("auxinfo direct", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("auxinfo direct", payload.PlanHash, s.planHash); err != nil {
 		return nil, err
 	}
 	if payload.RID != s.rid {

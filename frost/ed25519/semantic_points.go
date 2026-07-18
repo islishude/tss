@@ -22,10 +22,60 @@ func pointEqual(a, b *fed.Point) bool {
 	return a.Equal(b) == 1
 }
 
-// PublicKeyPoint is a validated, non-identity Ed25519 group public key.
-type PublicKeyPoint struct {
+// semanticPoint centralizes the copy, equality, canonical encoding, and
+// non-identity validation shared by the protocol's semantic point wrappers.
+// The named wrappers remain distinct types so their roles cannot be mixed.
+type semanticPoint struct {
 	p *fed.Point
 }
+
+func newSemanticPointFromBytes(in []byte) (semanticPoint, error) {
+	p, err := edcurve.PointFromBytes(in)
+	if err != nil {
+		return semanticPoint{}, err
+	}
+	return semanticPoint{p: clonePoint(p)}, nil
+}
+
+func newSemanticPointFromPoint(p *fed.Point, nilError string) (semanticPoint, error) {
+	if p == nil {
+		return semanticPoint{}, errors.New(nilError)
+	}
+	return newSemanticPointFromBytes(p.Bytes())
+}
+
+func (p semanticPoint) bytes() []byte {
+	if p.p == nil {
+		return nil
+	}
+	return p.p.Bytes()
+}
+
+func (p semanticPoint) point() *fed.Point { return clonePoint(p.p) }
+
+func (p semanticPoint) equal(other semanticPoint) bool { return pointEqual(p.p, other.p) }
+
+func (p semanticPoint) clone() semanticPoint { return semanticPoint{p: clonePoint(p.p)} }
+
+func (p semanticPoint) isZero() bool { return p.p == nil }
+
+func (p semanticPoint) validate(missingError string) error {
+	if p.p == nil {
+		return errors.New(missingError)
+	}
+	_, err := edcurve.PointFromBytes(p.p.Bytes())
+	return err
+}
+
+func (p semanticPoint) marshalWireValue(missingError string) ([]byte, error) {
+	if err := p.validate(missingError); err != nil {
+		return nil, err
+	}
+	return p.bytes(), nil
+}
+
+// PublicKeyPoint is a validated, non-identity Ed25519 group public key.
+type PublicKeyPoint semanticPoint
 
 // NewPublicKeyPoint parses a canonical non-identity Ed25519 public key.
 func NewPublicKeyPoint(in []byte) (PublicKeyPoint, error) {
@@ -33,63 +83,54 @@ func NewPublicKeyPoint(in []byte) (PublicKeyPoint, error) {
 }
 
 func newPublicKeyPointFromBytes(in []byte) (PublicKeyPoint, error) {
-	p, err := edcurve.PointFromBytes(in)
+	p, err := newSemanticPointFromBytes(in)
 	if err != nil {
 		return PublicKeyPoint{}, err
 	}
-	return PublicKeyPoint{p: clonePoint(p)}, nil
+	return PublicKeyPoint(p), nil
 }
 
 func newPublicKeyPointFromPoint(p *fed.Point) (PublicKeyPoint, error) {
-	if p == nil {
-		return PublicKeyPoint{}, errors.New("nil public key point")
+	point, err := newSemanticPointFromPoint(p, "nil public key point")
+	if err != nil {
+		return PublicKeyPoint{}, err
 	}
-	return newPublicKeyPointFromBytes(p.Bytes())
+	return PublicKeyPoint(point), nil
 }
 
 // Bytes returns a caller-owned canonical encoding of the public key point.
 func (p PublicKeyPoint) Bytes() []byte {
-	if p.p == nil {
-		return nil
-	}
-	return p.p.Bytes()
+	return semanticPoint(p).bytes()
 }
 
 // Point returns an independent mutable copy of the public key point.
 func (p PublicKeyPoint) Point() *fed.Point {
-	return clonePoint(p.p)
+	return semanticPoint(p).point()
 }
 
 // Equal reports whether two public key points are equal.
 func (p PublicKeyPoint) Equal(other PublicKeyPoint) bool {
-	return pointEqual(p.p, other.p)
+	return semanticPoint(p).equal(semanticPoint(other))
 }
 
 // Clone returns an independent copy of the public key point.
 func (p PublicKeyPoint) Clone() PublicKeyPoint {
-	return PublicKeyPoint{p: clonePoint(p.p)}
+	return PublicKeyPoint(semanticPoint(p).clone())
 }
 
 // IsZero reports whether the point has not been initialized.
 func (p PublicKeyPoint) IsZero() bool {
-	return p.p == nil
+	return semanticPoint(p).isZero()
 }
 
 // Validate checks that the point is non-identity and in the prime-order subgroup.
 func (p PublicKeyPoint) Validate() error {
-	if p.p == nil {
-		return errors.New("missing public key point")
-	}
-	_, err := edcurve.PointFromBytes(p.p.Bytes())
-	return err
+	return semanticPoint(p).validate("missing public key point")
 }
 
 // MarshalWireValue returns the canonical wire encoding of the public key point.
 func (p PublicKeyPoint) MarshalWireValue() ([]byte, error) {
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	return p.Bytes(), nil
+	return semanticPoint(p).marshalWireValue("missing public key point")
 }
 
 // UnmarshalWireValue decodes a canonical non-identity public key point.
@@ -131,9 +172,7 @@ func (p *PublicKeyPoint) UnmarshalJSON(in []byte) error {
 //
 // FROST verification shares are non-identity prime-order elements. Malformed
 // encodings, the identity, and non-prime-order torsion points are rejected.
-type VerificationSharePoint struct {
-	p *fed.Point
-}
+type VerificationSharePoint semanticPoint
 
 // NewVerificationSharePoint parses a canonical Ed25519 verification share.
 func NewVerificationSharePoint(in []byte) (VerificationSharePoint, error) {
@@ -141,64 +180,55 @@ func NewVerificationSharePoint(in []byte) (VerificationSharePoint, error) {
 }
 
 func newVerificationSharePointFromBytes(in []byte) (VerificationSharePoint, error) {
-	p, err := edcurve.PointFromBytes(in)
+	p, err := newSemanticPointFromBytes(in)
 	if err != nil {
 		return VerificationSharePoint{}, err
 	}
-	return VerificationSharePoint{p: clonePoint(p)}, nil
+	return VerificationSharePoint(p), nil
 }
 
 func newVerificationSharePointFromPoint(p *fed.Point) (VerificationSharePoint, error) {
-	if p == nil {
-		return VerificationSharePoint{}, errors.New("nil verification share point")
+	point, err := newSemanticPointFromPoint(p, "nil verification share point")
+	if err != nil {
+		return VerificationSharePoint{}, err
 	}
-	return newVerificationSharePointFromBytes(p.Bytes())
+	return VerificationSharePoint(point), nil
 }
 
 // Bytes returns a caller-owned canonical encoding of the verification share.
 func (p VerificationSharePoint) Bytes() []byte {
-	if p.p == nil {
-		return nil
-	}
-	return p.p.Bytes()
+	return semanticPoint(p).bytes()
 }
 
 // Point returns an independent mutable copy of the verification share.
 func (p VerificationSharePoint) Point() *fed.Point {
-	return clonePoint(p.p)
+	return semanticPoint(p).point()
 }
 
 // Equal reports whether two verification shares are equal.
 func (p VerificationSharePoint) Equal(other VerificationSharePoint) bool {
-	return pointEqual(p.p, other.p)
+	return semanticPoint(p).equal(semanticPoint(other))
 }
 
 // Clone returns an independent copy of the verification share.
 func (p VerificationSharePoint) Clone() VerificationSharePoint {
-	return VerificationSharePoint{p: clonePoint(p.p)}
+	return VerificationSharePoint(semanticPoint(p).clone())
 }
 
 // IsZero reports whether the verification share has not been initialized.
 func (p VerificationSharePoint) IsZero() bool {
-	return p.p == nil
+	return semanticPoint(p).isZero()
 }
 
 // Validate checks that the verification share is non-identity and in the
 // prime-order subgroup.
 func (p VerificationSharePoint) Validate() error {
-	if p.p == nil {
-		return errors.New("missing verification share point")
-	}
-	_, err := edcurve.PointFromBytes(p.p.Bytes())
-	return err
+	return semanticPoint(p).validate("missing verification share point")
 }
 
 // MarshalWireValue returns the canonical wire encoding of the verification share.
 func (p VerificationSharePoint) MarshalWireValue() ([]byte, error) {
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	return p.Bytes(), nil
+	return semanticPoint(p).marshalWireValue("missing verification share point")
 }
 
 // UnmarshalWireValue decodes a canonical verification-share point.

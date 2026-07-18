@@ -58,7 +58,7 @@ func TestSignWithEmptyBIP32PathMatchesCurrentGeneration(t *testing.T) {
 	signers := tss.NewPartySet(1)
 	ctx := testPresignContext()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
-	request := SignRequest{Context: ctx, Message: []byte("empty path signing")}
+	request := tss.SignRequest{Context: ctx, Message: []byte("empty path signing")}
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

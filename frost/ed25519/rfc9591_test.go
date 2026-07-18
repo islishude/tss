@@ -223,12 +223,14 @@ func startRFC9591VectorSign(
 ) (*SignSession, []tss.Envelope, error) {
 	limits := testLimits()
 	plan, err := NewSignPlan(SignPlanOption{
-		Key:       key,
-		SessionID: sessionID,
-		Signers:   signers,
-		Context:   testFROSTSigningContext(),
-		Message:   message,
-		Limits:    &limits,
+		Key: key,
+		Intent: tss.SignIntent{
+			SessionID: sessionID,
+			Signers:   signers,
+			Context:   testFROSTSigningContext(),
+			Message:   message,
+		},
+		Limits: &limits,
 	})
 	if err != nil {
 		return nil, nil, err

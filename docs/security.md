@@ -435,7 +435,7 @@ completion accessor returns a share:
 
 ```go
 out, err := kg.Handle(env)
-share, ok := kg.KeyShare() // FROST; CGGMP21 also exposes Complete()
+share, ok := kg.KeyShare()
 ```
 
 CGGMP21/secp256k1 key shares are not valid for signing until the full
@@ -489,10 +489,19 @@ Caller integration responsibilities:
   derivation is unsupported;
 - authenticated keygen message delivery through the confirmation round before any presign/sign operation.
 
-`RefreshScheduler` coordinates local protocol execution but does not provide
-cross-node transactions, automatic retries, or session-ID agreement. CGGMP21
-deployments must still use the lifecycle lease and cutover transaction as the
-authoritative replacement boundary.
+`RefreshScheduler` uses an external-commit model: the protocol session produces
+a caller-owned candidate and `CommitKeyShare` is the sole durable replacement
+boundary. It does not provide cross-node transactions, automatic retries, or
+session-ID agreement.
+
+CGGMP21 refresh does not use that scheduler model. Its `RefreshSession` owns the
+exclusive lifecycle lease, generation fence, and `CommitCutover` transaction.
+Callers drive `StartRefresh` and `Handle` directly. If a durable cutover attempt
+returns an error while retaining a session, the caller must keep that exact
+session and reconcile it with `RetryLifecycleCommit`; it must not invoke a
+second external key-share commit or start a new refresh intent. After terminal
+reconciliation, the next refresh reloads the authoritative current
+`GenerationBinding` and uses a new session ID and target generation.
 
 ## One-Time Presigns
 
@@ -510,8 +519,8 @@ The private presign record contains `Gamma`, local `kTilde_i` and `chiTilde_i`,
 and signer-ordered `DeltaTilde_j` and `STilde_j`, together with exact epoch,
 plan, signer, context, and transcript bindings. Its binary encoding does not
 change lifecycle availability. Canonical decode is structural; use
-`VerifyCryptographicMaterialWithLimits` before importing a candidate outside
-the authoritative start path.
+`ValidateWithLimits` before importing a candidate outside the authoritative
+start path.
 
 `StartSign` loads the key generation and available candidate from
 `LifecycleStore`, canonically re-encodes them, performs full material checks,

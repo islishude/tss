@@ -78,7 +78,7 @@ func TestFROSTKeygenRogueConstantRejectedBeforeShareEffects(t *testing.T) {
 	// The attacker does not know its discrete logarithm, so retaining its proof
 	// for a different constant must fail before any confidential share is sent.
 	payload.Commitments.points[0] = fed.NewIdentityPoint().Negate(honestConstant)
-	mutated, err := marshalKeygenCommitmentsPayloadWithLimits(payload, session.limits)
+	mutated, err := payload.MarshalBinaryWithLimits(session.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestFROSTKeygenVerifiesAllProofsBeforeShareEffects(t *testing.T) {
 	response.Add(response, edcurve.ScalarOne())
 	payload.Proof.Response = response.Bytes()
 	response.Set(fed.NewScalar())
-	last.Payload, err = marshalKeygenCommitmentsPayloadWithLimits(payload, target.limits)
+	last.Payload, err = payload.MarshalBinaryWithLimits(target.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func mutateCanonicalFROSTKeygenShare(t *testing.T, session *KeygenSession, env t
 	}
 	defer mutated.Destroy()
 	payload.Share = mutated
-	raw, err := marshalKeygenSharePayloadWithLimits(payload, session.limits)
+	raw, err := payload.MarshalBinaryWithLimits(session.limits)
 	if err != nil {
 		t.Fatal(err)
 	}

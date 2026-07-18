@@ -8,58 +8,47 @@ import (
 )
 
 // nonceCommitmentPoint is a validated non-identity Ed25519 nonce commitment.
-type nonceCommitmentPoint struct {
-	p *fed.Point
-}
+type nonceCommitmentPoint semanticPoint
 
 func newNonceCommitmentPointFromPoint(point *fed.Point) (nonceCommitmentPoint, error) {
-	if point == nil {
-		return nonceCommitmentPoint{}, errors.New("nil nonce commitment point")
-	}
-	return newNonceCommitmentPointFromBytes(point.Bytes())
-}
-
-func newNonceCommitmentPointFromBytes(in []byte) (nonceCommitmentPoint, error) {
-	point, err := edcurve.PointFromBytes(in)
+	value, err := newSemanticPointFromPoint(point, "nil nonce commitment point")
 	if err != nil {
 		return nonceCommitmentPoint{}, err
 	}
-	return nonceCommitmentPoint{p: clonePoint(point)}, nil
+	return nonceCommitmentPoint(value), nil
+}
+
+func newNonceCommitmentPointFromBytes(in []byte) (nonceCommitmentPoint, error) {
+	point, err := newSemanticPointFromBytes(in)
+	if err != nil {
+		return nonceCommitmentPoint{}, err
+	}
+	return nonceCommitmentPoint(point), nil
 }
 
 // Point returns an independent mutable copy of the nonce commitment point.
 func (p nonceCommitmentPoint) Point() *fed.Point {
-	return clonePoint(p.p)
+	return semanticPoint(p).point()
 }
 
 // Bytes returns a caller-owned canonical encoding of the nonce commitment point.
 func (p nonceCommitmentPoint) Bytes() []byte {
-	if p.p == nil {
-		return nil
-	}
-	return p.p.Bytes()
+	return semanticPoint(p).bytes()
 }
 
 // Equal reports whether two nonce commitment points are equal.
 func (p nonceCommitmentPoint) Equal(other nonceCommitmentPoint) bool {
-	return pointEqual(p.p, other.p)
+	return semanticPoint(p).equal(semanticPoint(other))
 }
 
 // Validate checks that the nonce commitment is non-identity and prime order.
 func (p nonceCommitmentPoint) Validate() error {
-	if p.p == nil {
-		return errors.New("missing nonce commitment point")
-	}
-	_, err := edcurve.PointFromBytes(p.p.Bytes())
-	return err
+	return semanticPoint(p).validate("missing nonce commitment point")
 }
 
 // MarshalWireValue returns the canonical nonce commitment point encoding.
 func (p nonceCommitmentPoint) MarshalWireValue() ([]byte, error) {
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	return p.Bytes(), nil
+	return semanticPoint(p).marshalWireValue("missing nonce commitment point")
 }
 
 // UnmarshalWireValue decodes a canonical nonce commitment point.

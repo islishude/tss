@@ -247,7 +247,7 @@ func TestPresignDestroyClearsNormalizedTuple(t *testing.T) {
 	deltaPoint := []byte{7, 8}
 	sPoint := []byte{9, 10}
 	p := &Presign{state: &presignState{
-		Consumed:   NewAtomicBoolWire(false),
+		Consumed:   newAtomicBool(),
 		attempt:    newPresignAttemptBinding(false),
 		KShare:     kShare,
 		ChiShare:   chiShare,

@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -151,7 +152,7 @@ func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*a
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("reshare confirmation sender mismatch"))
 	}
-	canonical, err := confirmation.MarshalBinary()
+	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
@@ -160,7 +161,7 @@ func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*a
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("non-canonical reshare confirmation"))
 	}
-	if err := requirePlanHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
@@ -172,7 +173,7 @@ func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*a
 	}
 	for _, existing := range []map[tss.PartyID]*KeygenConfirmation{s.pendingConfirmations, s.confirmations} {
 		if prior := existing[base.From]; prior != nil {
-			priorRaw, marshalErr := prior.MarshalBinary()
+			priorRaw, marshalErr := prior.MarshalBinaryWithLimits(s.limits)
 			if marshalErr == nil && bytes.Equal(priorRaw, canonical) {
 				clear(confirmation.ChainCode)
 				return &acceptReshareConfirmationTx{from: base.From, duplicate: true}, nil
@@ -196,7 +197,7 @@ func (s *ReshareSession) buildAcceptReshareCommitmentsTx(base tss.Envelope) (*ac
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
-	if err := requirePlanHash("reshare", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("reshare", payload.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if err := payload.Commitments.ValidateThreshold(s.newThreshold); err != nil {
@@ -226,7 +227,7 @@ func (s *ReshareSession) buildAcceptReshareShareTx(base tss.Envelope) (*acceptRe
 	if payload.Share == nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("missing reshare share"))
 	}
-	if err := requirePlanHash("reshare", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("reshare", payload.PlanHash, s.planHash); err != nil {
 		payload.Share.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}

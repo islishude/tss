@@ -7,6 +7,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/planvalidation"
 )
 
 type acceptNonceCommitmentTx struct {
@@ -119,7 +120,7 @@ func (s *SignSession) buildAcceptNonceCommitmentTx(base tss.Envelope) (*acceptNo
 			Err:   fmt.Errorf("invalid FROST nonce commitment: %w", err),
 		}
 	}
-	if err := requirePlanHash("sign", commitment.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("sign", commitment.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if existing, ok := s.commitments[base.From]; ok {
@@ -149,7 +150,7 @@ func (s *SignSession) buildAcceptPartialTx(base tss.Envelope) (*acceptPartialTx,
 			Err:   fmt.Errorf("invalid FROST partial signature: %w", err),
 		}
 	}
-	if err := requirePlanHash("sign", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("sign", payload.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	partial := payload.Z.Scalar()

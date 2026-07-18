@@ -7,6 +7,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -52,7 +53,7 @@ func (s *PresignSession) buildAcceptPresignRound3Tx(env tss.Envelope) (*acceptPr
 			clear(p.DeltaPoint)
 		}
 	}()
-	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("presign", p.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 	if err := requireFigure8Binding(p.EpochID, p.PresignID, s.epochID, s.presignID); err != nil {
@@ -533,7 +534,7 @@ func (s *PresignSession) maybePreparePresignCompletion() (*preparedPresignComple
 		KeygenTranscriptHash: bytes.Clone(s.key.state.KeygenTranscriptHash),
 		PartiesHash:          tss.PartySetHash(s.key.state.Parties, partySetHashLabel), PlanHash: bytes.Clone(s.planHash),
 		SecurityParams: s.securityParams, Derivation: s.derivation.Clone(), Epoch: s.key.state.Epoch.Clone(),
-		Consumed: NewAtomicBoolWire(false), attempt: newPresignAttemptBinding(false),
+		Consumed: newAtomicBool(), attempt: newPresignAttemptBinding(false),
 	}}
 	if err := completed.ValidateWithLimits(s.limits); err != nil {
 		completed.Destroy()

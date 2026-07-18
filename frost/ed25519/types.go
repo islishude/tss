@@ -1,12 +1,9 @@
 package ed25519
 
 import (
-	"io"
-	"math/big"
 	"slices"
 
 	"github.com/islishude/tss"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -126,28 +123,4 @@ type keyShareState struct {
 	KeygenTranscriptHash []byte                            `wire:"10,bytes"`                         // Transcript hash of completed keygen/reshare confirmation.
 	PlanHash             []byte                            `wire:"11,bytes,len=32"`                  // Lifecycle plan digest that authorized this key share.
 	ConfirmationMode     keyShareConfirmationMode          `wire:"12,u8"`                            // Chain-code interpretation for the mandatory completion confirmation set.
-}
-
-func scalarBytes(x *big.Int) ([]byte, error) {
-	s, err := edcurve.ScalarFromBig(x)
-	if err != nil {
-		return nil, err
-	}
-	return s.Bytes(), nil
-}
-
-// SignOptions controls optional signing behavior.
-type SignOptions struct {
-	// Context binds signing to a key, chain, derivation path, policy domain,
-	// and message domain.
-	Context tss.SigningContext
-
-	// NonceReader supplies fresh randomness for FROST signing nonces. If nil,
-	// crypto/rand.Reader is used. A custom reader must be a CSPRNG and must not
-	// intentionally repeat output. The implementation additionally binds nonce
-	// derivation to the signing session, message, context, plan, and nonce role.
-	NonceReader io.Reader
-
-	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.
-	Limits *Limits
 }

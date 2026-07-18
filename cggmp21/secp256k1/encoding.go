@@ -179,7 +179,7 @@ func (state *presignState) AfterUnmarshalWire() error {
 	if state == nil {
 		return errors.New("nil presign state")
 	}
-	state.Consumed = NewAtomicBoolWire(false)
+	state.Consumed = newAtomicBool()
 	state.attempt = newPresignAttemptBinding(false)
 	return nil
 }
@@ -269,7 +269,7 @@ func (p *Presign) unmarshalWireMessageWithLimits(in []byte, limits Limits, opts 
 	// A persisted available record is accepted only after replaying every
 	// normalized Figure 8 opening and aggregate commitment equation. Structural
 	// canonicality alone is not sufficient at this secret-state boundary.
-	if err := decoded.VerifyCryptographicMaterialWithLimits(limits); err != nil {
+	if err := decoded.ValidateWithLimits(limits); err != nil {
 		decoded.Destroy()
 		return err
 	}

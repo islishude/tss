@@ -7,6 +7,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/zk/schnorred25519"
 )
@@ -152,7 +153,7 @@ func (s *KeygenSession) buildAcceptKeygenCommitmentsTx(base tss.Envelope) (*acce
 	if err != nil {
 		return nil, s.keygenCommitmentVerificationError(base, nil, err)
 	}
-	if err := requirePlanHash("keygen", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("keygen", payload.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if err := payload.Commitments.ValidateThreshold(s.cfg.Threshold); err != nil {
@@ -201,7 +202,7 @@ func (s *KeygenSession) buildAcceptKeygenShareTx(base tss.Envelope) (*acceptKeyg
 	if payload.Share == nil {
 		return nil, s.keygenShareVerificationError(base, errors.New("missing keygen share"))
 	}
-	if err := requirePlanHash("keygen", payload.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("keygen", payload.PlanHash, s.planHash); err != nil {
 		payload.Share.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
@@ -286,18 +287,18 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 			fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", base.From, confirmation.Sender),
 		)
 	}
-	canonical, err := confirmation.MarshalBinary()
+	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
 	if !bytes.Equal(canonical, base.Payload) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("non-canonical keygen confirmation"))
 	}
-	if err := requirePlanHash("keygen confirmation", confirmation.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("keygen confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if existing := s.pendingConfirmations[base.From]; existing != nil {
-		existingRaw, marshalErr := existing.MarshalBinary()
+		existingRaw, marshalErr := existing.MarshalBinaryWithLimits(s.limits)
 		if marshalErr == nil && bytes.Equal(existingRaw, canonical) {
 			clear(confirmation.ChainCode)
 			return &acceptKeygenConfirmationTx{from: base.From, duplicate: true}, nil
@@ -311,7 +312,7 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 	}
 	existingConfirmation := s.confirmations.confirmations[base.From]
 	if existingConfirmation != nil {
-		existing, err := existingConfirmation.MarshalBinary()
+		existing, err := existingConfirmation.MarshalBinaryWithLimits(s.limits)
 		if err == nil && bytes.Equal(existing, canonical) {
 			clear(confirmation.ChainCode)
 			return &acceptKeygenConfirmationTx{from: base.From, duplicate: true}, nil

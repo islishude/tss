@@ -141,18 +141,18 @@ func startSignWithNonceGenerator(
 	if nonceGenerator == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil signing nonce generator"))
 	}
-	if err := key.ValidateConsistency(); err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
-	}
 	if plan == nil || plan.state == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil sign plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolFROSTEd25519, plan.state.sessionID, local.Self); err != nil {
+	if err := key.ValidateWithLimits(plan.limits); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
+	}
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolFROSTEd25519, plan.state.intent.SessionID, local.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	// Validate the local key against the immutable plan before deriving nonce
 	// material; wrong signer sets or paths must fail without mutating state.
-	signers := slices.Clone(plan.state.signers)
+	signers := plan.state.intent.Signers.Clone()
 	if err := plan.validateKey(key, local); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
@@ -166,7 +166,7 @@ func startSignWithNonceGenerator(
 	if limits.Payload.MaxMessageBytes <= 0 {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("max message bytes must be positive"))
 	}
-	message := slices.Clone(plan.state.message)
+	message := slices.Clone(plan.state.intent.Message)
 	if len(message) > limits.Payload.MaxMessageBytes {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, fmt.Errorf("message too large: %d > %d", len(message), limits.Payload.MaxMessageBytes))
 	}
@@ -195,13 +195,13 @@ func startSignWithNonceGenerator(
 	// FROST uses two nonces per signer so the binding factor can commit to the
 	// complete participant set and prevent later nonce-substitution attacks.
 	d, err := nonceGenerator(
-		x, local.Rand, plan.state.sessionID, message, plan.state.contextHash, planHash, "hiding",
+		x, local.Rand, plan.state.intent.SessionID, message, plan.state.contextHash, planHash, "hiding",
 	)
 	if err != nil {
 		return nil, nil, err
 	}
 	e, err := nonceGenerator(
-		x, local.Rand, plan.state.sessionID, message, plan.state.contextHash, planHash, "binding",
+		x, local.Rand, plan.state.intent.SessionID, message, plan.state.contextHash, planHash, "binding",
 	)
 	if err != nil {
 		d.Set(fed.NewScalar())
@@ -242,7 +242,7 @@ func startSignWithNonceGenerator(
 		E:        eCommitment,
 		PlanHash: slices.Clone(planHash),
 	}
-	payload, err := marshalNonceCommitmentPayloadWithLimits(commitment, limits)
+	payload, err := commitment.MarshalBinaryWithLimits(limits)
 	if err != nil {
 		dNonce.Destroy()
 		eNonce.Destroy()
@@ -250,7 +250,7 @@ func startSignWithNonceGenerator(
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		SessionID:   plan.state.sessionID,
+		SessionID:   plan.state.intent.SessionID,
 		Round:       signStartRound,
 		From:        key.state.Party,
 		PayloadType: payloadSignCommitment,
@@ -263,12 +263,12 @@ func startSignWithNonceGenerator(
 	}
 	s := &SignSession{
 		key:              key,
-		sessionID:        plan.state.sessionID,
+		sessionID:        plan.state.intent.SessionID,
 		log:              tss.NopLogger(),
 		limits:           limits,
 		message:          bytes.Clone(message),
 		signers:          signers,
-		context:          plan.state.context.Clone(),
+		context:          plan.state.intent.Context.Clone(),
 		contextHash:      slices.Clone(plan.state.contextHash),
 		derivation:       plan.state.derivation.Clone(),
 		planHash:         slices.Clone(planHash),
@@ -356,13 +356,6 @@ func (s *SignSession) Signature() ([]byte, bool) {
 		return nil, false
 	}
 	return bytes.Clone(s.signature), true
-}
-
-// VerifyKey returns the Ed25519 public key used for signature verification.
-// When HD additive shift is in use, this is the derived (shifted) child key;
-// otherwise it is the original group public key.
-func (s *SignSession) VerifyKey() []byte {
-	return s.VerificationKeyBytes()
 }
 
 // VerificationKeyBytes returns the Ed25519 public key used for signature verification.

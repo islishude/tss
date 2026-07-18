@@ -8,6 +8,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -21,7 +22,7 @@ const (
 // The group public key is preserved through Lagrange-weighted constant terms.
 type ReshareSession struct {
 	mu           sync.Mutex
-	oldKey       *KeyShare      // Caller-owned old share for dealers; nil for recipient-only participants.
+	oldKey       *KeyShare      // Caller-owned old share for dealers; nil for receiver-only participants.
 	oldPublicKey PublicKeyPoint // Existing parent group public key that must be preserved.
 	chainCode    []byte         // Existing HD chain code that must be preserved.
 	oldParties   tss.PartySet   // Canonical dealer set of old key holders.
@@ -44,7 +45,7 @@ type ReshareSession struct {
 	completed    bool               // Terminal success after every target-holder confirmation is verified.
 	aborted      bool               // Terminal failure/destruction flag.
 	pendingShare *KeyShare          // Locally derived share awaiting confirmations from all target key holders.
-	newShare     *KeyShare          // New key share produced for recipient participants.
+	newShare     *KeyShare          // New key share produced for receiver participants.
 	guard        *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
 }
 
@@ -149,7 +150,7 @@ func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error
 	return nil
 }
 
-// StartReshare starts a FROST key resharing as an old-party dealer.
+// StartReshareDealer starts a FROST key resharing as an old-only dealer.
 // Each dealer computes w_i = λ_i(old,0) * old_share_i and generates a random
 // polynomial with w_i as the constant term. The aggregated polynomial preserves
 // the group secret while supporting arbitrary membership and threshold changes.
@@ -158,21 +159,36 @@ func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error
 // threshold. Both may differ from the old key's parties and threshold.
 //
 // In production, the shared reshare plan means equivalent authenticated
-// reshare-run metadata, not a shared Go object. Old parties start the dealer
-// role with StartReshare, while new-only recipients use StartReshareRecipient.
-func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+// reshare-run metadata, not a shared Go object. Old-only parties call
+// StartReshareDealer, new-only parties call StartReshareReceiver, and parties
+// in both committees call StartReshareOverlap.
+func StartReshareDealer(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	return startReshareDealer(oldKey, plan, local, guard, false)
+}
+
+// StartReshareOverlap starts a FROST key resharing for a party that is both an
+// old dealer and a new receiver. The party contributes a Lagrange-weighted
+// dealer polynomial and receives the target share contributions.
+func StartReshareOverlap(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	return startReshareDealer(oldKey, plan, local, guard, true)
+}
+
+func startReshareDealer(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard, overlap bool) (*ReshareSession, []tss.Envelope, error) {
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil reshare plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil reshare plan"))
 	}
 	if oldKey == nil || oldKey.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
-	}
-	if err := oldKey.ValidateConsistency(); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil old key share"))
 	}
 	limits := plan.limits
+	if err := oldKey.ValidateWithLimits(limits); err != nil {
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
+	}
 	if local.Self == 0 {
 		local.Self = oldKey.state.Party
+	}
+	if !plan.IsDealer(local.Self) || plan.IsOverlap(local.Self) != overlap {
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("local party role does not match reshare start function"))
 	}
 	config, err := plan.dealerConfig(local)
 	if err != nil {
@@ -182,10 +198,10 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if config.Self != oldKey.state.Party {
-		return nil, nil, invalidPlanConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
+		return nil, nil, planvalidation.InvalidConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
 	}
 	if err := validateResharePlanMatchesOldKey(plan, oldKey); err != nil {
-		return nil, nil, invalidPlanConfig(config.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(config.Self, err)
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
@@ -199,10 +215,10 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	config.Parties = oldParties
 	newParties := plan.state.newParties.Clone()
 	newThreshold := plan.state.newThreshold
-	isRecipient := tss.ContainsParty(newParties, oldKey.state.Party)
+	isReceiver := plan.IsReceiver(oldKey.state.Party)
 	role := frostReshareRoleDealerOnly
-	if isRecipient {
-		role = frostReshareRoleDealerAndRecipient
+	if isReceiver {
+		role = frostReshareRoleDealerAndReceiver
 	}
 
 	// Compute w_i = λ_i(old, 0) * s_i (mod L).
@@ -239,40 +255,38 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	return prepared.session, prepared.out, nil
 }
 
-// StartReshareRecipient starts a resharing session for a new participant.
-// config.Self is the recipient ID. The function validates membership against
+// StartReshareReceiver starts a resharing session for a new-only participant.
+// config.Self is the receiver ID. The function validates membership against
 // newParties and validates incoming dealer messages against oldParties.
 //
 // In production, the shared reshare plan means equivalent authenticated
-// reshare-run metadata, not a shared Go object. New-only recipients use this
-// entry point while old parties start the dealer role with StartReshare.
-func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, error) {
+// reshare-run metadata, not a shared Go object. New-only parties call
+// StartReshareReceiver, old-only parties call StartReshareDealer, and parties
+// in both committees call StartReshareOverlap.
+func StartReshareReceiver(plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	if plan == nil || plan.state == nil {
-		return nil, invalidPlanConfig(local.Self, errors.New("nil reshare plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil reshare plan"))
 	}
 	limits := plan.limits
+	if plan.IsDealer(local.Self) || !plan.IsReceiver(local.Self) {
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("local party role does not match reshare start function"))
+	}
 	config, err := plan.receiverConfig(local)
 	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
-	}
-	if !tss.ContainsParty(plan.state.newParties, config.Self) {
-		return nil, invalidPlanConfig(config.Self, errors.New("recipient must be in the new participant set"))
-	}
-	if tss.ContainsParty(plan.state.oldParties, config.Self) {
-		return nil, invalidPlanConfig(config.Self, errors.New("recipient is in the old participant set; use StartReshare instead"))
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	validationConfig := config
 	validationConfig.Parties = plan.state.newParties.Clone()
 	validationConfig.Threshold = plan.state.newThreshold
 	if err := validationConfig.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	// Blame evidence for reshare share verification is scoped to old dealers.
 	config.Parties = plan.state.oldParties.Clone()
@@ -285,7 +299,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		newThreshold:         plan.state.newThreshold,
 		selfID:               config.Self,
 		mode:                 frostReshareModeReshare,
-		role:                 frostReshareRoleRecipientOnly,
+		role:                 frostReshareRoleReceiverOnly,
 		cfg:                  config,
 		log:                  config.Logger(),
 		limits:               limits,
@@ -295,7 +309,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		confirmations:        make(map[tss.PartyID]*KeygenConfirmation),
 		pendingConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
 		guard:                guard,
-	}, nil
+	}, nil, nil
 }
 
 // StartRefresh starts a FROST same-party proactive key refresh using the
@@ -306,17 +320,17 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 // from equivalent authenticated refresh-run metadata. The refreshed KeyShare is
 // staged output and should be installed with compare-and-swap against the
 // expected current key generation.
-func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil refresh plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil refresh plan"))
 	}
 	if oldKey == nil || oldKey.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
-	}
-	if err := oldKey.ValidateConsistency(); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil old key share"))
 	}
 	limits := plan.limits
+	if err := oldKey.ValidateWithLimits(limits); err != nil {
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
+	}
 	if local.Self == 0 {
 		local.Self = oldKey.state.Party
 	}
@@ -328,7 +342,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if config.Self != oldKey.state.Party {
-		return nil, nil, invalidPlanConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
+		return nil, nil, planvalidation.InvalidConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
 	}
 	if plan.state.threshold != oldKey.state.Threshold ||
 		!plan.state.publicKey.Equal(oldKey.state.PublicKey) ||
@@ -338,7 +352,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		!bytes.Equal(plan.state.oldKeygenTranscriptHash, oldKey.state.KeygenTranscriptHash) ||
 		!bytes.Equal(plan.state.oldPlanHash, oldKey.state.PlanHash) ||
 		!bytes.Equal(plan.state.oldCommitmentsHash, keygenGroupCommitmentsHash(oldKey.state.GroupCommitments.BytesList())) {
-		return nil, nil, invalidPlanConfig(config.Self, errors.New("refresh plan does not match old key share"))
+		return nil, nil, planvalidation.InvalidConfig(config.Self, errors.New("refresh plan does not match old key share"))
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
@@ -362,7 +376,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		parties,
 		oldKey.state.Threshold,
 		frostReshareModeRefresh,
-		frostReshareRoleDealerAndRecipient,
+		frostReshareRoleDealerAndReceiver,
 		zero,
 		guard,
 	)
@@ -371,7 +385,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	}
 	defer prepared.destroy()
 	prepared.markCommitted()
-	return prepared.session, prepared.out, nil
+	return &RefreshSession{reshare: prepared.session}, prepared.out, nil
 }
 
 // Handle validates and applies one reshare envelope.

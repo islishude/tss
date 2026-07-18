@@ -10,6 +10,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/tssrun"
 )
 
@@ -20,40 +21,40 @@ import (
 func StartSign(plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelope, error) {
 	local := runtime.Local
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil sign plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil sign plan"))
 	}
 	if local.Self == tss.BroadcastPartyId {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("SignRuntime.Local.Self is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("SignRuntime.Local.Self is required"))
 	}
 	if runtime.LifecycleStore == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("SignRuntime.LifecycleStore is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("SignRuntime.LifecycleStore is required"))
 	}
 	if err := runtime.Binding.Validate(); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := validateSignLifecycleIdentifier(runtime.PresignID); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("invalid SignRuntime.PresignID"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid SignRuntime.PresignID"))
 	}
 	if err := validateCanonicalPresignSlot(runtime.PresignID, plan.state.protocolPresignID); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := validateSignLifecycleIdentifier(runtime.AttemptID); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("invalid SignRuntime.AttemptID"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid SignRuntime.AttemptID"))
 	}
 	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if !plan.state.signers.Contains(local.Self) ||
 		!bytes.Equal(plan.state.epochID, runtime.Binding.EpochID[:]) ||
 		plan.state.intent.Context.KeyID != runtime.Binding.KeyID {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("sign plan does not match lifecycle binding or local party"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("sign plan does not match lifecycle binding or local party"))
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 
 	ctx := local.Ctx()
@@ -69,7 +70,7 @@ func StartSign(plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelop
 		}
 	}()
 	if local.Self != key.state.Party {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("local self does not match lifecycle key share party"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("local self does not match lifecycle key share party"))
 	}
 	storeCtx, cancel := durableStoreContext(ctx, timeout)
 	lease, err := runtime.LifecycleStore.AcquireRunLease(storeCtx, runtime.Binding, tssrun.RunSign, plan.state.sessionID)
@@ -108,18 +109,18 @@ func StartSign(plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelop
 	if err := key.requireMPCMaterial(plan.limits); err != nil {
 		return nil, nil, failBeforeCommit(err)
 	}
-	if err := presign.VerifySignMaterialWithLimits(plan.limits); err != nil {
+	if err := presign.ValidateWithLimits(plan.limits); err != nil {
 		return nil, nil, failBeforeCommit(err)
 	}
 	if err := validatePresign(key, &presign, plan.limits); err != nil {
-		return nil, nil, failBeforeCommit(invalidPlanConfig(local.Self, err))
+		return nil, nil, failBeforeCommit(planvalidation.InvalidConfig(local.Self, err))
 	}
 	presignMetadata, ok := presign.PublicMetadata()
 	if !ok {
-		return nil, nil, failBeforeCommit(invalidPlanConfig(local.Self, errors.New("invalid public presign metadata")))
+		return nil, nil, failBeforeCommit(planvalidation.InvalidConfig(local.Self, errors.New("invalid public presign metadata")))
 	}
 	if err := plan.validate(key, presignMetadata, local); err != nil {
-		return nil, nil, failBeforeCommit(invalidPlanConfig(local.Self, err))
+		return nil, nil, failBeforeCommit(planvalidation.InvalidConfig(local.Self, err))
 	}
 	if !signAttemptPublicContextMatchesPresign(publicContext, &presign) {
 		return nil, nil, failBeforeCommit(fmt.Errorf("%w: public presign metadata does not match secret candidate", ErrSignAttemptCorrupt))

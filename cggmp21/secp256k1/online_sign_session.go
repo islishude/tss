@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/tssrun"
 )
@@ -256,7 +257,7 @@ func VerifyDigest(publicKey, digest32 []byte, sig *Signature) bool {
 }
 
 // VerifySignature verifies a context-bound canonical low-S secp256k1 ECDSA signature.
-func VerifySignature(publicKey []byte, request SignRequest, sig *Signature) bool {
+func VerifySignature(publicKey []byte, request tss.SignRequest, sig *Signature) bool {
 	if err := validatePresignContext(request.Context); err != nil {
 		return false
 	}
@@ -278,7 +279,7 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 	if !bytes.Equal(p.PresignID, s.verification.ProtocolPresignID) || !bytes.Equal(p.EpochID, s.verification.EpochID) {
 		return secp.Scalar{}, errors.New("presign or epoch identifier mismatch")
 	}
-	if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("sign", p.PlanHash, s.planHash); err != nil {
 		return secp.Scalar{}, err
 	}
 	expectedDigestHash := digestHash(s.digest, s.verification.ContextHash)

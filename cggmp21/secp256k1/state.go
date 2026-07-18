@@ -22,7 +22,7 @@ func shouldAbortSession(err error) bool {
 	if protocolErr.Code == tss.ErrCodeDuplicate {
 		return false
 	}
-	if protocolErr.Code == tss.ErrCodeVerification && errors.Is(protocolErr.Err, errPlanHashMismatch) {
+	if protocolErr.Code == tss.ErrCodeVerification && errors.Is(protocolErr.Err, tss.ErrPlanHashMismatch) {
 		return false
 	}
 	return protocolErr.Code == tss.ErrCodeVerification

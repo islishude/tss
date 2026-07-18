@@ -237,8 +237,8 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 		messages = append(messages, out...)
 	}
 
-	// Party 4 is a recipient-only.
-	recipient, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, newThreshold, tss.ThresholdConfig{
+	// Party 4 is a receiver-only.
+	receiver, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, newThreshold, tss.ThresholdConfig{
 		Threshold: newThreshold,
 		Parties:   newParties,
 		Self:      4,
@@ -247,7 +247,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reshareSessions[4] = recipient
+	reshareSessions[4] = receiver
 
 	deliverReshareMessages(t, newParties, messages, reshareSessions)
 	newShares := collectReshareShares(t, newParties, reshareSessions)
@@ -289,7 +289,7 @@ func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 		selected = append(selected, shares[id])
 	}
 	msg := []byte("slowcrypto frost hd production")
-	pub, sig, err := signFROSTSimulationWithOptions(msg, selected, SignOptions{Context: testFROSTSigningContext(path)})
+	pub, sig, err := signFROSTSimulationWithOptions(msg, selected, testSignOptions{Context: testFROSTSigningContext(path)})
 	if err != nil {
 		t.Fatal(err)
 	}

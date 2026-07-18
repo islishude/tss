@@ -106,6 +106,25 @@ func TestCommitmentValidateThresholdRejectsUndercount(t *testing.T) {
 	}
 }
 
+func TestCommitmentWireCodecsRejectNilReceivers(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		decode func([]byte) error
+	}{
+		{name: "keygen", decode: (*keygenCommitments)(nil).UnmarshalWireValue},
+		{name: "reshare", decode: (*reshareCommitments)(nil).UnmarshalWireValue},
+		{name: "group", decode: (*groupCommitments)(nil).UnmarshalWireValue},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.decode(nil); err == nil {
+				t.Fatal("nil commitment receiver accepted input")
+			}
+		})
+	}
+}
+
 func TestGroupCommitmentsWireCodec(t *testing.T) {
 	t.Parallel()
 

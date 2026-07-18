@@ -8,6 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/tssrun"
@@ -191,68 +192,6 @@ func (p *ResharePlan) PaillierBits() int {
 	return p.state.PaillierBits
 }
 
-// ReshareMessageHeader identifies one logical resharing message.
-type ReshareMessageHeader struct {
-	SessionID tss.SessionID
-	Type      string
-	Sender    tss.PartyID
-	Receiver  tss.PartyID
-}
-
-// ReceiverAuxBroadcast carries fresh Paillier and Ring-Pedersen material from a new receiver.
-type ReceiverAuxBroadcast struct {
-	Header               ReshareMessageHeader
-	PaillierPublicKey    []byte
-	PaillierModulusProof []byte
-	RingPedersenParams   []byte
-	RingPedersenProof    []byte
-	AuxiliaryProofs      [][]byte
-}
-
-// DealerCommitmentBroadcast carries one old dealer's weighted contribution commitments.
-type DealerCommitmentBroadcast struct {
-	Header      ReshareMessageHeader
-	Commitments [][]byte
-}
-
-// DealerShareDirect carries one dealer contribution for one new receiver.
-type DealerShareDirect struct {
-	Header                 ReshareMessageHeader
-	EncryptedShareEnvelope []byte
-	DealerCommitmentHash   []byte
-	AuthenticatedPlaintext []byte
-}
-
-// ReceiverShareBindingBroadcast records a new receiver's share-binding material.
-type ReceiverShareBindingBroadcast struct {
-	Header            ReshareMessageHeader
-	VerificationShare []byte
-	EncryptedShare    []byte
-	ShareSchnorrProof []byte
-	ShareLogStarProof []byte
-}
-
-// ReshareConfirmationBroadcast records a receiver's final resharing transcript view.
-type ReshareConfirmationBroadcast struct {
-	Header                    ReshareMessageHeader
-	ReshareTranscriptHash     []byte
-	NewGroupPublicKey         []byte
-	NewGroupCommitmentsHash   []byte
-	NewVerificationSharesHash []byte
-	ReceiverAuxHash           []byte
-	DealerCommitmentsHash     []byte
-	ShareBindingsHash         []byte
-}
-
-// ReshareDealerSession is an old-party dealer-only reshare session.
-type ReshareDealerSession = ReshareSession
-
-// ReshareReceiverSession is a new-party receiver-only reshare session.
-type ReshareReceiverSession = ReshareSession
-
-// ReshareOverlapSession is a session for a party that is both old dealer and new receiver.
-type ReshareOverlapSession = ReshareSession
-
 // ResharePlanOption configures CGGMP21 reshare plan construction.
 type ResharePlanOption struct {
 	OldKey         *KeyShare
@@ -271,53 +210,53 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 	oldKey := option.OldKey
 	limits := limitsOrDefault(option.Limits)
 	if oldKey == nil {
-		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
+		return nil, planvalidation.InvalidConfig(0, errors.New("nil old key share"))
 	}
 	var party tss.PartyID
 	if oldKey.state != nil {
 		party = oldKey.state.Party
 	}
 	if err := oldKey.ValidateWithLimits(limits); err != nil {
-		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old key share: %w", err))
+		return nil, planvalidation.InvalidConfig(party, fmt.Errorf("invalid old key share: %w", err))
 	}
 	sourceEpoch := option.SourceEpoch
 	if sourceEpoch == nil {
 		sourceEpoch = oldKey.state.Epoch
 	}
 	if sourceEpoch == nil {
-		return nil, invalidPlanConfig(party, errors.New("reshare source epoch is required"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("reshare source epoch is required"))
 	}
 	if err := sourceEpoch.ValidateWithLimits(limits); err != nil {
-		return nil, invalidPlanConfig(party, fmt.Errorf("invalid reshare source epoch: %w", err))
+		return nil, planvalidation.InvalidConfig(party, fmt.Errorf("invalid reshare source epoch: %w", err))
 	}
 	if oldKey.state.Epoch == nil || !epochContextsEqual(oldKey.state.Epoch, sourceEpoch, limits) {
-		return nil, invalidPlanConfig(party, errors.New("reshare source epoch does not exactly match old key share"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("reshare source epoch does not exactly match old key share"))
 	}
 	securityParams := securityParamsForArtifact(oldKey.state.SecurityParams, option.SecurityParams)
 	if option.SecurityParams != nil && validSecurityParams(oldKey.state.SecurityParams) && oldKey.state.SecurityParams != *option.SecurityParams {
-		return nil, invalidPlanConfig(party, errors.New("security params mismatch with old key share"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("security params mismatch with old key share"))
 	}
 	if err := securityParams.Validate(); err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	paillierBits := option.PaillierBits
 	if paillierBits == 0 {
 		paillierBits = int(securityParams.MinPaillierBits)
 	}
 	if paillierBits < int(securityParams.MinPaillierBits) {
-		return nil, invalidPlanConfig(party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
+		return nil, planvalidation.InvalidConfig(party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
 	}
 	verificationShares := make(map[tss.PartyID][]byte, len(oldKey.state.Parties))
 	for _, id := range oldKey.state.Parties {
 		verificationShare, ok := oldKey.verificationShare(id)
 		if !ok {
-			return nil, invalidPlanConfig(party, fmt.Errorf("missing verification share for party %d", id))
+			return nil, planvalidation.InvalidConfig(party, fmt.Errorf("missing verification share for party %d", id))
 		}
 		verificationShares[id] = bytes.Clone(verificationShare)
 	}
 	oldGroupCommitments, err := secp.CommitmentPointsBytes(oldKey.state.GroupCommitments)
 	if err != nil {
-		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old group commitments: %w", err))
+		return nil, planvalidation.InvalidConfig(party, fmt.Errorf("invalid old group commitments: %w", err))
 	}
 	plan := &ResharePlan{state: &resharePlanState{
 		SessionID:                 option.SessionID,
@@ -343,7 +282,7 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		plan.state.DealerParties = plan.state.OldParties.Clone()
 	}
 	if err := plan.ValidateWithLimits(limits); err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	return plan, nil
 }

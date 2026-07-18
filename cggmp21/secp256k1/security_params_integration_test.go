@@ -100,7 +100,7 @@ func TestIntegration_CGGMP21_SecurityParams_MismatchIsRejected(t *testing.T) {
 	if _, err := NewSignPlan(SignPlanOption{
 		Key:     shares[1],
 		Presign: mustPresignMetadata(t, mismatched),
-		Intent: SignIntent{
+		Intent: tss.SignIntent{
 			SessionID: sessionID,
 			Context:   testPresignContext(),
 			Message:   []byte("security profile mismatch"),

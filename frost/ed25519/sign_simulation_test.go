@@ -8,17 +8,21 @@ import (
 )
 
 func signFROSTSimulation(message []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, []byte, error) {
-	return signFROSTSimulationWithOptions(message, signers, SignOptions{Context: ctx})
+	return signFROSTSimulationWithOptions(message, signers, testSignOptions{Context: ctx})
 }
 
-func signFROSTSimulationWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]byte, []byte, error) {
+func signFROSTSimulationWithOptions(message []byte, signers []*KeyShare, opts testSignOptions) ([]byte, []byte, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
+	}
+	limits := testLimits()
+	if opts.Limits != nil {
+		limits = *opts.Limits
 	}
 	ids := make(tss.PartySet, len(signers))
 	shares := make(map[tss.PartyID]*KeyShare, len(signers))
 	for i, share := range signers {
-		if err := share.ValidateConsistency(); err != nil {
+		if err := share.ValidateWithLimits(limits); err != nil {
 			return nil, nil, err
 		}
 		ids[i] = share.state.Party

@@ -35,11 +35,11 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	if dealerOnly.mode != frostReshareModeReshare || dealerOnly.role != frostReshareRoleDealerOnly {
 		t.Fatalf("dealer-only mode/role = %d/%d", dealerOnly.mode, dealerOnly.role)
 	}
-	if !dealerOnly.isDealer() || dealerOnly.isRecipient() || dealerOnly.requiresInboundShares() {
+	if !dealerOnly.isDealer() || dealerOnly.isReceiver() || dealerOnly.requiresInboundShares() {
 		t.Fatal("dealer-only role predicates are inconsistent")
 	}
 
-	dealerRecipient, _, err := startFROSTReshare(oldShares[2], newParties, 2, tss.ThresholdConfig{
+	dealerReceiver, _, err := startFROSTReshare(oldShares[2], newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   oldParties,
 		Self:      2,
@@ -48,12 +48,12 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dealerRecipient.Destroy()
-	if dealerRecipient.role != frostReshareRoleDealerAndRecipient || !dealerRecipient.isDealer() || !dealerRecipient.isRecipient() {
-		t.Fatal("dealer-recipient role predicates are inconsistent")
+	defer dealerReceiver.Destroy()
+	if dealerReceiver.role != frostReshareRoleDealerAndReceiver || !dealerReceiver.isDealer() || !dealerReceiver.isReceiver() {
+		t.Fatal("dealer-receiver role predicates are inconsistent")
 	}
 
-	recipientOnly, err := startFROSTReshareRecipient(
+	receiverOnly, err := startFROSTReshareReceiver(
 		oldShares[1],
 		oldParties,
 		newParties,
@@ -68,9 +68,9 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer recipientOnly.Destroy()
-	if recipientOnly.role != frostReshareRoleRecipientOnly || recipientOnly.isDealer() || !recipientOnly.isRecipient() {
-		t.Fatal("recipient-only role predicates are inconsistent")
+	defer receiverOnly.Destroy()
+	if receiverOnly.role != frostReshareRoleReceiverOnly || receiverOnly.isDealer() || !receiverOnly.isReceiver() {
+		t.Fatal("receiver-only role predicates are inconsistent")
 	}
 
 	refreshID, err := tss.NewSessionID(nil)
@@ -87,7 +87,7 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer refresh.Destroy()
-	if refresh.mode != frostReshareModeRefresh || refresh.role != frostReshareRoleDealerAndRecipient || !refresh.isRefresh() {
+	if refresh.mode != frostReshareModeRefresh || refresh.role != frostReshareRoleDealerAndReceiver || !refresh.isRefresh() {
 		t.Fatal("refresh mode/role predicates are inconsistent")
 	}
 }
@@ -242,10 +242,10 @@ func maliciousFROSTRefreshIdentityVerificationShareEnvelopes(t *testing.T, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{
+	commitPayload, err := (reshareCommitmentsPayload{
 		Commitments: commitments,
 		PlanHash:    bytes.Clone(session.planHash),
-	}, session.limits)
+	}).MarshalBinaryWithLimits(session.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,10 +266,10 @@ func maliciousFROSTRefreshIdentityVerificationShareEnvelopes(t *testing.T, sessi
 	if err != nil {
 		t.Fatal(err)
 	}
-	sharePayload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{
+	sharePayload, err := (reshareSharePayload{
 		Share:    secretShare,
 		PlanHash: bytes.Clone(session.planHash),
-	}, session.limits)
+	}).MarshalBinaryWithLimits(session.limits)
 	secretShare.Destroy()
 	if err != nil {
 		t.Fatal(err)
@@ -444,7 +444,7 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipient, err := startFROSTReshareRecipient(
+	receiver, err := startFROSTReshareReceiver(
 		oldShares[1],
 		oldParties,
 		newParties,
@@ -459,7 +459,7 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer recipient.Destroy()
+	defer receiver.Destroy()
 	dealer, dealerOut, err := startFROSTReshare(oldShares[1], newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   oldParties,
@@ -473,9 +473,9 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 	share := mustFROSTEnvelope(t, dealerOut, payloadReshareShare, 4)
 	share.From = 99
 
-	before := snapshotFROSTReshareSession(recipient)
-	out, err := recipient.Handle(testutil.DeliverEnvelope(share))
-	after := snapshotFROSTReshareSession(recipient)
+	before := snapshotFROSTReshareSession(receiver)
+	out, err := receiver.Handle(testutil.DeliverEnvelope(share))
+	after := snapshotFROSTReshareSession(receiver)
 	if err == nil {
 		t.Fatal("expected share from non-dealer to be rejected")
 	}
@@ -512,7 +512,7 @@ func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
-	recipient, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
+	receiver, err := startFROSTReshareReceiver(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -521,8 +521,8 @@ func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer recipient.Destroy()
-	sessions[4] = recipient
+	defer receiver.Destroy()
+	sessions[4] = receiver
 
 	dealerOnly := sessions[1]
 	if len(dealerOnly.shares) != 0 {

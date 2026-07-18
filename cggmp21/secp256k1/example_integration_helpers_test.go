@@ -49,7 +49,7 @@ type examplePresignJob struct {
 
 type exampleSignJob struct {
 	run     exampleProtocolRun
-	request cggmp.SignRequest
+	request tss.SignRequest
 	stores  map[tss.PartyID]tssrun.LifecycleStore
 }
 
@@ -474,7 +474,7 @@ func runExampleCGGMPPresign(
 	return presigns, nil
 }
 
-func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest, stores map[tss.PartyID]tssrun.LifecycleStore) (exampleSignJob, error) {
+func newExampleCGGMPSignJob(signers tss.PartySet, request tss.SignRequest, stores map[tss.PartyID]tssrun.LifecycleStore) (exampleSignJob, error) {
 	// The signing session ID is generated for this online signing attempt.
 	// It is distinct from the earlier presign session ID.
 	sessionID, err := tss.NewSessionID(nil)
@@ -517,7 +517,7 @@ func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presi
 	plan, err := cggmp.NewSignPlan(cggmp.SignPlanOption{
 		Key:     share,
 		Presign: metadata,
-		Intent: cggmp.SignIntent{
+		Intent: tss.SignIntent{
 			SessionID: job.run.sessionID,
 			Context:   job.request.Context,
 			Message:   job.request.Message,
@@ -573,7 +573,7 @@ func runExampleCGGMPSign(
 	shares map[tss.PartyID]*cggmp.KeyShare,
 	presigns map[tss.PartyID]cggmp.PersistedPresign,
 	signers tss.PartySet,
-	request cggmp.SignRequest,
+	request tss.SignRequest,
 	stores map[tss.PartyID]tssrun.LifecycleStore,
 ) ([]byte, *cggmp.Signature, error) {
 	job, err := newExampleCGGMPSignJob(signers, request, stores)

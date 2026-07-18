@@ -272,7 +272,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 		}
 		g.AckVerifier = km.verifier
 		g.EnvelopeVerifier = km.verifier
-		session, out, err := startCGGMP21SignWithLocal(shares[id], presigns[id], signSessionID, SignRequest{
+		session, out, err := startCGGMP21SignWithLocal(shares[id], presigns[id], signSessionID, tss.SignRequest{
 			Context: testPresignContext(),
 			Message: []byte("hello guard-protected world"),
 		}, tss.LocalConfig{Self: id, EnvelopeSigner: km.signerFor(id).(*ed25519Signer)}, g)
@@ -304,7 +304,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	}
 
 	// Verify the produced signature.
-	if !VerifySignature(mustKeySharePublicKey(t, shares[1]), SignRequest{
+	if !VerifySignature(mustKeySharePublicKey(t, shares[1]), tss.SignRequest{
 		Context: testPresignContext(),
 		Message: []byte("hello guard-protected world"),
 	}, sig) {

@@ -359,6 +359,8 @@ by `LifecycleStore`, not by a mutable flag embedded in a caller-managed file.
 the exact key generation and the available candidate from `LifecycleStore`,
 revalidates both canonically and cryptographically, constructs the exact
 outbound partial, and calls `CommitSignAttempt`.
+`SignPlanOption.Intent` uses the root `tss.SignIntent`, and
+`VerifySignature` accepts the corresponding root `tss.SignRequest`.
 
 That one transaction must atomically:
 
@@ -389,6 +391,17 @@ A protocol-level refresh failure durably marks refresh disabled for that key
 lineage while leaving signing and presigning on the current generation
 available. A local pre-start or storage failure does not create that protocol
 marker.
+
+CGGMP21 refresh owns this cutover inside `RefreshSession`; it is not an
+external-commit `tss.RefreshScheduler` runner. `StartRefresh` may return a
+non-nil session together with a durable cutover error, and `Handle` may return
+the same class of error after the session has staged its candidate. In either
+case the caller retains that exact session, releases no withheld confirmation,
+and calls `RetryLifecycleCommit` until the store gives an authoritative
+terminal result. The caller must not install the candidate through a second
+callback or destroy the session while reconciliation is pending. A later
+refresh run reloads the current `GenerationBinding`, constructs a fresh plan
+and runtime, and names a distinct target generation.
 
 ## Resharing
 

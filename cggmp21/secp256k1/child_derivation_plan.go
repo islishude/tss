@@ -8,6 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/tssrun"
@@ -105,42 +106,42 @@ func NewChildDerivationPlan(option ChildDerivationPlanOption) (*ChildDerivationP
 	parent := option.Parent
 	limits := limitsOrDefault(option.Limits)
 	if parent == nil || parent.state == nil {
-		return nil, invalidPlanConfig(0, errors.New("nil child-derivation parent key share"))
+		return nil, planvalidation.InvalidConfig(0, errors.New("nil child-derivation parent key share"))
 	}
 	party := parent.state.Party
 	if err := option.ParentBinding.Validate(); err != nil {
-		return nil, invalidPlanConfig(party, fmt.Errorf("invalid parent generation binding: %w", err))
+		return nil, planvalidation.InvalidConfig(party, fmt.Errorf("invalid parent generation binding: %w", err))
 	}
 	if !option.SessionID.Valid() {
-		return nil, invalidPlanConfig(party, tss.ErrInvalidSessionID)
+		return nil, planvalidation.InvalidConfig(party, tss.ErrInvalidSessionID)
 	}
 	if len(option.Path) == 0 {
-		return nil, invalidPlanConfig(party, errors.New("child derivation path must be non-empty"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("child derivation path must be non-empty"))
 	}
 	if err := option.Path.ValidateNonHardened(); err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	if !option.InvalidChildMode.Valid() {
-		return nil, invalidPlanConfig(party, fmt.Errorf("%w: %d", tss.ErrInvalidChildMode, option.InvalidChildMode))
+		return nil, planvalidation.InvalidConfig(party, fmt.Errorf("%w: %d", tss.ErrInvalidChildMode, option.InvalidChildMode))
 	}
 	if err := parent.requireMPCMaterial(limits); err != nil {
-		return nil, invalidPlanConfig(party, fmt.Errorf("invalid child-derivation parent key: %w", err))
+		return nil, planvalidation.InvalidConfig(party, fmt.Errorf("invalid child-derivation parent key: %w", err))
 	}
 	if parent.state.Epoch == nil || !bytes.Equal(parent.state.Epoch.EpochID, option.ParentBinding.EpochID[:]) {
-		return nil, invalidPlanConfig(party, errors.New("parent binding epoch does not match parent key share"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("parent binding epoch does not match parent key share"))
 	}
 	if option.TargetKeyID == option.ParentBinding.KeyID {
-		return nil, invalidPlanConfig(party, errors.New("child key id must differ from parent key id"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("child key id must differ from parent key id"))
 	}
 	if err := validateChildTargetDescriptor(option.TargetKeyID, option.TargetKeyGeneration, option.ParentBinding.EpochID); err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	securityParams := securityParamsForArtifact(parent.state.SecurityParams, option.SecurityParams)
 	if option.SecurityParams != nil && parent.state.SecurityParams != *option.SecurityParams {
-		return nil, invalidPlanConfig(party, errors.New("security params mismatch with parent key share"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("security params mismatch with parent key share"))
 	}
 	if err := securityParams.Validate(); err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	paillierBits := option.PaillierBits
 	if paillierBits == 0 {
@@ -148,7 +149,7 @@ func NewChildDerivationPlan(option ChildDerivationPlanOption) (*ChildDerivationP
 	}
 	if paillierBits < int(securityParams.MinPaillierBits) ||
 		(limits.Paillier.MaxModulusBits > 0 && paillierBits > limits.Paillier.MaxModulusBits) {
-		return nil, invalidPlanConfig(party, errors.New("child derivation Paillier key size is outside allowed bounds"))
+		return nil, planvalidation.InvalidConfig(party, errors.New("child derivation Paillier key size is outside allowed bounds"))
 	}
 	derivation, err := DeriveNonHardenedBIP32(
 		parent.state.PublicKey,
@@ -157,11 +158,11 @@ func NewChildDerivationPlan(option ChildDerivationPlanOption) (*ChildDerivationP
 		tss.WithInvalidChildMode(option.InvalidChildMode),
 	)
 	if err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	defer derivation.Destroy()
 	if err := validateChildDerivationResult(derivation, option.Path, option.InvalidChildMode); err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	state := &childDerivationPlanState{
 		ParentKeyID:         option.ParentBinding.KeyID,
@@ -189,11 +190,11 @@ func NewChildDerivationPlan(option ChildDerivationPlanOption) (*ChildDerivationP
 	}
 	state.ChildSID, err = deriveChildLineageSID(state)
 	if err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	plan := &ChildDerivationPlan{state: state, limits: limits}
 	if err := plan.ValidateWithLimits(limits); err != nil {
-		return nil, invalidPlanConfig(party, err)
+		return nil, planvalidation.InvalidConfig(party, err)
 	}
 	return plan, nil
 }

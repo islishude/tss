@@ -229,7 +229,7 @@ func TestIntegration_CGGMP21_Presign_LocalZeroDeltaAndChiRemainValid(t *testing.
 	if !chi.IsZero() {
 		t.Fatal("local zero chi was not preserved through normalization")
 	}
-	if err := prepared.presign.VerifyCryptographicMaterialWithLimits(testLimits()); err != nil {
+	if err := prepared.presign.ValidateWithLimits(testLimits()); err != nil {
 		t.Fatalf("normalized presign with local zero shares failed cryptographic validation: %v", err)
 	}
 }

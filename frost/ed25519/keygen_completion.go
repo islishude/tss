@@ -165,7 +165,7 @@ func (s *KeygenSession) preparePendingKeyMaterial(snap *frostKeygenRound1Snapsho
 		pending.Destroy()
 		return nil, err
 	}
-	encoded, err := confirmation.MarshalBinary()
+	encoded, err := confirmation.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		clear(confirmation.ChainCode)
 		pending.Destroy()

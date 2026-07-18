@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/planvalidation"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/tssrun"
 )
@@ -65,73 +66,48 @@ type ChildDerivationResultMetadata struct {
 func StartChildDerivation(plan *ChildDerivationPlan, run ChildDerivationRun) (session *ChildDerivationSession, out []tss.Envelope, err error) {
 	local := run.Local
 	if plan == nil || plan.state == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil child derivation plan"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil child derivation plan"))
 	}
 	if run.LifecycleStore == nil {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("ChildDerivationRun.LifecycleStore is required"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("ChildDerivationRun.LifecycleStore is required"))
 	}
 	if err := plan.ValidateWithLimits(plan.limits); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	snapshot, ok := plan.Snapshot()
 	if !ok {
-		return nil, nil, invalidPlanConfig(local.Self, errors.New("invalid child derivation plan snapshot"))
+		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid child derivation plan snapshot"))
 	}
 	defer snapshot.Derivation.Destroy()
 
 	timeout := durableStoreTimeout(run.DurableStoreTimeout)
-	storeCtx, cancel := durableStoreContext(local.Ctx(), timeout)
-	record, err := run.LifecycleStore.LoadCurrentGeneration(storeCtx, snapshot.ParentBinding.KeyID)
-	cancel()
+	parent, err := loadLifecycleKeyShare(local.Ctx(), run.LifecycleStore, snapshot.ParentBinding, plan.limits, timeout)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("load child parent generation: %w", err)
 	}
-	defer clear(record.Blob)
-	defer clear(record.Metadata)
-	if record.Status != tssrun.GenerationCurrent || record.Binding != snapshot.ParentBinding {
-		return nil, nil, fmt.Errorf("%w: current parent generation does not match child plan", tssrun.ErrLifecycleCorrupt)
-	}
-	parent := new(KeyShare)
 	defer parent.Destroy()
-	if err := parent.UnmarshalBinaryWithLimits(record.Blob, plan.limits); err != nil {
-		return nil, nil, fmt.Errorf("%w: decode child parent generation: %w", tssrun.ErrLifecycleCorrupt, err)
-	}
-	canonical, err := parent.MarshalBinaryWithLimits(plan.limits)
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: revalidate child parent generation: %w", tssrun.ErrLifecycleCorrupt, err)
-	}
-	defer clear(canonical)
-	if !bytes.Equal(canonical, record.Blob) {
-		return nil, nil, fmt.Errorf("%w: non-canonical child parent generation", tssrun.ErrLifecycleCorrupt)
-	}
-	if err := parent.requireMPCMaterial(plan.limits); err != nil {
-		return nil, nil, fmt.Errorf("%w: invalid child parent generation: %w", tssrun.ErrLifecycleCorrupt, err)
-	}
-	if parent.state.Epoch == nil || !bytes.Equal(parent.state.Epoch.EpochID, snapshot.ParentBinding.EpochID[:]) {
-		return nil, nil, fmt.Errorf("%w: child parent epoch does not match generation binding", tssrun.ErrLifecycleCorrupt)
-	}
 	if local.Self == tss.BroadcastPartyId {
 		local.Self = parent.state.Party
 	}
 	if err := tss.RequireEnvelopeGuard(run.Guard, tss.ProtocolCGGMP21Secp256k1, snapshot.SessionID, local.Self); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(run.Guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := plan.validateParentKey(parent, local); err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	cfg, err := plan.thresholdConfig(local)
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, invalidPlanConfig(local.Self, err)
+		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 
-	storeCtx, cancel = durableStoreContext(local.Ctx(), timeout)
+	storeCtx, cancel := durableStoreContext(local.Ctx(), timeout)
 	lease, err := run.LifecycleStore.AcquireRunLease(storeCtx, snapshot.ParentBinding, tssrun.RunChildDerivation, snapshot.SessionID)
 	cancel()
 	if err != nil {

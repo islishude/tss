@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testvectors"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -70,7 +71,7 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 		switch kind % 8 {
 		case fuzzKeyShare:
 			var share *KeyShare
-			share, err = UnmarshalKeyShareWithLimits(raw, limits)
+			share, err = tss.DecodeBinaryWithLimits[KeyShare](raw, limits)
 			if err != nil {
 				return
 			}
@@ -82,7 +83,7 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 			if err != nil {
 				return
 			}
-			canonical, err = marshalKeygenCommitmentsPayloadWithLimits(value, limits)
+			canonical, err = value.MarshalBinaryWithLimits(limits)
 		case fuzzKeygenShare:
 			var value keygenSharePayload
 			value, err = unmarshalKeygenSharePayload(raw)
@@ -90,21 +91,21 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 				return
 			}
 			defer value.Share.Destroy()
-			canonical, err = marshalKeygenSharePayloadWithLimits(value, limits)
+			canonical, err = value.MarshalBinaryWithLimits(limits)
 		case fuzzNonceCommitment:
 			var value nonceCommitment
 			value, err = unmarshalNonceCommitmentPayload(raw)
 			if err != nil {
 				return
 			}
-			canonical, err = marshalNonceCommitmentPayloadWithLimits(value, limits)
+			canonical, err = value.MarshalBinaryWithLimits(limits)
 		case fuzzSignPartial:
 			var value signPartialPayload
 			value, err = unmarshalSignPartialPayload(raw)
 			if err != nil {
 				return
 			}
-			canonical, err = marshalSignPartialPayloadWithLimits(value, limits)
+			canonical, err = value.MarshalBinaryWithLimits(limits)
 		case fuzzKeygenConfirmation:
 			var value KeygenConfirmation
 			err = value.UnmarshalBinaryWithLimits(raw, limits)
@@ -118,7 +119,7 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 			if err != nil {
 				return
 			}
-			canonical, err = marshalReshareCommitmentsPayloadWithLimits(value, limits)
+			canonical, err = value.MarshalBinaryWithLimits(limits)
 		case fuzzReshareShare:
 			var value reshareSharePayload
 			value, err = unmarshalReshareSharePayload(raw)
@@ -126,7 +127,7 @@ func FuzzFROSTSemanticDecoders(f *testing.F) {
 				return
 			}
 			defer value.Share.Destroy()
-			canonical, err = marshalReshareSharePayloadWithLimits(value, limits)
+			canonical, err = value.MarshalBinaryWithLimits(limits)
 		}
 		if err != nil {
 			t.Fatalf("accepted value failed canonical re-encode: %v", err)
