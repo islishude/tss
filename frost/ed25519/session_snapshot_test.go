@@ -1,6 +1,9 @@
 package ed25519
 
-import "github.com/islishude/tss"
+import (
+	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
+)
 
 type frostSignSnapshot struct {
 	Completed bool
@@ -56,8 +59,8 @@ func snapshotFROSTSignSession(s *SignSession) frostSignSnapshot {
 	return frostSignSnapshot{
 		Completed:         s.completed,
 		Aborted:           s.aborted,
-		CommitmentSenders: frostSnapshotMapKeys(s.commitments),
-		PartialSenders:    frostSnapshotMapKeys(s.partials),
+		CommitmentSenders: testutil.SortedPartyMapKeys(s.commitments),
+		PartialSenders:    testutil.SortedPartyMapKeys(s.partials),
 		PartialSent:       s.partialSent,
 		HasDNonce:         s.dNonce != nil,
 		HasENonce:         s.eNonce != nil,
@@ -116,20 +119,9 @@ func snapshotFROSTReshareSession(s *ReshareSession) frostReshareSnapshot {
 		HasConfirmationBinding:     s.confirmationBinding != nil,
 		IsReceiver:                 s.isReceiver(),
 		RefreshMode:                s.isRefresh(),
-		CommitSenders:              frostSnapshotMapKeys(s.commits),
-		ShareSenders:               frostSnapshotMapKeys(s.shares),
-		ConfirmationSenders:        frostSnapshotMapKeys(s.confirmations),
-		PendingConfirmationSenders: frostSnapshotMapKeys(s.pendingConfirmations),
+		CommitSenders:              testutil.SortedPartyMapKeys(s.commits),
+		ShareSenders:               testutil.SortedPartyMapKeys(s.shares),
+		ConfirmationSenders:        testutil.SortedPartyMapKeys(s.confirmations),
+		PendingConfirmationSenders: testutil.SortedPartyMapKeys(s.pendingConfirmations),
 	}
-}
-
-func frostSnapshotMapKeys[V any](m map[tss.PartyID]V) tss.PartySet {
-	if len(m) == 0 {
-		return nil
-	}
-	out := make(tss.PartySet, 0, len(m))
-	for id := range m {
-		out = append(out, id)
-	}
-	return out.Sorted()
 }

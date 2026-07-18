@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 type cggmpKeygenSnapshot struct {
@@ -137,7 +138,7 @@ func snapshotCGGMPKeygenSession(s *KeygenSession) cggmpKeygenSnapshot {
 			}
 		}
 	}
-	snap.ConfirmationSenders = cggmpSnapshotMapKeys(s.paperConfirmations)
+	snap.ConfirmationSenders = testutil.SortedPartyMapKeys(s.paperConfirmations)
 	snap.Figure6CommitmentSenders = snap.Figure6CommitmentSenders.Sorted()
 	snap.Figure6RevealSenders = snap.Figure6RevealSenders.Sorted()
 	snap.Figure6ProofSenders = snap.Figure6ProofSenders.Sorted()
@@ -161,7 +162,7 @@ func snapshotCGGMPPresignSession(s *PresignSession) cggmpPresignSnapshot {
 		Identifying:            s.identifying,
 		RedAlertKind:           s.redAlertKind,
 		RedAlertDigest:         bytes.Clone(s.redAlertDigest),
-		RedAlertPayloadSenders: cggmpSnapshotMapKeys(s.redAlertPayloads),
+		RedAlertPayloadSenders: testutil.SortedPartyMapKeys(s.redAlertPayloads),
 		Round2Sent:             s.round2Sent,
 		Round3Sent:             s.round3Sent,
 		HasKShare:              s.kShare != nil,
@@ -243,19 +244,8 @@ func snapshotCGGMPSignSession(s *SignSession) cggmpSignSnapshot {
 		Completed:      s.completed,
 		Aborted:        s.aborted,
 		HasSignature:   s.signature != nil,
-		PartialSenders: cggmpSnapshotMapKeys(s.partials),
+		PartialSenders: testutil.SortedPartyMapKeys(s.partials),
 		HasAttempt:     s.attempt.PresignID != "" || s.attempt.Intent.AttemptID != "" || len(s.attempt.ExactOutbox) != 0,
 		HasCoordinator: s.coordinator != nil,
 	}
-}
-
-func cggmpSnapshotMapKeys[V any](m map[tss.PartyID]V) tss.PartySet {
-	if len(m) == 0 {
-		return nil
-	}
-	out := make(tss.PartySet, 0, len(m))
-	for id := range m {
-		out = append(out, id)
-	}
-	return out.Sorted()
 }
