@@ -19,17 +19,27 @@ Every sign-ready key share carries one non-optional epoch context:
 ```text
 SID              stable key/session identity
 RID              XOR of the committed per-party rid contributions
-EpochID          H(SID, RID, parties, threshold, public shares,
-                   Paillier keys, auxiliary moduli and Pedersen bases)
-ShamirID[j]      H(SID, RID, party[j]) in Fq, non-zero and collision-free
+EpochID          H(SID, RID, parties, threshold, public shares, lineage,
+                   AuxDigest)
+ShamirID[j]      first valid H(SID, RID, party[j], counter) in Fq
 PublicShares[j]  public share for ShamirID[j]
-AuxDigest        digest of all epoch auxiliary material
+AuxDigest        digest of every party's Paillier key and Ring-Pedersen setup
 ```
 
 `KeyGeneration` is a local store CAS token and is never substituted for
-`EpochID`. Every protocol payload and proof domain binds the protocol version,
-plan digest, SID, RID, EpochID, round, sender, recipient, ordered committee or
-signer set, and every public field affecting the statement.
+`EpochID`. Payloads and proof domains bind every context field that exists at
+construction time and affects the statement. Early Figure 6 records cannot
+bind an RID or epoch that does not yet exist; Figure 7 `Pi_prm` is prepared
+before RID derivation; broadcast statements have no direct recipient. Later
+records bind the derived RID and `EpochID`, and recipient-specific proofs bind
+the recipient. The accepted early records are subsequently covered by the
+final transcript and epoch auxiliary digest.
+
+Figure 6/7 keygen and interactive trusted import return an in-memory confirmed
+`KeyShare`. A caller must serialize it and call
+`tssrun.LifecycleStore.InstallInitialGeneration` before any store-backed
+presign, sign, refresh, reshare, or child-derivation start. Later generations
+are installed by their lifecycle transaction.
 
 Deriving a public xpub remains a preview operation. CGGMP presign and sign
 plans accept only an empty path. A signable non-hardened child is established
@@ -38,31 +48,37 @@ run.
 
 ## Figure 6: key generation
 
-| Round | Payload                | Local witness                                           | Required verification                                                      |
-| ----- | ---------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 1     | commitment `V_i`       | `x_i`, Schnorr first-message randomness, `rho_i`, `u_i` | Canonical authenticated broadcast only                                     |
-| 2     | `rho_i, X_i, A_i, u_i` | retained `x_i` and first-message randomness             | `H(sid,i,rho_i,X_i,A_i,u_i)=V_i`                                           |
-| 3     | finalized `Pi_sch`     | `x_i` and committed Schnorr randomness                  | first message equals `A_i`; verify Schnorr under the common XOR coin `rho` |
+| Round | Paper item             | Repository payload or action                                        | Required verification                                                      |
+| ----- | ---------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 1     | commitment `V_i`       | `V_i`, chain-code commitment, plan digest                           | Canonical authenticated broadcast; retain both commitments                 |
+| 2     | `rho_i, X_i, A_i, u_i` | Paper opening and plan digest; chain-code contribution stays hidden | `H(label,sid,i,rho_i,X_i,A_i,u_i,plan)=V_i` and exact plan                 |
+| 3     | finalized `Pi_sch`     | Proof finalized from retained `x_i` and first-message randomness    | First message equals `A_i`; verify Schnorr under the common XOR coin `rho` |
 
-The group public key is the product of all `X_i`. Figure 6 output is not a
-sign-ready `KeyShare`; it must immediately complete Figure 7/F.1 and acquire an
-epoch context.
+The paper's product of all `X_i` is point addition in the Go implementation.
+Figure 6 output is not a sign-ready `KeyShare`; it must immediately complete
+Figure 7/F.1 and acquire an epoch context. The chain-code contribution is
+opened and checked only in the final confirmation after that auxiliary run.
 
 ## Figure 7 and Appendix F.1: auxiliary information and refresh
 
-| Round       | Payload                                                                                                                      | Statement and witness                                                                                                                                                               | Commit boundary                                                             |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| 1           | commitment `V_i` only                                                                                                        | New independent Paillier factors, independent auxiliary factors and Pedersen lambda, DH exponents, degree `t-1` refresh polynomial, commit-ahead Schnorr randomness, `rid_i`, `u_i` | No public material or new share becomes visible                             |
-| 2           | public share commitments, DH keys, Schnorr first messages, Paillier `N_i`, auxiliary `Nhat_i,s_i,t_i`, `Pi_prm`, `rid_i,u_i` | Opening of round-1 commitment                                                                                                                                                       | Accept only after the commitment and zero-sum/public-polynomial checks pass |
-| 3 broadcast | finalized `Pi_sch` values                                                                                                    | each refresh coefficient/share exponent                                                                                                                                             | Bind the XOR-derived RID and target EpochID                                 |
-| 3 direct    | `Pi_mod`, verifier-specific `Pi_fac`, DH-masked share                                                                        | Paillier factors and `z_{i,j}` matching the committed polynomial evaluation                                                                                                         | Decrypt/verify on staged state; transfer secret ownership only at commit    |
+| Round       | Payload                                                                                                                         | Statement and witness                                                                                                                                                   | Commit boundary                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1           | commitment `V_i` plus plan digest                                                                                               | New Paillier factors; temporary separately generated auxiliary factors/trapdoor; DH exponents; degree `t-1` polynomial; commit-ahead proof state; `rid_i`; decommitment | No opened public material or new share becomes visible                      |
+| 2           | polynomial commitments, DH keys, Schnorr first messages, Paillier `N_i`, auxiliary `Nhat_i,s_i,t_i`, `Pi_prm`, `rid_i`, opening | Opening of round-1 commitment                                                                                                                                           | Accept only after the commitment and zero-sum/public-polynomial checks pass |
+| 3 broadcast | finalized `Pi_sch`, RID, EpochID, plan digest                                                                                   | Each polynomial coefficient/share exponent                                                                                                                              | Bind the XOR-derived RID and target EpochID                                 |
+| 3 direct    | `Pi_mod`, verifier-specific `Pi_fac`, DH-masked share, RID, EpochID, plan digest                                                | Retained Paillier factors and the polynomial evaluation matching the committed polynomial; recipient setup is part of the receiver-specific factor-proof statement      | Decrypt/verify on staged state; transfer secret ownership only at commit    |
 
-Dynamic identifiers are derived after every round-2 opening is accepted. A
-zero identifier or collision terminates the protocol; it is not silently
-retried. DH masks are derived from the authenticated pairwise DH point and bind
-SID, RID, EpochID, sender, and recipient. A DH decryption-error witness is
-allowed only in the dedicated authenticated accusation payload required by the
-paper and never in logs, ordinary errors, or generic blame fields.
+The auxiliary factorization and Ring-Pedersen trapdoor are destroyed after
+`Pi_prm` preparation; the final key share retains only public
+`(Nhat_i,s_i,t_i)` parameters and the party's separate Paillier private factors.
+
+Dynamic identifiers are derived after every round-2 opening is accepted.
+Candidates at or above the scalar order are retried with a domain-bound counter
+up to 256 times. A zero candidate or collision terminates the protocol. DH masks
+are derived from the authenticated pairwise DH point and bind SID, RID,
+EpochID, sender, and recipient. A DH decryption-error witness is allowed only in
+the dedicated authenticated accusation payload required by the paper and never
+in logs, ordinary errors, or generic blame fields.
 
 The common Figure 7 transcript commits to the accepted public proof records.
 Proofs created after RID derivation bind the final epoch and lifecycle plan;
@@ -182,11 +198,14 @@ record.
 ## Figure 9: failed nonce or chi
 
 Figure 9 is entered only when one of the two aggregate equations above fails.
-For the selected relation, every signer publishes the paper's aggregated
-ciphertext `D_i`, `Pi_dec`, and one setup-less `Pi_aff-g*` per peer. Portable
-evidence contains only these public proofs and their authenticated envelopes.
-Figure 10 ends with direct partial attribution; it defines no later proof
-phase.
+For the selected relation, every signer publishes the canonical alert and, for
+each peer, both public MtA response views plus one setup-less `Pi_aff-g*`; the
+same record contains the aggregate ciphertext relation with one `Pi_dec`.
+Verification also rechecks the original accepted `Pi_aff-g` records against the
+authenticated transcript view. Portable evidence contains only public proof
+material and authenticated envelopes. If every proof verifies while the alert
+remains unresolved, the run ends with an unblamed invariant. Figure 10 ends
+with direct partial attribution; it defines no later proof phase.
 
 ## Figure 10: signing
 
@@ -230,19 +249,10 @@ input cannot mutate an accepted slot, consume a presign, or emit an effect.
 
 ## Proof profile
 
-Production uses exactly:
-
-```text
-Ell=256
-Epsilon=512
-EllPrime=1280
-ChallengeBits=256
-MinPaillierBits=3072
-```
-
-Fiat-Shamir challenges use a labeled SHA-256 expansion with a bounded counter
-and rejection sampling to obtain the canonical non-zero representative
-`1 <= e < q`. `Pi_mod` samples with
-`limit=floor(2^(8*nLen)/N)*N`, rejects candidates at or above the cutoff, then
-rejects non-units. Both samplers fail closed after 256 attempts. Reduced
-profiles are explicit test inputs and never a production default.
+The production profile implements Appendix C.1 with
+`(Ell,Epsilon,EllPrime)=(256,512,1280)`, 256-bit challenges, independently
+generated 3072-bit minimum Paillier and auxiliary moduli, and 128-round
+`Pi_mod`/`Pi_prm` amplification. Exact relations, transcript construction,
+challenge sampling, source files, and retained-but-inactive primitives live in
+[`paillier-zk-proofs.md`](paillier-zk-proofs.md); that document is authoritative
+for proof implementation details.

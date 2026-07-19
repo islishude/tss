@@ -1,350 +1,267 @@
-# Production Deployment Guide
+# Deployment Guide
 
-This guide describes the deployment boundary implemented by this repository.
-It is not a production-readiness claim: the library has not completed an
+This guide describes the operational boundary expected by the repository. It
+is not a production-readiness claim: the library has not completed an
 independent production audit, and the CGGMP21 Paillier/ZK layer still requires
 independent cryptographic review.
 
-Read [`integration.md`](integration.md), [`tssrun.md`](tssrun.md), and
-[`security.md`](security.md) before integrating a protocol package. The
-`StartXxx` functions are party-local state-machine constructors; the
-application remains responsible for authorization, coordination, transport,
-durability, recovery, and operations.
+Read the [integration model](integration.md), [`tssrun` contracts](tssrun.md),
+and [security notes](security.md) before deploying a protocol package. Protocol
+`Start*` functions create party-local state machines; the application owns
+authorization, coordination, transport, durability, recovery, and operations.
 
-## Deployment Model
+## Required Components
 
-A production deployment has three explicit boundaries:
+A deployment needs these explicit components:
 
-1. The control plane authorizes one canonical `tssrun.RunIntent`, distributes
-   its public fields, and records each party's acceptance digest.
-2. The data plane opens authenticated envelopes, enforces confidentiality and
-   broadcast policy, and routes them to a registered local session.
-3. The durability plane implements `tssrun.LifecycleStore` as the single
-   transactional authority for key generations, run leases, available
-   presigns, signing attempts, and generation cutover.
+| Component                | Required responsibility                                                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| Control plane            | Authorize one canonical `RunIntent`, distribute public metadata, and record each local acceptance/result. |
+| Authenticated data plane | Open wire envelopes with transport-derived facts, collect broadcast certificates, and deliver outboxes.   |
+| Session registry         | Route active `(Protocol, SessionID, local Party)` entries and retire terminal sessions.                   |
+| Replay/session store     | Atomically claim session IDs and message slots without evicting live security state.                      |
+| Lifecycle database       | Implement generation, lease, presign, attempt, and cutover transactions.                                  |
+| Key management           | Encrypt secret records, control decrypt authority, rotate keys, and audit access.                         |
+| Recovery state           | Persist accepted runs, inbox/outbox progress, exact recovery descriptors, backups, and incident records.  |
 
-The coordinator is not a cryptographic participant unless it is also one of
-the parties. It must not receive private shares, nonce shares, Paillier private
-keys, MtA witnesses, presign secret tuples, trusted-dealer contributions, or
+The coordinator is not a cryptographic party unless explicitly deployed as
+one. It must not receive private shares, nonces, Paillier factors, MtA
+witnesses, presign secret tuples, trusted-dealer contributions, or
 reconstructed secrets.
 
 ## Run Admission
 
-Every keygen, refresh, reshare, child-derivation, presign, and signing run has a
-fresh shared session ID. Each party reconstructs the protocol plan from the
-same authenticated public metadata and checks its digest against the accepted
-`RunIntent` before releasing the first envelope.
+Before releasing the first envelope:
 
-For lifecycle-bound CGGMP21 runs, the intent names an exact
-`GenerationBinding`:
+1. Create one fresh, unpredictable `SessionID` for the run and claim it
+   durably in the protocol namespace.
+2. Authenticate every public `RunIntent` field and validate it against local
+   authorization policy.
+3. Reconstruct the protocol plan and compare its digest with
+   `RunIntent.PlanDigest`.
+4. Persist the canonical `RunIntent.AcceptanceDigest()` for the local party.
+5. Build the production guard, start the local role, and call
+   `RegisterStartedSession` before sending its initial outbox.
+
+Use complete `GenerationBinding` values wherever the flow is lifecycle-bound:
 
 ```text
-key ID + local generation token + cryptographic EpochID
+KeyID + KeyGeneration + EpochID
 ```
 
-Matching only the key ID or public key is insufficient. The complete binding,
-plan digest, signer or party set, context digest, lifecycle target, and
-presign ID where applicable must agree.
+Matching only a key ID, public key, or local generation string is not an
+authorization check. The exact signer/party set, context digest, target
+descriptor, plan digest, and presign ID where applicable must also agree.
+Failed and retired runs do not make a session ID reusable.
 
-Use one durable session-ID claim per protocol namespace. A failed or retired
-run does not make its session ID reusable. Unknown-session envelopes are
-rejected by default; deployments that durably buffer them must reopen and
-revalidate them through the newly registered session before use.
+Unknown-session envelopes are rejected by default. If the deployment enables
+durable buffering, quota the buffer and retain the authenticated receive facts
+and certificate. Re-dispatch only after the run is accepted and the local
+session is registered; normal guard validation must still run.
 
 ## Authenticated Transport
 
-The receive path is:
+The receive adapter supplies facts that the envelope cannot self-assert:
 
 ```text
-raw bytes + authenticated transport facts
+raw bytes + authenticated peer + channel protection + certificate
   -> tss.OpenEnvelope
   -> tssrun.Dispatcher.Dispatch
   -> ProtocolSession.Handle
   -> authenticated outbox delivery
 ```
 
-`ReceiveInfo.Peer`, `PeerKeyID`, `ChannelID`, and `Protection` must be derived
-from the transport, not copied from untrusted message fields. Direct messages
-that contain shares or protocol witnesses require
-`tss.ChannelConfidential`. Broadcast delivery must satisfy the configured
-acknowledgment and certificate policy.
+- Derive `ReceiveInfo.Peer`, `PeerKeyID`, `ChannelID`, and `Protection` from the
+  authenticated channel, never from payload fields.
+- Use `ChannelConfidential` for direct messages that contain shares, nonces, or
+  other protocol secrets.
+- Collect a complete signed `BroadcastCertificate` for broadcast policies and
+  persist it with the delivery decision when recovery depends on it.
+- Preserve each exact canonical outbox for at-least-once retry. Never rebuild a
+  CGGMP21 online-sign outbox from a new intent.
+- Remove terminal registry entries so delayed traffic reaches the
+  unknown-session policy.
 
-Within a round, messages may arrive in any order. Across rounds, protocol state
-machines reject early messages unless that specific phase explicitly buffers
-them. Replayed, conflicting, cross-session, wrong-plan, and wrong-recipient
-messages fail closed.
+Messages may arrive in any order within the current phase. Across phases, they
+are rejected unless the state machine explicitly buffers and later revalidates
+that payload. Do not add a transport-side exception for early, conflicting, or
+cross-session traffic.
 
-The application should register a successfully started session before making
-its outbound envelopes visible. Remove completed, aborted, and retired
-sessions from the registry so delayed traffic reaches the unknown-session
-policy.
+## Durable Stores
 
-## Unified Lifecycle Store
+### Public run and routing state
 
-`tssrun.LifecycleStore` is the only authoritative CGGMP21 persistence
-boundary. A production implementation must provide atomic transactions and
-encrypt secret-bearing blobs with a KMS or HSM-backed scheme.
+Production implementations of `RunStore`, `SessionRegistry`, and
+`UnknownEnvelopeStore` must preserve the semantics described in
+[`tssrun.md`](tssrun.md). A registry may be process-local if the application's
+routing and ownership model makes one process authoritative, but accepted run
+and session-ID state must survive restart.
 
-| Operation                                  | Required atomic effect                                                                                                      |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `InstallInitialGeneration`                 | Install the first exact generation for a key ID only if none exists.                                                        |
-| `AcquireRunLease`                          | Bind one run kind and session to the exact current generation.                                                              |
-| `CommitAvailablePresignFromLease`          | Store one available presign and finish its presign lease together.                                                          |
-| `CommitSignAttempt`                        | Revalidate the current generation, consume one available presign, and store the immutable intent and exact outbox together. |
-| `MarkAttemptDelivered` / `CompleteAttempt` | Advance the same immutable signing attempt without creating a new claim.                                                    |
-| `BeginCutoverFromLease`                    | Finish the refresh or reshare lease and fence new source-generation work.                                                   |
-| `CommitCutover`                            | Install the target, retire and clear the source, and burn all source-epoch available presigns together.                     |
-| `CommitInitialGenerationFromLease`         | Install a derived child as the first generation of a distinct key lineage.                                                  |
-| `CommitInitialGenerationFromReshareLease`  | Install a new-only receiver's first generation without claiming it owned the source secret.                                 |
+### Secret lifecycle state
 
-`MemoryLifecycleStore` is a test/reference helper and is not durable.
-`FileLifecycleStore` is an encrypted reference implementation with one
-manifest covering all lineages. It serializes cross-process mutations with
-sorted per-lineage OS locks and a manifest lock, fsyncs immutable encrypted
-blobs before the manifest swap, and reconciles orphan crash artifacts on the
-next open operation. It demonstrates ordering and crash semantics, but it is
-not a substitute for a transactional production database and a production
-key-management design.
+`LifecycleStore` is the sole authority for CGGMP21 generation records,
+available presigns, signing attempts, and native refresh/reshare/child
+transitions. The critical atomic effects are:
 
-Third-party backends should run `tssrun/conformance.RunConformance` and add
-backend-specific transaction, crash, encryption, locking, corruption, and
-unknown-outcome tests.
-
-### Secret Storage
+| Transaction                                | Atomic effect                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `InstallInitialGeneration`                 | Install one exact first generation only if the lineage is absent.                                                   |
+| `AcquireRunLease`                          | Bind one session and run kind to the exact generation; enforce compatible/exclusive work.                           |
+| `CommitAvailablePresignFromLease`          | Store one available presign and complete its lease together.                                                        |
+| `CommitSignAttempt`                        | Revalidate the generation, claim/remove the available secret presign, and store immutable intent plus exact outbox. |
+| `MarkAttemptDelivered` / `CompleteAttempt` | Advance the same immutable attempt; delivery and completion are independent facts.                                  |
+| `BeginCutoverFromLease` / `CommitCutover`  | Fence source work, install target, retire/clear source, and burn source-epoch available presigns.                   |
+| `CommitRetirementFromLease`                | Complete an old-only reshare dealer without installing a local target.                                              |
+| Initial child/receiver commit              | Create the first exact generation in a distinct child or new-only receiver lineage.                                 |
 
 `GenerationRecord.Blob` and `PresignCandidate.Blob` contain secret material.
-They must never appear in logs, metrics, tracing attributes, paths, plaintext
-indexes, error strings, or crash reports. Public metadata is still integrity
-sensitive and must be authenticated with the encrypted record.
+Encrypt them with per-record authenticated encryption, randomized nonces, key
+versioning, rotation, and access-controlled KMS/HSM-backed keys. Authenticate
+public metadata with the ciphertext. Never put secret bytes in plaintext
+indexes, paths, logs, metrics, traces, error strings, or crash reports.
 
-The passphrase-encryption helpers and file lifecycle store are references. A
-production design should use per-record authenticated encryption, randomized
-nonces, key versioning, rotation, and KMS/HSM policy. Encryption does not
-replace lifecycle transactions.
+`Memory*` implementations are test/example helpers. `FileLifecycleStore` is an
+encrypted crash-semantics reference, not a production database. External
+stores should run `conformance.RunConformance` and backend-specific tests for
+transactions, concurrent claims, crash points, locking, corruption,
+encryption, and unknown outcomes.
 
-## CGGMP21 Key Generation
+## Key Ceremonies
 
-CGGMP21 keygen executes the paper's Figure 6 followed by Figure 7/F.1 and a
-repository confirmation round. Figure 6 establishes the additive public key
-and shared `rho`; Figure 7 creates the secret sharing, Paillier and independent
-Ring-Pedersen auxiliary setup, shared `RID`, dynamic party identifiers, and a
-new `EpochID`.
+### Keygen and initial install
 
-`KeyShare()` remains unavailable until the confirmation set binds the complete
-transcript, epoch, party set, public key, and chain code. Only then may the
-application canonically encode the share and call
-`InstallInitialGeneration`. Use the share's exact epoch when constructing the
-initial `GenerationBinding`.
+Do not expose a generated key until every required protocol confirmation has
+completed and the local share is durably installed. FROST returns a
+caller-owned share for application-managed encrypted persistence. CGGMP21
+keygen returns a confirmed share whose canonical bytes and exact produced
+epoch must be installed with `InstallInitialGeneration`.
 
-The production proof profile is `(Ell, EllPrime, Epsilon, ChallengeBits,
-MinPaillierBits) = (256, 1280, 512, 256, 3072)`, targeting the repository's
-128-bit classical security profile. Every party generates an independent
-Paillier modulus `N` and independent Ring-Pedersen modulus `Nhat`; these are not
-the same modulus and are validated separately. Reduced parameters are test
-controls only.
+Use default production-policy limits and CGGMP21 security parameters. Reduced
+profiles are test controls and must not enter a production run or store.
 
-### Trusted-Dealer Import and Reconstruction
+### Trusted import and reconstruction
 
-Trusted-dealer import uses the same public Figure 6 and Figure 7/F.1 path after
-each party receives its explicitly authorized secret contribution through a
-confidential, authenticated, KMS-backed channel. The public import plan and
-digest belong in the control plane; each contribution belongs only to its
-named party and must be destroyed when no longer needed.
+Trusted import and reconstruction are explicit exfiltration ceremonies, not
+ordinary signing helpers.
 
-Secret reconstruction is a separate exfiltration ceremony. Require explicit
-authorization, load one exact lifecycle generation, validate at least the
-threshold number of shares in an isolated process, export only to the approved
-destination, and clear the returned bytes. Reconstruction does not silently
-consume, retire, or weaken the source generation.
+- Authorize the public import plan separately from each secret contribution.
+- Deliver a contribution only to its named party over confidential,
+  authenticated transport and encrypted storage; destroy it after successful
+  use.
+- Treat `GenerateTrustedDealerKeyShares` as a total-trust boundary because it
+  centralizes all shares and, for CGGMP21, all Paillier private keys.
+- For reconstruction, load enough unique shares from one exact generation in
+  an isolated process, export only to the approved destination, and clear the
+  returned bytes.
+- Reconstruction does not consume, revoke, or weaken the source shares. The
+  authorization workflow must decide what happens to them.
 
-## CGGMP21 Presign and Sign
+### CGGMP21 presign and sign
 
-### Figure 8 Presign
+Presign plans bind one exact generation, signer set, protocol presign ID,
+security profile, and empty derivation path. Figure 8 success is not an
+in-memory availability flag: only `CommitAvailablePresignFromLease` creates an
+available slot, and `PresignSession.Presign()` returns public metadata.
 
-The offline run implements Figure 8. Its successful normalized local artifact
-is:
+`CommitSignAttempt` is the online linearization point. It destroys the
+available secret state and retains the immutable attempt plus exact public
+recovery outbox. Persist delivery acknowledgments/certificate separately from
+final signature completion. Expose terminal success only after the completion
+record is durable.
 
-```text
-(Gamma, k_i/delta, chi_i/delta,
- {(Delta_j^(delta^-1), S_j^(delta^-1))}_j)
-```
+### Refresh, reshare, and child generation
 
-The presign plan binds one exact generation and epoch, signer set, 32-byte
-protocol presign ID, security profile, and signing context. The context uses an
-empty derivation path: online or presign-time path derivation is rejected.
+- FROST refresh/reshare returns staged caller-owned shares. Install them with
+  application compare-and-swap and coordinate source retirement externally.
+- CGGMP21 refresh and reshare use native exclusive leases and lifecycle
+  commit. A transient post-protocol store error leaves the live session pending
+  for `RetryLifecycleCommit`.
+- Old-only reshare dealers must remain active through the required target
+  confirmations. New-only receivers install their first generation without
+  pretending to own the source secret record.
+- A CGGMP21 non-hardened child is a distinct lineage with fresh Figure 7/F.1
+  auxiliary material. The parent remains current. Presign/sign select the
+  installed child and use an empty derivation path.
 
-Completion is the atomic
-`CommitAvailablePresignFromLease` transaction. `PresignSession.Presign()`
-returns a public-only `PersistedPresign` descriptor containing the lifecycle
-slot and public metadata; it does not return the normalized secret tuple.
-Availability is store state, not a wire bit. Canonical encoding or decoding
-does not consume an available artifact and does not prove that a slot is
-available.
+## Unknown Outcomes and Recovery
 
-If Figure 8's aggregate checks fail, the session enters the paper's Figure 9
-red-alert path using `Pi_dec` and setup-less `Pi_aff-g*` evidence. A Figure 9
-failure never produces an available presign.
+A timeout, cancellation, crash, or I/O error from a durable mutation may leave
+its outcome unknown. Do not infer rollback from an error return.
 
-### Figure 10 Online Signing
+| Durable state or uncertainty                 | Recovery action                                                                                         |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Available presign                            | Select only through the authoritative store and claim atomically.                                       |
+| `CommitSignAttempt` outcome unknown          | Retain its exact `AttemptQuery`; call `QueryAttemptOutcome` or `ResumeSign`.                            |
+| Attempt committed, delivery incomplete       | Replay only the exact stored outbox and persist verified recipient acknowledgments/certificate.         |
+| Attempt delivered, completion incomplete     | Restore inbound progress and finish the same attempt; do not create another intent.                     |
+| FROST compare-and-swap outcome unknown       | Re-read the authoritative generation before choosing source or target.                                  |
+| Refresh/reshare cutover fenced or uncertain  | Reconcile or abort the exact fence; admit no new source work meanwhile.                                 |
+| Child installation uncertain                 | Query the declared child key ID/target binding; do not create a competing lineage.                      |
+| Process lost a non-terminal protocol session | Reconcile leases/fences, fail the run, and authorize a new session unless a specific resume API exists. |
 
-The online plan is constructed from the current key generation and public
-presign metadata. `StartSign` then loads the exact generation and available
-presign candidate from `LifecycleStore`, prepares and self-verifies the local
-partial, and calls `CommitSignAttempt` before exposing its broadcast envelope.
+The public API does not provide general mid-round session snapshot recovery.
+`ResumeSign` is the explicit CGGMP21 online-sign exception. A live CGGMP21
+refresh or reshare session may retry its pending durable transition through
+`RetryLifecycleCommit`; that is not a post-crash session reconstruction API.
 
-That commit is the linearization point. It atomically removes availability and
-stores the immutable attempt identity, public Figure 10 verification context,
-and exact canonical outbox. A committed attempt never retains the available
-presign's secret blob or normalized secret tuple.
+Back up lifecycle state, encryption-key metadata, accepted run intent,
+session-ID claims, and transport inbox/outbox state as one recovery design.
+After restore, canonically decode, validate, and re-encode secret records and
+compare the complete generation binding. Corrupt, missing, non-canonical, or
+cross-epoch records fail closed.
 
-Every received partial is checked directly with Figure 10's equation:
-
-```text
-Gamma^sigma_j = DeltaTilde_j^m * STilde_j^r
-```
-
-An invalid partial is attributed to its sender in that round; Figure 10 defines
-no later proof phase.
-
-Delivery and signature completion are separate durable facts. Persist
-recipient acknowledgments and the required verifier-backed broadcast
-certificate with `MarkAttemptDelivered`; persist the final signature with
-`CompleteAttempt` before exposing terminal success.
-
-### Unknown Outcomes and Recovery
-
-A timeout, cancellation, process crash, or I/O error from a lifecycle mutation
-may leave its durable outcome unknown. This is not permission to reuse a
-presign or create another intent.
-
-For `CommitSignAttempt`, retain the exact public `AttemptQuery` from
-`AttemptOutcomeUnknownError` and reconcile only through
-`QueryAttemptOutcome`/`ResumeSign`. `ResumeSign` validates the immutable
-binding and returns the exact stored outbox only while delivery remains
-incomplete. Remote inbound partials still require a durable application inbox
-or at-least-once transport replay.
-
-Never change the digest, context, session ID, signer set, presign ID, attempt
-ID, generation, or epoch during recovery.
-
-## Refresh, Reshare, and Child Generations
-
-### Refresh
-
-CGGMP21 refresh reruns Figure 7/F.1. It preserves the group public key, party
-set, threshold, and chain code while replacing the secret sharing, Paillier and
-Ring-Pedersen auxiliary keys, `RID`, dynamic identifiers, and `EpochID`.
-
-`StartRefresh` loads the exact source generation from `LifecycleStore` and
-acquires an exclusive refresh lease. A successful confirmation set produces a
-target generation. The session begins a generation fence and commits an atomic
-same-key cutover; source material is retired and source-epoch available
-presigns are burned. A protocol-level refresh failure durably disables further
-refresh for that key ID until operator remediation, while signing and
-presigning may remain allowed by policy.
-
-### Reshare
-
-The canonical `ResharePlan` binds the entire source generation and declares
-the target parties, threshold, and generation token. Old-only dealers,
-new-only receivers, and overlap parties start their explicit roles from the
-same accepted intent.
-
-Existing holders use source-generation leases and same-key cutover. New-only
-receivers use a public `ReshareReceiverAnchor` and
-`CommitInitialGenerationFromReshareLease`; they do not pretend to own the
-source secret record. Do not retire the source generation until the configured
-target-holder confirmation and lifecycle commit conditions are satisfied.
-
-### Explicit Child Derivation
-
-Non-hardened BIP32 derivation creates a distinct child key lineage through
-`ChildDerivationPlan` and `StartChildDerivation`. The plan binds the parent
-generation, resolved path, child key ID, target generation, session, and
-security profile. The child run establishes fresh Figure 7 auxiliary material,
-`RID`, dynamic identifiers, and `EpochID` before
-`CommitInitialGenerationFromLease` installs it.
-
-The parent remains current and usable. A child is never an in-memory view of
-the parent and never shares the parent's auxiliary epoch. Presign and sign
-plans reject non-empty derivation paths; callers must select the already
-installed child generation instead.
-
-## Restart and Disaster Recovery
-
-Back up the encrypted lifecycle database, encryption-key metadata, accepted
-run intents, and transport inbox/outbox state as one recovery design. Do not
-back up secret records without their authoritative lifecycle state.
-
-| Durable state                            | Recovery action                                                                                       |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Available presign                        | May be selected only through `PreparePresignCandidate` and atomically claimed by `CommitSignAttempt`. |
-| Committed attempt, delivery incomplete   | Call `ResumeSign` with the exact query and replay only the stored outbox.                             |
-| Attempt delivered, completion incomplete | Restore inbound delivery and finish the same attempt; do not replay as a new intent.                  |
-| Source generation fenced                 | Reconcile or abort the exact cutover fence; do not admit new source work.                             |
-| Target cutover committed                 | Load only the target as current; source blobs and available presigns must be retired.                 |
-| Child installation outcome unknown       | Query the child key ID and exact target binding; do not create a competing lineage.                   |
-
-After restore, canonically decode, validate, and re-encode every generation and
-presign candidate before use. Compare the full binding and known public key,
-not just storage keys. Corrupt, missing, cross-epoch, or non-canonical records
-fail closed.
-
-## Monitoring
+## Monitoring and Secret Handling
 
 Alert on:
 
-- any proof or partial-equation verification failure;
-- Figure 7 decryption-error accusations or Figure 9 red alerts;
-- replay, equivocation, plan mismatch, or cross-epoch messages;
-- presign unavailable, burned, or conflicting-attempt results;
-- unknown lifecycle mutation outcomes;
-- cutover fences that remain unresolved;
-- session timeouts and persistent delivery gaps.
+- proof, confirmation, or partial-equation verification failure;
+- Figure 7 accusations or Figure 9 red alerts;
+- replay, equivocation, plan mismatch, or cross-epoch input;
+- presign burns, unavailable slots, or conflicting attempts;
+- unknown mutation outcomes and unresolved cutover fences; and
+- session timeouts, unknown-session buffer pressure, and persistent delivery
+  gaps.
 
-Logs may contain public party IDs, session IDs, plan hashes, epoch IDs, and
-public attempt descriptors when operationally necessary. They must never
-contain secret scalars, private shares, chain-code contributions, Paillier
-factors, DH exponents except the protocol-defined public accusation, MtA
-witnesses, presign blobs, reconstructed secrets, or raw lifecycle blobs.
+Public party/session/plan/epoch/attempt identifiers may be logged only when
+operational policy permits. Never log secret scalars, shares, chain-code
+contributions, Paillier factors, ordinary DH exponents, MtA witnesses, presign
+blobs, trusted contributions, reconstructed secrets, or raw lifecycle blobs.
 
-## Destruction
-
-Call `Destroy()` on caller-owned sessions, key-share copies, and secret objects
-as soon as they are no longer needed. A shallow Go copy of an opaque secret
-handle may share lifecycle state; use documented clone-returning accessors when
-independent ownership is required.
-
-Go cannot guarantee secure deletion. Use short-lived isolated processes,
-locked-down crash reporting, disabled core dumps, minimal privileges, and
-KMS/HSM-backed storage controls. Do not describe best-effort clearing as a
+Call `Destroy` on caller-owned sessions, shares, presigns, contributions,
+reconstructed keys, and derivation results as soon as they are no longer
+needed. Go cannot guarantee secure deletion; use isolated short-lived
+processes, restrictive crash reporting, disabled core dumps, minimal
+privileges, and encrypted storage. Do not describe best-effort clearing as a
 zeroization guarantee.
 
-## Startup Checklist
+## Readiness Checklist
 
-Before enabling production traffic, verify:
+Before enabling deployment traffic, verify:
 
 1. Every party accepts the same canonical run intent and fresh session ID.
-2. Envelope sender identity comes from authenticated transport.
-3. Secret direct messages use a transport-verified confidential channel.
-4. The production `LifecycleStore` passes conformance and crash tests.
-5. Key generations, presigns, and lifecycle metadata are transactionally
+2. Peer identity and channel protection come from authenticated transport.
+3. Secret direct messages are confidential and broadcasts have full signed
+   certificates.
+4. Initial outboxes are released only after durable startup registration.
+5. Production stores pass conformance, concurrency, crash, corruption, and
+   unknown-outcome tests.
+6. Secret records and integrity-sensitive metadata are transactionally
    encrypted and authenticated.
-6. Every CGGMP21 run names the exact generation and epoch.
-7. Presign availability ends only through atomic claim, explicit burn, or
-   source cutover.
-8. Unknown outcomes retain their exact reconciliation descriptor.
-9. Refresh and reshare use fenced atomic cutover; child derivation creates a
-   distinct key lineage.
-10. Monitoring, backup, incident response, and secret-log scanning are active.
+7. Every CGGMP21 operation names the exact generation and epoch.
+8. Presign availability changes only through atomic claim, burn, or source
+   cutover.
+9. Recovery retains exact descriptors and never invents replacement intent.
+10. Monitoring, backup/restore drills, incident response, and secret-log
+    scanning are active.
 
-## Version Upgrades
+## Upgrades
 
-Every TLV record has one schema-local version in its frame header, while
-`tss.ProtocolVersion` is bound separately into protocol transcripts. Decoders
-reject unknown versions, retired layouts, extra fields, and trailing bytes.
+Canonical TLV records carry schema-local frame versions; semantic
+`tss.ProtocolVersion` is bound separately into protocol digests and
+transcripts. Decoders reject unknown versions, retired layouts, extra fields,
+and trailing bytes.
 
-Coordinate protocol, wire, storage-schema, proof-domain, and lifecycle-store
-upgrades across every party. Regenerate and verify intentional vectors before
+Coordinate protocol, wire, storage schema, proof domains, and lifecycle-store
+changes across all parties. Regenerate and verify intentional vectors before
 deployment. Do not add fallback decoders or compatibility shims for retired
 pre-production records.

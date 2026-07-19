@@ -15,8 +15,11 @@ The paper writes group operations multiplicatively. The Go curve package uses
 additive notation. Thus paper expressions such as `g^x`, `A^x`, and products of
 points appear in code as `[x]G`, `[x]A`, and point addition.
 
-The implementation contract and source locations are summarized in
-[`cggmp21-paper-mapping.md`](cggmp21-paper-mapping.md).
+This document describes the operational contract. For paper equations and exact
+source locations, use
+[`cggmp21-paper-mapping.md`](cggmp21-paper-mapping.md); for proof relations, use
+[`paillier-zk-proofs.md`](paillier-zk-proofs.md). Keeping those details in their
+specialized documents avoids maintaining competing protocol descriptions here.
 
 ## Protocol Surface
 
@@ -49,10 +52,10 @@ Every sign-ready `KeyShare` contains one canonical `EpochContext`:
 SID               stable key-lineage identity
 RID               XOR of the committed per-party RID contributions
 EpochID           digest of SID, RID, committee, threshold, public shares,
-                  Paillier keys, auxiliary moduli, and Pedersen bases
-Identifier[j]     H(SID, RID, party[j]) reduced to a non-zero field element
+                  lineage, and AuxiliaryDigest
+Identifier[j]     first valid H(SID, RID, party[j], counter) field element
 PublicShare[j]    public Shamir share at Identifier[j]
-AuxiliaryDigest   digest of the complete public auxiliary setup
+AuxiliaryDigest   digest of every party's Paillier key and Ring-Pedersen setup
 SourceEpochID     parent epoch for refresh, reshare, or child lineage
 ```
 
@@ -61,8 +64,10 @@ cryptographic substitute for `EpochID`. Plans, payloads, proof domains, and
 durable records bind the exact generation and epoch required by their phase.
 
 Dynamic Shamir identifiers are derived only after every committed RID opening
-has been accepted. Zero or colliding identifiers abort the run. Protocol code
-never substitutes transport `PartyID` values for these field elements.
+has been accepted. Candidates at or above the scalar order are retried with a
+domain-bound counter, at most 256 times; a zero candidate or a collision aborts
+the run. Protocol code never substitutes transport `PartyID` values for these
+field elements.
 
 ## State-Machine Transaction Boundary
 
@@ -80,10 +85,13 @@ wrong-epoch input is rejected without advancing accepted state or releasing an
 envelope. Prepared secret state is registered for cleanup until commit transfers
 ownership to the session or durable store.
 
-All protocol starts require an `EnvelopeGuard`. CGGMP21 direct messages also
-require canonical sender signatures. Broadcast-mode messages require the
-configured full broadcast certificate. Secret-bearing direct messages require
-authenticated confidential transport.
+All protocol starts require an `EnvelopeGuard` and a local `EnvelopeSigner`.
+Every direct CGGMP21 record requires a canonical sender signature; the Figure 7
+decryption-error accusation broadcast does as well. Broadcast-mode messages
+require the configured full broadcast certificate. Records whose policy is
+`ConfidentialityRequired` include secret or proof-bearing direct traffic and the
+Figure 10 partial broadcast, so the transport must enforce the policy rather
+than infer confidentiality from the payload shape.
 
 ## Figure 6: ECDSA Key Generation
 
@@ -93,11 +101,17 @@ repository `KeyShare`.
 ### Round 1: commitment
 
 Party `i` samples its additive key contribution `x_i`, sets `X_i=[x_i]G`,
-prepares the first Schnorr message `A_i`, and broadcasts only:
+prepares the first Schnorr message `A_i`, and computes the paper commitment:
 
 ```text
-V_i = H(SID, i, rho_i, X_i, A_i, u_i)
+V_i = H(label, SID, i, rho_i, X_i, A_i, u_i, planDigest)
 ```
+
+The labeled commitment and explicit plan binding are repository transcript
+hardening around the paper item. The round-1 payload carries `V_i`, a separate
+commitment to the party's chain-code contribution, and repeats the plan digest
+for explicit payload validation. The chain-code commitment is not folded into
+`V_i`.
 
 ### Round 2: opening
 
@@ -113,7 +127,9 @@ same committed first message `A_i` and the common coin. The group public key is
 the sum of all `X_i` in additive notation.
 
 The implementation then immediately enters Figure 7/F.1. No `KeyShare` is
-exposed between these phases.
+exposed between these phases. The chain-code contribution is not revealed in
+Figure 6 round 2; it is opened and checked during final keygen confirmation,
+after the auxiliary run succeeds.
 
 ## Figure 7 and Appendix F.1: Auxiliary Information
 
@@ -122,24 +138,30 @@ adapts share refresh to a threshold Shamir committee. The repository threshold
 `t` means exactly `t` shares reconstruct, so refresh polynomials have degree
 `t-1` and contain `t` coefficients.
 
-### Independent moduli
+### Separate moduli
 
-Each party generates two independent RSA-style moduli:
+Each party's local setup uses separate key-generation calls for two RSA-style
+moduli:
 
 - `N_i`, the Paillier modulus with retained factors `(p_i,q_i)`; and
-- `Nhat_i`, the auxiliary Ring-Pedersen modulus with retained trapdoor
-  `lambda_i`.
+- `Nhat_i`, the auxiliary Ring-Pedersen modulus used to derive public
+  `(Nhat_i,s_i,t_i)` parameters.
 
-They must be generated independently and must differ. Equal bit lengths do not
-permit reusing one factorization for both roles. Public Ring-Pedersen parameters
-are `(Nhat_i,s_i,t_i)` with a `Πprm` proof. Paillier correctness is established
-with `Πmod` and receiver-specific `Πfac` proofs.
+Honest setup requires separate factor material, and the implementation enforces
+both modulus floors and rejects `N_i == Nhat_i`. It does not explicitly check
+`gcd(N_i,Nhat_i) == 1` or prove independent generation to peers; that remains
+an explicit review boundary. Public Ring-Pedersen parameters are accompanied
+by a `Πprm` proof. The auxiliary factors, private key, and trapdoor are destroyed
+after that proof is prepared; only the public parameters and proof survive. The
+factors for the party's Paillier `N_i` remain private key-share material.
+Paillier correctness is established with `Πmod` and receiver-specific `Πfac`
+proofs.
 
 ### Round 1: commit
 
 Party `i` prepares:
 
-- independent Paillier and auxiliary key material;
+- separately generated Paillier and auxiliary key material;
 - a degree-`t-1` zero-sharing or contribution polynomial;
 - one ephemeral DH public key for every peer;
 - commit-ahead Schnorr first messages for the polynomial coefficients;
@@ -225,7 +247,7 @@ B_i = ([b_i]G, [b_i]Y_i + [gamma_i]G)
 
 Each recipient receives verifier-specific `Πenc-elg` proofs for both `K_i/A_i`
 and `G_i/B_i`. The proof domain binds the exact epoch, presign, plan, prover,
-recipient, ciphertext, curve points, ranges, and the recipient's independent
+recipient, ciphertext, curve points, ranges, and the recipient's separate
 auxiliary setup. A common hash of all accepted public round-1 payloads is echoed
 in the following round.
 
@@ -324,9 +346,14 @@ An invalid partial attributes the authenticated sender immediately. Valid
 partials are summed. Low-S normalization and recovery-ID parity adjustment are
 applied only to the final ECDSA signature.
 
-## Unified Durable Lifecycle
+## Durable Lifecycle
 
-`tssrun.LifecycleStore` is the single transactional boundary for CGGMP21 key
+Figure 6/7 keygen and interactive trusted-dealer import return a confirmed
+in-memory `KeyShare`; they do not install it into a store. Before presign,
+refresh, reshare, child derivation, or signing, the application serializes that
+share and bootstraps its first `GenerationBinding` with
+`LifecycleStore.InstallInitialGeneration`. From that point onward,
+`tssrun.LifecycleStore` is the authoritative transactional boundary for key
 generations, run leases, available presigns, online attempts, and generation
 cutover.
 
@@ -348,7 +375,12 @@ On successful Figure 8 completion,
 
 Only then does `PresignSession.Presign()` expose a repeatable,
 public-only `PersistedPresign` descriptor. The session never returns the secret
-tuple. A persistence failure destroys the candidate and aborts the lease.
+tuple. If the store call returns an error, the session withholds the descriptor,
+destroys its local candidate, and attempts to abort the lease. An error does not
+prove that a durable commit failed: a backend may have crossed its atomic commit
+point before reporting an unknown outcome. The store remains authoritative, and
+recovery must follow its exact lease/artifact idempotency and reconciliation
+contract.
 
 An available presign encoding is side-effect free. Its availability is decided
 by `LifecycleStore`, not by a mutable flag embedded in a caller-managed file.
@@ -417,7 +449,7 @@ the final target identifiers.
 The handoff's Paillier material, encrypted contributions, and proofs are
 temporary transport state. After the target contributions verify, every target
 runs all three Figure 7/F.1 rounds. Only the resulting fresh RID, final dynamic
-identifiers, independent Paillier and auxiliary material, and confirmations
+identifiers, separately generated Paillier and auxiliary material, and confirmations
 enter the new `KeyShare`.
 
 Old-only dealers wait for mutually consistent target confirmations but never
@@ -442,7 +474,7 @@ is created with `ChildDerivationPlan` and `StartChildDerivation`:
    `CommitInitialGenerationFromLease`.
 
 The parent remains current and usable. The child receives a new SID, RID,
-`EpochID`, dynamic identifiers, Paillier keys, and independent auxiliary setup.
+`EpochID`, dynamic identifiers, Paillier keys, and a separate auxiliary setup.
 Presign and sign plans reject non-empty signing paths because those protocols
 operate only on an already established lifecycle generation.
 
@@ -453,7 +485,9 @@ Decoders require the exact type identifier, schema version, contiguous expected
 tags, canonical integers and points, bounded lists, and no trailing bytes.
 Retired record shapes are rejected; there is no fallback decoder.
 
-Every Figure 6-10 payload binds, as applicable:
+Each payload or proof binds every context field available when it is constructed
+and relevant to its statement. Across Figures 6-10 those fields include, as
+applicable:
 
 - semantic protocol version, payload type, and round;
 - session, stable SID, RID, `EpochID`, and `PresignID`;
@@ -480,9 +514,11 @@ MinPaillierBits = 3072
 ```
 
 The Paillier modulus `N` and auxiliary modulus `Nhat` are each at least 3072
-bits but are independently generated. `Πmod` and `Πprm` use 128 amplification
-rounds. Reduced parameters are explicit test inputs, are bound into plans and
-proof transcripts, and are never production defaults.
+bits, and local setup generates them separately. Validation rejects equality
+but does not establish cross-modulus coprimality or peer-verifiable independent
+generation. `Πmod` and `Πprm` use 128 amplification rounds. Reduced parameters
+are explicit test inputs, are bound into plans and proof transcripts, and are
+never production defaults.
 
 Fiat-Shamir field challenges use labeled SHA-256 expansion and rejection
 sampling to obtain a canonical non-zero scalar. Modulus challenges use bounded
@@ -495,13 +531,16 @@ The main construction and startup APIs are:
 
 - `NewKeygenPlan` and `StartKeygen` for the combined Figure 6 then Figure 7/F.1
   flow;
+- `NewTrustedDealerImport` and `StartTrustedDealerImport` for the explicitly
+  authorized import ceremony;
 - `NewPresignPlan` and `StartPresign(plan, PresignRuntime)` for Figure 8;
 - `NewSignPlan`, `StartSign(plan, SignRuntime)`, and `ResumeSign` for Figure 10;
 - `NewRefreshPlan` and `StartRefresh` for same-party refresh;
 - `NewResharePlan` with role-specific dealer, receiver, and overlap starts;
-- `NewChildDerivationPlan` and `StartChildDerivation`; and
-- trusted import and reconstruction APIs described in
-  [`security.md`](security.md).
+- `NewChildDerivationPlan` and `StartChildDerivation`;
+- `GenerateTrustedDealerKeyShares` for the explicit trusted-dealer helper; and
+- `ReconstructSecretKey` or `ReconstructSecretKeyWithLimits` for the separately
+  authorized exfiltration boundary described in [`security.md`](security.md).
 
 Plans are shared public intent. Runtime values contain local dependencies such
 as the party identity, guard, random source, context, and lifecycle store.

@@ -61,7 +61,7 @@ Every wire type must have deterministic marshaling and strict decoding:
 
 - repeated `MarshalBinary` calls are byte-identical;
 - `UnmarshalBinary(MarshalBinary(x))` preserves the intended public state;
-- duplicate or missing tags, unknown critical tags, trailing bytes, wrong type
+- duplicate, missing, or unknown tags, trailing bytes, wrong type
   or version, invalid ordering, oversized fields, duplicate party IDs,
   non-minimal integers, and malformed scalars or points reject;
 - semantically equivalent non-canonical values are canonicalized before
@@ -140,14 +140,14 @@ The protocol contract is documented in
 
 ### Dealerless Keygen
 
-| Area                | Required coverage                                                                                                                                                                                                                                                                                    |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proof primitive     | Deterministic prove/verify; wrong secret, public value, or domain; every statement-field substitution; point/scalar boundaries; valid zero response; one-use nonce destruction.                                                                                                                      |
-| Applicability       | Required constant-term proof for 1-of-1, 2-of-2, threshold smaller than committee, full threshold, and trusted-dealer import.                                                                                                                                                                        |
-| Protocol placement  | The 2-of-2 rogue-key regression; proof verification before any confidential round-2 effect; bounded early-share buffering without advancement followed by full revalidation.                                                                                                                         |
-| Reject and cleanup  | Duplicate, equivocation, out-of-order, cross-session, malformed, invalid-proof, and invalid-share paths terminate and clear staged secret state. Guard rejection and plan mismatch retain their separate nonterminal, unblamed behavior.                                                             |
-| Evidence            | Public commitment evidence may use public-envelope data. Confidential-share evidence contains neither the share, the original payload, nor a hash of either.                                                                                                                                         |
-| Transcript contract | The challenge binds protocol/version, ciphersuite, session, round, dealer, threshold, canonical complete party set, plan hash, every coefficient commitment, chain-code commitment, constant commitment, and proof commitment. The completed transcript binds canonical proof bytes in dealer order. |
+| Area                | Required coverage                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Proof primitive     | Deterministic prove/verify; wrong secret, public value, or domain; every statement-field substitution; point/scalar boundaries; valid zero response; one-use nonce destruction.                                                                                                                                                                                                                                                               |
+| Applicability       | Required constant-term proof for 1-of-1, 2-of-2, threshold smaller than committee, full threshold, and trusted-dealer import.                                                                                                                                                                                                                                                                                                                 |
+| Protocol placement  | The 2-of-2 rogue-key regression; proof verification before any confidential round-2 effect; bounded early-share buffering without advancement followed by full revalidation.                                                                                                                                                                                                                                                                  |
+| Reject and cleanup  | Exact duplicates reject without terminating. Explicitly permitted early shares, partials, and confirmations buffer within limits and are fully revalidated before use. Guard-level cross-session and recipient rejection, and protocol plan-mismatch rejection, are nonterminal and unblamed. Equivocation and authenticated malformed or invalid proofs/shares terminate and clear staged secret state where the phase contract requires it. |
+| Evidence            | Public commitment evidence may use public-envelope data. Confidential-share evidence contains neither the share, the original payload, nor a hash of either.                                                                                                                                                                                                                                                                                  |
+| Transcript contract | The challenge binds protocol/version, ciphersuite, session, round, dealer, threshold, canonical complete party set, plan hash, every coefficient commitment, chain-code commitment, constant commitment, and proof commitment. The completed transcript binds canonical proof bytes in dealer order.                                                                                                                                          |
 
 Substitute every challenge field and verify party/dealer input permutation
 cannot change the canonical result. `frostReshareTranscriptHash` retains its
@@ -198,10 +198,14 @@ below refer to that revision.
   the dedicated authenticated accusation payload. Reject that witness in logs,
   ordinary errors, snapshots, or generic evidence, and validate the embedded
   signed direct envelope.
-- Cover missing or mutated `Πprm`, `Πmod`, and receiver-specific `Πfac`;
-  wrong prover/verifier, SID/RID/epoch/plan/profile; small or equal `N`/`Nhat`;
-  broadcast/direct reordering and equivocation; dynamic-identifier
-  zero/collision; and canonical key-share revalidation.
+- Cover missing or mutated `Πprm`, `Πmod`, and receiver-specific `Πfac`; wrong
+  prover/verifier and every context field available when each proof is created;
+  small or equal `N`/`Nhat`; broadcast/direct reordering and equivocation;
+  dynamic-identifier zero/collision; and canonical key-share revalidation.
+  Early `Πprm` precedes RID and EpochID, so it binds the auxiliary parameters,
+  run/session, committee, prover, and plan available at that point. The final
+  transcript and `AuxiliaryDigest` bind the derived RID/EpochID and completed
+  auxiliary state.
 - Ring-Pedersen generation uses known local factors to prove both bases are
   quadratic residues. Public validation separately covers Jacobi `+1`.
 
@@ -218,10 +222,12 @@ below refer to that revision.
 ### Figures 9 and 10
 
 - Figure 9 begins only after a Figure 8 aggregate equation fails; while active,
-  no available presign exists. The first invalid `Πaff-g*` or `Πdec` blames
-  only its authenticated sender. A complete valid proof set with the original
-  alert unresolved returns an unblamed invariant and destroys all witnesses.
-  Early Figure 9 payloads, duplicates, and conflicts obey the universal reject
+  no available presign exists. Verification reconstructs canonical inbound and
+  outbound MtA views and revalidates the previously accepted `Πaff-g` material
+  before checking `Πaff-g*` and `Πdec`. The first invalid proof blames only its
+  authenticated sender. A complete valid proof set with the original alert
+  unresolved returns an unblamed invariant and destroys all witnesses. Early
+  Figure 9 payloads, duplicates, and conflicts obey the universal reject
   contract.
 - Figure 10 has no additional proof phase. An invalid partial is attributed
   through its authenticated envelope and the normalized commitment equation:
@@ -239,11 +245,19 @@ below refer to that revision.
 One public `PresignID` under one exact `GenerationBinding` has at most one
 transition from available to a committed attempt or burn.
 
+- Dealerless keygen and trusted import return in-memory key shares. The caller
+  must explicitly commit the initial lifecycle generation with
+  `InstallInitialGeneration` before `StartPresign` can load it.
 - `StartPresign` loads and canonically validates the exact current generation
   before acquiring a `RunPresign` lease or emitting output.
 - Figure 8 success atomically stores one available presign and completes the
   lease before exposing its public descriptor. Known non-commit leaves no
   descriptor, candidate secret, or active lease.
+- A `CommitAvailablePresignFromLease` error can be outcome-unknown: the atomic
+  rename may already be durable. The session exposes no descriptor and destroys
+  its local candidate; the store is authoritative. Reconcile by re-reading the
+  exact slot or retrying the exact lease/artifact, never by starting a new
+  presign run.
 - Artifact copies and encoding round trips cannot create a second slot.
 - Concurrent different intents have exactly one winner; exact retries recover
   the same immutable attempt and envelope. Conflict, burn, successful commit,
@@ -252,16 +266,17 @@ transition from available to a committed attempt or burn.
   public recovery metadata and the exact outbox remain.
 - `ResumeSign` uses the exact `AttemptQuery`, never a new session or digest.
 
-| Failure point                                                       | Availability result                       |
-| ------------------------------------------------------------------- | ----------------------------------------- |
-| Invalid plan, generation, epoch, signer set, or empty-path binding  | Unchanged; no lease or attempt            |
-| Ordinary load failure before atomic mutation                        | Unchanged                                 |
-| Figure 8 protocol failure                                           | No available presign                      |
-| Figure 8 store known non-commit                                     | No available presign; lease aborted       |
-| Figure 8 atomic commit                                              | Exactly one available presign             |
-| Figure 10 validation or envelope construction failure before commit | Still available                           |
-| Attempt commit, conflict, burn, or outcome unknown                  | Unavailable to every new intent           |
-| Crash after attempt commit                                          | Recover only the exact attempt and outbox |
+| Failure point                                                       | Availability result                              |
+| ------------------------------------------------------------------- | ------------------------------------------------ |
+| Invalid plan, generation, epoch, signer set, or empty-path binding  | Unchanged; no lease or attempt                   |
+| Ordinary load failure before atomic mutation                        | Unchanged                                        |
+| Figure 8 protocol failure                                           | No available presign                             |
+| Figure 8 store known non-commit                                     | No available presign; lease aborted              |
+| Figure 8 store outcome unknown                                      | No local descriptor; reconcile exact store state |
+| Figure 8 atomic commit                                              | Exactly one available presign                    |
+| Figure 10 validation or envelope construction failure before commit | Still available                                  |
+| Attempt commit, conflict, burn, or outcome unknown                  | Unavailable to every new intent                  |
+| Crash after attempt commit                                          | Recover only the exact attempt and outbox        |
 
 Bad input never makes a partial signature or secret presign artifact
 externally visible.
@@ -271,10 +286,14 @@ externally visible.
 - Refresh and reshare preserve the group public key unless explicitly stated.
 - Figure 7/F.1 commits public material before reveal, derives RID from every
   contribution, and derives non-zero collision-free dynamic identifiers.
-- Paillier and auxiliary moduli are independent; equality rejects even when both
-  meet the bit-size floor.
-- Epoch, SID, RID, plan, source epoch, party set, and threshold bind transcripts
-  and proofs.
+- Local setup generates Paillier and auxiliary moduli through separate key
+  generation, enforces both size floors, and rejects equality. Current
+  validation does not explicitly check their GCD or prove independent factor
+  generation to peers.
+- Every proof and transcript binds the context fields available when it is
+  created. Later refresh, reshare, and child-generation transcripts bind epoch,
+  SID, RID, plan, source epoch, party set, and threshold; the early Figure 7
+  `Πprm` exception is described above.
 - Output remains unavailable until every target holder confirms the complete
   new epoch and the lifecycle cutover commits. Serialized shares reject
   missing, partial, and stripped confirmation sets.
@@ -304,7 +323,8 @@ the phase has those boundaries.
 | State at crash                               | Required state after restart                                               |
 | -------------------------------------------- | -------------------------------------------------------------------------- |
 | Keygen or Figure 7 incomplete/unconfirmed    | No current sign-ready generation                                           |
-| Keygen and Figure 7 confirmed                | Exactly one usable current generation                                      |
+| Protocol confirmed, before initial install   | No current sign-ready generation                                           |
+| Initial generation installation durable      | Exactly one usable current generation                                      |
 | Presign lease active, artifact not committed | No available presign; finish or abort the exact lease                      |
 | Available-presign commit durable             | Exactly one available public slot and secret candidate                     |
 | Attempt committed or outcome unknown         | Resume only the bound attempt and exact envelope while delivery is pending |

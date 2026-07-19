@@ -1,14 +1,13 @@
 # Test Inventory
 
-This inventory is the working map for test-suite cleanup. It records the
-current shape of the repository by package, build tag, invariant group, and
-runtime tier so future removals can be justified by invariant coverage rather
-than file count.
+This inventory records the current test-suite shape by package, build tag, and
+invariant group. Use it to locate existing coverage before moving, merging, or
+removing tests; file counts alone do not justify deletion.
 
 Stable policy lives in [`testing-rules.md`](testing-rules.md); normative
 behavioral coverage lives in [`testing-invariants.md`](testing-invariants.md).
 
-Snapshot date: 2026-07-14, after the CGGMP21 CI-timeout tier cleanup.
+Snapshot date: 2026-07-19.
 
 ## Repository Snapshot
 
@@ -20,13 +19,14 @@ rg -n '^func Test' -g '*_test.go'
 rg -n '^func Fuzz' -g '*_test.go'
 rg -n '^func Benchmark' -g '*_test.go'
 rg -n '^func Example' -g '*_test.go'
+rg -n '^//go:build ' -g '*_test.go'
 ```
 
 | Metric                 | Count |
 | ---------------------- | ----: |
-| Test files             |   261 |
-| `Test*` functions      |  1264 |
-| `Fuzz*` functions      |     9 |
+| Test files             |   278 |
+| `Test*` functions      |  1321 |
+| `Fuzz*` functions      |    10 |
 | `Benchmark*` functions |    15 |
 | `Example*` functions   |    21 |
 
@@ -34,9 +34,9 @@ rg -n '^func Example' -g '*_test.go'
 
 | Build tag                    | Files | Intended tier   | Cleanup status                                                                                                     |
 | ---------------------------- | ----: | --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| untagged                     |   194 | Tier 0          | Keep only fast deterministic unit, wire, guard, replay, state-machine, fail-closed, domain, and copy-safety tests. |
+| untagged                     |   210 | Tier 0          | Keep only fast deterministic unit, wire, guard, replay, state-machine, fail-closed, domain, and copy-safety tests. |
 | `tier1`                      |    19 | Tier 1          | Keep reduced-parameter crypto, cached-fixture validation, and local primitive/property checks.                     |
-| `integration`                |    39 | Tier 2          | Keep full lifecycle, HD lifecycle, adversarial delivery, restart, and recovery tests.                              |
+| `integration`                |    40 | Tier 2          | Keep full lifecycle, HD lifecycle, adversarial delivery, restart, and recovery tests.                              |
 | `integration \|\| vectorgen` |     1 | Shared helper   | Only helper-only files needed by both integration and generator code may use this shape.                           |
 | `slowcrypto`                 |     5 | Tier 3          | Keep narrow production-parameter smoke tests.                                                                      |
 | `vectorgen`                  |     3 | generation only | Keep only `TestGenerate*` entry points used by `internal/testvectors/cmd/tvgen`.                                   |
@@ -45,24 +45,19 @@ rg -n '^func Example' -g '*_test.go'
 
 | Package                | Test files | `Test*` functions | Primary invariants                                                                                                       |
 | ---------------------- | ---------: | ----------------: | ------------------------------------------------------------------------------------------------------------------------ |
-| `cggmp21/secp256k1`    |         92 |               315 | CGGMP21 keygen, presign, online sign, refresh, reshare, HD/BIP32, one-use presigns, restart, blame, wire/golden vectors. |
-| `frost/ed25519`        |         41 |               191 | FROST keygen, sign, refresh, reshare, HD, domain separation, copy-safety, vectors.                                       |
-| `.`                    |         25 |               222 | Envelope guards, configs, replay, clone/copy safety, redaction, storage helpers.                                         |
+| `cggmp21/secp256k1`    |         92 |               316 | CGGMP21 keygen, presign, online sign, refresh, reshare, HD/BIP32, one-use presigns, restart, blame, wire/golden vectors. |
+| `frost/ed25519`        |         48 |               224 | FROST keygen, sign, refresh, reshare, HD, domain separation, copy-safety, vectors.                                       |
+| `.`                    |         25 |               207 | Envelope guards, configs, replay, clone/copy safety, redaction, storage helpers.                                         |
 | `internal/wire`        |         16 |               162 | Canonical TLV encoding, tag grammar, limits, duplicate/trailing/malformed rejection.                                     |
 | `internal/zk/paillier` |         36 |               121 | Reduced and production-parameter proof correctness, tamper rejection, transcript binding.                                |
 | `internal/mta`         |         10 |                29 | MtA correctness, proof binding, reduced-parameter integration with Paillier.                                             |
 
-## Tier Decisions
+## Placement Notes
 
-- Tier 0 is for local invariants that do not need a full protocol lifecycle.
-- Tier 1 is for reduced-parameter crypto and proof coverage that is still cheap
-  enough for normal local feedback.
-- Tier 2 is for full protocol lifecycles, HD lifecycles, adversarial delivery,
-  restart/recovery, and any test that needs multiple protocol phases to make the
-  assertion meaningful.
-- Tier 3 remains production-parameter smoke coverage only.
-- `vectorgen` is not a tier. It is only the build tag for generator entry points
-  selected by `tvgen`.
+The normative tier definitions are in
+[`testing-rules.md`](testing-rules.md). The current inventory has two notable
+placement constraints:
+
 - CGGMP21 tests that construct complete Figure 8/9 exchanges, run an
   authoritative persistence lifecycle, or reconstruct and sign with imported
   shares are Tier 2 even when they use reduced cryptographic parameters.
@@ -84,24 +79,3 @@ or stronger assertion.
 | Available-presign commit                | `presign_available_persistence_test.go`, `presign_lifecycle_store_test.go`, `presign_runtime_integration_test.go` | Prove side-effect-free encoding, atomic lease completion, canonical slot identity, burn/conflict behavior, and public-only completion descriptors.                            |
 | Figure 10 attempt claim and recovery    | `crash_recovery_test.go`, `concurrency_test.go`, `state_transition_test.go`, `low_s_test.go`                      | Keep exact outbox recovery, outcome-unknown reconciliation, delivery/completion separation, conflicting concurrent claims, direct partial verification, and low-S completion. |
 | Generation and plan binding             | `lifecycle_plan_integration_test.go`, `lifecycle_test.go`, `presign_context_test.go`, `presign_identity_test.go`  | Bind key ID, generation, epoch, signer set, presign ID, empty-path context, plan digest, and security profile.                                                                |
-
-## Rollout Order
-
-1. Fix tier and generator semantics before deleting tests.
-2. Split broad protocol files by invariant bucket.
-3. Merge duplicate setup with table-driven cases.
-4. Downgrade tests whose invariant can be exercised in a lower tier without
-   weakening realism.
-5. Delete only after the inventory can point to a stronger remaining assertion.
-
-## Follow-Up Areas
-
-- Move FROST full lifecycle, HD lifecycle, refresh, and reshare flows to
-  `integration` while keeping local state transition, encoding, domain, and
-  copy-safety tests untagged.
-- Table-drive root package clone/config/broadcast tests while preserving
-  copy-safety, redaction, and fail-closed assertions.
-- Keep `internal/wire` high coverage, but group tests by codec feature instead
-  of adding catch-all files.
-- Keep ZK and Paillier tier boundaries intact. Merge same-setup proof and
-  tamper cases without downgrading production-parameter smoke tests.

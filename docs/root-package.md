@@ -1,249 +1,165 @@
 # Root Package
 
-The `github.com/islishude/tss` root package provides shared types used by both `frost/ed25519` and `cggmp21/secp256k1`.
+`github.com/islishude/tss` contains the transport-neutral types shared by the
+FROST and CGGMP21 packages. This document focuses on integration boundaries;
+the generated Go documentation is the exhaustive exported-symbol reference.
 
-## LocalConfig
+## Parties, Sessions, and Local Dependencies
 
-`LocalConfig` carries only party-local runtime dependencies. Lifecycle-wide intent such as the session ID, threshold, participant set, signer set, derivation path, and message context belongs in the protocol-specific immutable plan.
+`PartyID` is a `uint32`. Zero is reserved for unset values and broadcast
+recipients. Protocol parties may use any unique non-zero identifiers; they are
+not required to be contiguous. Plan constructors validate and canonicalize the
+party sets used in transcripts.
+
+`SessionID` is a 32-byte public nonce for one protocol run. One coordinator or
+job creates it and distributes it as authenticated run metadata; parties in the
+same run do not generate independent IDs.
+
+```go
+id, err := tss.NewSessionID(nil)       // crypto/rand
+id, err = tss.NewSessionID(myReader)  // caller-provided randomness
+id, err = tss.SessionIDFromBytes(raw) // exact 32-byte parse
+```
+
+`MarshalText` and `String` use hexadecimal encoding, and `Bytes` returns a
+copy. Persist accepted and terminal IDs per protocol namespace. Retirement of
+replay data is safe only after durable policy makes the ID unavailable for
+reuse.
+
+`LocalConfig` contains only party-local execution dependencies:
 
 ```go
 type LocalConfig struct {
-    Self         PartyID
-    Rand         io.Reader       // optional; defaults to crypto/rand
-    Context      context.Context // optional; defaults to context.Background()
-    RoundTimeout time.Duration
-    Log          Logger          // optional; defaults to no-op
+    Self           PartyID
+    Rand           io.Reader
+    Context        context.Context
+    RoundTimeout   time.Duration
+    Log            Logger
+    EnvelopeSigner EnvelopeSigner
 }
 ```
 
-Protocol lifecycle APIs use the plan-first shape:
+Nil `Rand`, `Context`, and `Log` values resolve to `crypto/rand`,
+`context.Background`, and a no-op logger. Shared session ID, committee,
+threshold, signer set, signing intent, derivation context, limits profile, and
+security parameters belong in protocol-specific immutable plans.
+`ThresholdConfig` is the validated state-machine representation assembled from
+a plan plus local dependencies; new lifecycle integrations should use the
+plan-first `Start*` APIs.
 
-```go
-plan, err := secp256k1.NewKeygenPlan(secp256k1.KeygenPlanOption{
-    SessionID: sessionID, Parties: parties, Threshold: threshold,
-})
-session, out, err := secp256k1.StartKeygen(plan, tss.LocalConfig{Self: self}, guard)
-```
+## Envelopes and Receive Facts
 
-Plan constructors canonicalize and validate global intent. Start functions validate `LocalConfig.Self` against that plan and return `ErrCodeInvalidConfig` for invalid local startup configuration.
-
-`ThresholdConfig` remains the protocol state-machine representation assembled from a validated plan plus `LocalConfig`; lifecycle callers should not use it to express global intent.
-
-## PartyID
-
-`PartyID` is a `uint32` identifying one protocol participant. Zero is reserved (unset). Both protocol packages expect parties to be numbered `1..n`.
-
-## SessionID
-
-`SessionID` is a 32-byte nonce separating independent protocol executions.
-
-In production, a session ID belongs to one application-level protocol run or
-job. It is not generated independently by each party. The party or coordinator
-that creates the run generates one session ID and distributes it as part of the
-authenticated public run metadata. Every participant reconstructing the same
-plan must use that same session ID.
-
-A party should persist recently accepted and completed session IDs per protocol
-namespace and reject accidental reuse. The session ID is public but must be
-fresh and unpredictable because it is bound into envelopes, plan digests,
-transcripts, proofs, and replay protection.
-
-```go
-id, _ := tss.NewSessionID(nil)          // crypto/rand
-id, _ := tss.NewSessionID(myReader)     // custom reader
-id, _ := tss.SessionIDFromBytes(raw)    // parse from bytes
-```
-
-It supports `MarshalText`/`UnmarshalText` (hex), `Bytes()` (copy), and `String()` (hex). Reusing a session ID across runs allows cross-session replay.
-
-## Envelope
-
-Protocol state machines emit `tss.Envelope` values. `Envelope` is only the
-canonical wire/protocol message; it does not carry receive-side transport facts.
-Inbound handlers accept `tss.InboundEnvelope`, which is created by opening raw
-wire bytes with transport-verified `ReceiveInfo`.
+`Envelope` is the canonical protocol wire record:
 
 ```go
 type Envelope struct {
-    Protocol       ProtocolID       // e.g. ProtocolCGGMP21Secp256k1
-    SessionID      SessionID        // scopes this message to a run
-    Round          uint8            // protocol round number
-    From           PartyID          // sender
-    To             PartyID          // recipient; 0 means broadcast
-    PayloadType    PayloadType      // identifies the payload schema
-    Payload        []byte           // TLV-encoded protocol payload
+    Protocol        ProtocolID
+    SessionID       SessionID
+    Round           uint8
+    From            PartyID
+    To              PartyID // zero means broadcast
+    PayloadType     PayloadType
+    Payload         []byte
+    SenderSignature []byte
 }
 ```
 
-`Envelope.Digest()` computes an `EnvelopeDigest` from the current public envelope
-metadata and payload. The digest is not cached and is not part of the wire
-schema.
+Use `NewEnvelope(EnvelopeInput{...})`; it validates basic fields and copies
+payload and signature bytes. `MarshalBinary` and `UnmarshalBinary` use strict
+canonical TLV framing and reject unknown type/version, malformed fields,
+limits violations, and trailing data.
 
-### Construction
-
-Production code should use `NewEnvelope(EnvelopeInput{...})`, which validates
-fields and copies the payload. Direct struct literals bypass those checks.
-
-```go
-env, err := tss.NewEnvelope(tss.EnvelopeInput{
-    Protocol:    tss.ProtocolCGGMP21Secp256k1,
-    SessionID:   sessionID,
-    Round:       1,
-    From:        1,
-    PayloadType: "cggmp21.secp256k1.keygen.share",
-    Payload:     payload,
-})
-```
-
-`OpenEnvelope(raw, receiveInfo, opts...)` decodes wire bytes and returns an
-`InboundEnvelope`. It rejects the wrong wire type/schema version, missing peer
-identity, missing channel protection, and peer/envelope sender mismatch before
-the guard runs.
-
-Applications should route inbound envelopes by `(Protocol, SessionID, To)`.
-`OpenEnvelope` validates transport metadata and returns an inbound envelope that
-must be dispatched to the locally registered session for that protocol run.
-The `tssrun` package provides the public `SessionRegistry` and `Dispatcher`
-contracts for this routing layer.
-
-### Encoding
-
-`MarshalBinary()` produces canonical TLV bytes. `UnmarshalBinary()` decodes and rejects:
-
-- Wrong wire type identifier (JSON fallback, legacy GG20 identifiers).
-- Mismatched frame schema version.
-- Missing or malformed fields.
-- Trailing bytes.
-
-See [docs/wire.md](wire.md) for the full canonical encoding specification.
-
-### Envelope Digest
-
-`Digest()` uses the canonical labeled SHA-256 transcript encoding from
-[`wire.md`](wire.md). Its domain label is followed by named entries for
-`protocol`, `version`, `session_id`, `round`, `from`, `to`, `payload_type`, and
-`payload`. The `version` entry is the semantic `tss.ProtocolVersion` constant,
-not mutable envelope state or the TLV frame schema version. It computes from the
-current fields on every call and returns the distinct `EnvelopeDigest` type.
-Protocol transcript hashes such as keygen and presign transcripts are separate
-concepts.
-
-### Transport Semantics
-
-Transport security is not self-declared by the envelope. The receive adapter must
-authenticate the peer, classify the actual channel protection, and call
-`OpenEnvelope`:
+An `Envelope` does not carry trusted transport state. The receive adapter must
+derive `ReceiveInfo` from its authenticated channel and call `OpenEnvelope`:
 
 ```go
-type ReceiveInfo struct {
-    Peer       PartyID
-    Protection ChannelProtection // Unknown, Plaintext, or Confidential
-    ChannelID  string
-    PeerKeyID  string
-    ReceivedAt time.Time
-}
-
 in, err := tss.OpenEnvelope(raw, tss.ReceiveInfo{
     Peer:       peerID,
     Protection: tss.ChannelConfidential,
+    ChannelID:  channelID,
+    PeerKeyID:  peerKeyID,
 })
 ```
 
-Delivery requirements (confidentiality, broadcast consistency) are defined per
-payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`.
-`PolicySet` describes what the protocol requires; `ReceiveInfo` describes what
-the transport actually observed.
+`OpenEnvelope` decodes the wire record, requires an authenticated non-zero
+peer and a defined channel-protection value, and checks
+`ReceiveInfo.Peer == Envelope.From`. It returns an immutable
+`InboundEnvelope`; its accessors return values or defensive copies. Protocol
+policy is applied later by `EnvelopeGuard`.
 
-### DeliveryPolicy & PolicySet
+### Digest and Signature Domains
 
-Each protocol defines a `PolicySet` that maps `(protocol, round, payloadType)` to delivery requirements:
+`Envelope.Digest` binds protocol, semantic `ProtocolVersion`, session, round,
+sender, recipient, payload type, payload, and `SenderSignature` when present.
+It is used for complete-envelope identity and broadcast acknowledgments.
+
+`EnvelopeSigningDigest` and `Envelope.SigningDigest` bind the same message slot
+and payload but deliberately exclude `SenderSignature`. `SignEnvelope` signs
+that digest, and `VerifyEnvelopeSignature` verifies it. The TLV frame version
+is separate from the semantic protocol version.
+
+## Delivery Policy and Guard
+
+Each protocol exports a `PolicySet` keyed by protocol, round, and payload type:
 
 ```go
 type DeliveryPolicy struct {
-    Protocol             ProtocolID
-    Round                uint8
-    PayloadType          PayloadType
-    Mode                 DeliveryMode              // Direct or Broadcast
-    Confidentiality      ConfidentialityPolicy     // Required, Optional, or Forbidden
-    BroadcastConsistency BroadcastConsistencyPolicy // None or Required
+    Protocol               ProtocolID
+    Round                  uint8
+    PayloadType            PayloadType
+    Mode                   DeliveryMode
+    Confidentiality        ConfidentialityPolicy
+    BroadcastConsistency   BroadcastConsistencyPolicy
+    RequireSenderSignature bool
 }
 ```
 
-Unregistered payload types are **rejected by default** (fail-closed). See `cggmp21/secp256k1/policy.go` and `frost/ed25519/policy.go` for the complete matrices.
+Unregistered payload types fail closed. `MustNewPolicySet` also rejects any
+broadcast-mode entry that does not require broadcast consistency.
 
-### EnvelopeGuard
+Production code builds a guard with `GuardConfig.BuildGuard`. It requires a
+non-nil replay cache and broadcast-ack verifier; if any policy requires sender
+signatures, it also requires an `EnvelopeSignatureVerifier`. CGGMP21 starts
+that emit signed direct messages additionally need
+`LocalConfig.EnvelopeSigner`.
 
-`EnvelopeGuard` performs centralized security validation before any protocol handler processes an inbound envelope. It enforces these checks in order:
+For each inbound envelope, the guard verifies:
 
-1. Protocol match
-2. Session ID match
-3. Sender membership in party set
-4. Authenticated transport peer is present
-5. `ReceiveInfo.Peer == Envelope.From`
-6. Channel protection is set
-7. Recipient correctness
-8. Policy lookup (fail-closed for unknown payloads)
-9. Canonical sender-signature verification when required by policy
-10. Delivery mode enforcement (direct vs broadcast)
-11. Confidentiality enforcement against policy
-12. Broadcast consistency certificate verification with `VerifyFull` (when required)
-13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
+- expected protocol and session;
+- allowed non-local sender and transport identity binding;
+- channel-protection classification and direct recipient;
+- registered delivery mode and confidentiality policy;
+- portable sender signature when required;
+- a complete verifier-backed broadcast certificate when required; and
+- replay or equivocation for the canonical message slot.
 
-Each protocol session must be constructed with an `EnvelopeGuard` passed to its
-`Start*` entry point, and handlers call `Validate(inbound)` as their first step.
-A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use
-`GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`, which panics when
-not running under `go test` to prevent accidental production use. Sessions expose
-`Guard()` as a read-only accessor for transport adapters.
+Reshare and other role-dependent sessions call `ValidateForRound` through
+`ValidateInbound` with the sender set allowed for that message. The guard's
+`Parties` value remains the construction-time universe. A narrowly defined
+early-message path may call `ValidateInboundWithoutReplay`, but the message
+must pass full validation before later use.
 
-Direct CGGMP21 policies set `RequireSenderSignature`. Their senders use
-`LocalConfig.EnvelopeSigner`, while guards use
-`EnvelopeSignatureVerifier`. `EnvelopeSigningDigest` excludes the signature
-itself and binds the complete canonical message slot and payload.
+`NewTestEnvelopeGuard` supplies in-memory/no-op verification dependencies and
+panics outside `go test`; it is not a production constructor.
 
-The guard's configured `Parties` field is the construction-time party universe.
-Protocol handlers that have lifecycle-specific sender sets call
-`ValidateForRound(inbound, allowedSenders)` through `ValidateInbound`, so reshare
-and similar flows can accept different sender sets in different rounds without
-weakening transport, policy, replay, or broadcast-certificate checks.
+## Broadcast Certificates
 
-### BroadcastCertificate
+`BroadcastCertificate` binds the protocol, session, round, sender, payload
+type, payload hash, complete envelope digest, recipient set, and one signed
+`BroadcastAck` per recipient.
 
-When a policy requires `BroadcastConsistencyRequired`, the transport must supply
-a `BroadcastCertificate` to `OpenEnvelope` via `WithBroadcastCertificate`,
-proving all parties received the same payload. Use
-`BroadcastCertificate.VerifyFull` for production validation — it requires a
-`BroadcastAckVerifier` to verify individual ack signatures. `VerifyStructure`
-performs structural checks only and is intended for test code and low-level
-parsing.
+`VerifyStructure` checks canonical shape and message binding only.
+`VerifyFull` additionally verifies every acknowledgment signature and is the
+production validation path used by `EnvelopeGuard`. The certificate and ack
+binary decoders reject duplicate, out-of-order, missing, and mismatched
+records.
 
-`BroadcastAck` and `BroadcastCertificate` implement
-`encoding.BinaryMarshaler` and `encoding.BinaryUnmarshaler`. Certificate
-encoding sorts recipients and acknowledgments canonically and rejects duplicate,
-out-of-order, or mismatched acknowledgment records during decoding.
+The root package also provides `BroadcastConsistency` to collect verified
+acknowledgments for one broadcast and detect conflicting digests. Persisting
+the resulting certificate and delivery decision remains an application
+responsibility.
 
-```go
-type BroadcastCertificate struct {
-    Protocol       ProtocolID
-    SessionID      SessionID
-    Round          uint8
-    From           PartyID
-    PayloadType    PayloadType
-    PayloadHash    [32]byte
-    EnvelopeDigest EnvelopeDigest
-    Recipients     PartySet
-    Acks           []BroadcastAck
-}
-```
-
-CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare round 1 commitments require broadcast consistency certificates. All broadcast-mode policies in FROST and CGGMP21 policy sets now require `BroadcastConsistencyRequired`. Tests that route messages in-process use package-local policy helpers to relax broadcast consistency.
-
-In single-process examples, broadcast consistency may be simulated in memory.
-Production transports must collect and persist acknowledgments or certificates
-according to the configured policy before considering broadcast delivery
-complete.
-
-### ReplayCache
+## Replay Cache
 
 ```go
 type ReplayCache interface {
@@ -252,125 +168,63 @@ type ReplayCache interface {
 }
 ```
 
-`CheckAndStore` atomically checks whether a message slot has been seen and returns:
+`MessageSlotKey` contains protocol, session, round, sender, recipient, and
+payload type. The payload hash is deliberately separate:
 
-- `nil` when the slot is new (first use).
-- `ErrDuplicateMessage` when the slot exists with the same payload hash (harmless duplicate, silently dropped by the guard).
-- `ErrEquivocation` when the slot exists with a different payload hash (malicious or faulty sender).
-- `ErrReplayCacheFull` when a bounded cache cannot record a new slot without forgetting existing replay history.
+- a new slot is stored and returns `nil`;
+- the same hash in the same slot returns `ErrDuplicateMessage`;
+- a different hash in the same slot returns `ErrEquivocation`; and
+- a full bounded cache returns `ErrReplayCacheFull` without evicting accepted
+  security state.
 
-`MessageSlotKey` identifies a unique protocol message slot by `(protocol, sessionID, round, from, to, payloadType)`. The payload is excluded from the slot key, so two different payloads in the same slot constitute equivocation.
+`InMemoryReplayCache` is bounded and process-local. Production deployments
+that route across processes need a durable/shared implementation with atomic
+`CheckAndStore`. Call `RetireSession` only after the session is terminal and its
+ID is durably non-reusable. `RefreshScheduler` performs that retirement for
+the refresh session IDs it claims.
 
-`SlotKeyFromEnvelope` and `PayloadHashFromEnvelope` construct the arguments for `CheckAndStore` from an envelope.
+## Protocol Errors and Evidence
 
-`RetireSession` removes only one terminal session's replay history. Call it only
-after the session ID is durably unavailable for reuse. The refresh scheduler
-does this automatically after every claimed run reaches a terminal outcome.
+Protocol state machines return `*ProtocolError` with a machine-readable code,
+round, optional attributed party, optional `Blame`, and wrapped error.
+`errors.Is` and `errors.As` work through `Unwrap`.
 
-Production sessions must use a non-nil `ReplayCache`. An `InMemoryReplayCache`
-is provided for single-process use and fails closed at its configured capacity;
-operators must size it for all concurrently active session replay state and
-retire terminal sessions promptly.
+| Code constants                                                                                                             | Meaning                                                |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `ErrCodeInvalidConfig`, `ErrCodeInvalidMessage`, `ErrCodeRound`                                                            | Invalid startup or message routing/state.              |
+| `ErrCodeDuplicate`, `ErrCodeVerification`, `ErrCodeAggregateSignInvalid`                                                   | Duplicate or failed cryptographic/transcript checks.   |
+| `ErrCodeNotReady`, `ErrCodeConsumed`, `ErrCodeCompleted`, `ErrCodeAborted`                                                 | Lifecycle disposition.                                 |
+| `ErrCodeLimitExceeded`, `ErrCodeTooManyParties`, `ErrCodeTooManySigners`, `ErrCodePayloadTooLarge`, `ErrCodeProofTooLarge` | Explicit resource-limit failure.                       |
+| `ErrCodeInvariant`                                                                                                         | Local bug or corrupted state; never participant blame. |
+| `ErrCodeNotImplemented`                                                                                                    | Explicitly unsupported operation.                      |
 
-## ProtocolError
+`ErrCodeAggregateSignInvalid` remains an exported generic code; the current
+CGGMP21 Figure 10 path verifies and attributes individual invalid partials
+instead.
 
-`ProtocolError` is the stable error shape returned by all protocol state machines.
+`BlameEvidence` is a canonical public record containing the message identity,
+payload and envelope digests, failure kind, reason, and named public inputs.
+`IdentificationRecord` carries the verifiable public artifact for signed
+equivocation, certified broadcast failures, or proof-backed accusations.
+Algorithm-specific verifiers must rebind evidence to trusted session context.
 
-```go
-type ProtocolError struct {
-    Code  string   // machine-readable code (see constants below)
-    Round uint8    // round where the failure occurred
-    Party PartyID  // party attributed with the failure (0 if none)
-    Blame *Blame   // public blame evidence, nil when not attributable
-    Err   error    // wrapped underlying error
-}
-```
+Neither record is a license to copy secrets into evidence. Protocol code must
+exclude private shares, nonces, Paillier factors, MtA witnesses, trusted-dealer
+contributions, and reconstructed secrets. Treat evidence as integrity-sensitive
+public operational data and validate it before storage or sharing.
 
-Error code constants:
+## Signing and HD Types
 
-| Constant                 | Meaning                                                                        |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| `invalid_config`         | Invalid local configuration.                                                   |
-| `invalid_message`        | Malformed or cross-session message.                                            |
-| `duplicate_message`      | Repeated or replayed message within a round.                                   |
-| `wrong_round`            | Message delivered to the wrong protocol round.                                 |
-| `verification_failed`    | Cryptographic or transcript check failed.                                      |
-| `aggregate_sign_invalid` | Aggregate ECDSA signature failed verification (suspect set, not attributable). |
-| `not_ready`              | Not enough messages collected yet.                                             |
-| `consumed`               | One-use material already consumed (presign).                                   |
-| `completed`              | Session already completed.                                                     |
-| `aborted`                | Session previously aborted with attributed blame.                              |
-| `not_implemented`        | Intentionally unsupported feature.                                             |
+`SignIntent` binds a session ID, `SigningContext`, message, and signer set.
+`SigningContext` binds the key ID, chain ID, derivation request, policy domain,
+and message domain. Both protocol packages construct their immutable sign plan
+from this public intent.
 
-`ProtocolError` implements `Unwrap()` for `errors.Is`/`errors.As` support. `NewProtocolError(code, round, party, err)` constructs an error without blame.
+The root package does not define a protocol-neutral signature container:
+FROST returns a 64-byte Ed25519 signature, while CGGMP21 returns its own
+low-S `secp256k1.Signature` with `R`, `S`, and `RecoveryID`.
 
-## Blame & BlameEvidence
-
-When a verification failure can be attributed to a specific party, state machines return a `ProtocolError` with `Blame`:
-
-```go
-type Blame struct {
-    Reason   string    // human-readable failure description
-    Parties  []PartyID // attributed parties
-    Evidence []byte    // deterministic BlameEvidence binary encoding, nil if not attributable
-}
-```
-
-`BlameEvidence` is a canonical TLV binary record binding:
-
-- Protocol and session ID.
-- Round, sender, payload type.
-- Payload hash and envelope digest.
-- Evidence kind (see `EvidenceKind` constants) and reason.
-- Selected public input hashes (commitments, Paillier keys, transcript hashes).
-
-It **never** contains private shares, nonces, or Paillier secret-key material. Evidence is safe to log and share across operators.
-
-The evidence schema version is carried only in the TLV frame header. The
-`EnvelopeDigest` field binds the semantic `ProtocolVersion` used by the
-referenced envelope.
-
-`NewBlameEvidence` constructs a validated record from an envelope.
-`UnmarshalBlameEvidence` decodes and re-validates. CGGMP21-specific evidence is
-validated against trusted session context by `secp256k1.VerifyBlameEvidence`.
-
-`EvidenceKind` constants cover keygen, presign, sign, refresh, reshare, and FROST failure classes.
-
-## Logger
-
-```go
-type Logger interface {
-    Debug(ctx context.Context, msg string, fields ...any)
-    Info(ctx context.Context, msg string, fields ...any)
-    Warn(ctx context.Context, msg string, fields ...any)
-    Error(ctx context.Context, msg string, fields ...any)
-}
-```
-
-`NopLogger()` returns a no-op implementation. `SLogger` adapts `log/slog.Logger` via `tss.NewSLogger(slog.Default())`.
-
-Set `LocalConfig.Log` to capture structured logs. Protocol completion and failure events include `party_id` and `session_id` for cross-party correlation.
-
-## Algorithm & Signature
-
-```go
-const (
-    AlgorithmCGGMP21Secp256k1 Algorithm = "cggmp21-secp256k1"
-    AlgorithmFROSTEd25519     Algorithm = "frost-ed25519"
-)
-
-type Signature struct {
-    Algorithm Algorithm `json:"algorithm"`
-    PublicKey []byte    `json:"public_key"`
-    Data      []byte    `json:"data"`
-    R         []byte    `json:"r,omitempty"`
-    S         []byte    `json:"s,omitempty"`
-}
-```
-
-`Signature` is a protocol-agnostic container. Algorithm-specific packages return `*Signature` from their `Signature()` accessors.
-
-## KeyShare Interface
+`KeyShare` is the common opaque interface:
 
 ```go
 type KeyShare interface {
@@ -382,34 +236,36 @@ type KeyShare interface {
 }
 ```
 
-Both `frost/ed25519.KeyShare` and `cggmp21/secp256k1.KeyShare` implement this
-interface. They are opaque handles; algorithm-specific packages expose public
-metadata through their own snapshot APIs.
-`Destroy()` clears local secret material shared by all shallow copies of the
-same handle. `MarshalBinary()` produces deterministic TLV bytes for
-persistence. Algorithm session completion accessors return independently owned
-shares that require separate destruction.
+`DerivationPath` accepts `m` or non-hardened paths such as `m/0/1`, with at
+most 255 levels. FROST can use the local additive derivation result during
+signing. A CGGMP21 child becomes signable only after the protocol-specific
+`ChildDerivationPlan` installs a distinct lifecycle generation; presign and
+sign plans require an empty derivation path.
 
-## Persistence Helpers
+## Refresh Scheduler
 
-`EncryptKeyShareWithPassphrase` / `DecryptKeyShareWithPassphrase` and `EncryptPresignWithPassphrase` / `DecryptPresignWithPassphrase` provide ChaCha20-Poly1305 encryption with Argon2id key derivation from a passphrase. KDF parameters, version, algorithm, record type, and key ID are stored as authenticated metadata in the envelope:
+`RefreshScheduler` drives protocols whose refreshed share is committed by an
+external `CommitKeyShare(previous, refreshed)` compare-and-swap callback. Its
+callbacks must also load the current share and durably claim the shared
+session ID. A normal commit error transfers no ownership; an error wrapping
+`ErrRefreshCommitOutcomeUnknown` leaves ownership with the callback for exact
+reconciliation.
 
-```go
-raw, _ := share.MarshalBinary()
-encrypted, _ := tss.EncryptKeyShareWithPassphrase(raw, passphrase, "key-1", nil)
-// store encrypted...
+Protocols that own a lifecycle lease and cutover transaction must use their
+native API. In particular, CGGMP21 refresh is not driven through this generic
+scheduler.
 
-raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase, "key-1")
-share, _ := tss.DecodeBinary[secp256k1.KeyShare](raw)
-```
+## Reference Encryption and Logging
 
-Decrypt helpers require the expected key ID and compare it only after AEAD
-authentication. A valid same-type ciphertext encrypted under the same
-passphrase but for another key ID is rejected with `ErrStorageKeyIDMismatch`.
+The passphrase helpers encrypt key-share, presign, and sign-attempt bytes with
+Argon2id-derived ChaCha20-Poly1305 keys. Record type, KDF parameters, and key ID
+are authenticated; decryptors that accept an expected key ID reject a valid
+record for another ID.
 
-These are **reference/demo implementations**. Production deployments should use a KMS or HSM. See [docs/deployment.md](deployment.md) for the full persistence guide.
+These helpers are reference/demo primitives, not a database or production key
+management system. See [`deployment.md`](deployment.md) for storage
+requirements.
 
-## Party Utilities
-
-- `ContainsParty(parties, id)` — reports whether `id` appears in `parties`.
-- `SortParties(parties)` — returns a sorted copy used by plan constructors and protocol handlers that need canonical participant ordering.
+`Logger` provides context-aware `Debug`, `Info`, `Warn`, and `Error` methods.
+`NopLogger` is the default, and `NewSLogger` adapts `log/slog.Logger`. Callers
+must ensure fields never contain secret material.

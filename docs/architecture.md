@@ -1,150 +1,170 @@
 # Architecture
 
-This module is a transport- and database-neutral threshold-signature library.
+This module contains party-local threshold-signature state machines. It is
+transport- and database-neutral: applications own run authorization, peer
+authentication, delivery, durable storage, and recovery.
 
 ## Package Ownership
 
-- `github.com/islishude/tss` owns shared identifiers, envelopes, authenticated
-  inbound opening, guards, replay protection, broadcast certificates, evidence,
-  signing context, and scheduling helpers.
-- `github.com/islishude/tss/tssrun` owns accepted run intent, session registry,
-  dispatch, unknown-session policy, exact generation bindings, and the unified
-  durable lifecycle contract.
+- `github.com/islishude/tss` owns shared identifiers, immutable inbound
+  envelopes, delivery policy, guards, replay and broadcast validation, public
+  evidence, signing context, HD types, and the externally committed refresh
+  scheduler.
+- `github.com/islishude/tss/tssrun` owns run-intent acceptance, active-session
+  routing, unknown-session policy, exact generation bindings, and lifecycle
+  store interfaces.
 - `github.com/islishude/tss/frost/ed25519` owns FROST-style Ed25519 DKG,
-  signing, refresh, resharing, import, reconstruction, and derivation.
-- `github.com/islishude/tss/cggmp21/secp256k1` owns the Figure 6-10 CGGMP21
-  state machines, Figure 7/F.1 epoch creation, trusted import, reconstruction,
-  refresh, resharing, and explicit non-hardened child generation.
-- `internal/wire` owns strict canonical TLV encoding.
-- `internal/transcript` owns repository-defined labeled SHA-256 transcripts.
-- `internal/secret` owns fixed-width secret scalar and signed-integer wrappers.
+  signing, refresh, resharing, trusted import, reconstruction, and derivation.
+- `github.com/islishude/tss/cggmp21/secp256k1` owns CGGMP21 Figures 6-10,
+  Figure 7/F.1 epoch creation, trusted import, reconstruction, refresh,
+  resharing, and explicit child lineages.
+- `internal/wire` owns strict canonical TLV encoding; `internal/transcript`
+  owns repository-defined labeled SHA-256 transcripts; `internal/secret` owns
+  fixed-width secret wrappers.
 - `internal/curve`, `internal/shamir`, `internal/bip32util`,
   `internal/paillier`, `internal/paillier/paillierct`, `internal/mta`, and
-  `internal/zk` own narrow cryptographic primitives. CGGMP21 Figure 8 uses
-  `Πenc-elg`, `Πelog`, and `Πaff-g`; Figure 9 uses setup-less `Πaff-g*` and
-  `Πdec`.
+  `internal/zk/*` own narrow cryptographic primitives.
 - `internal/testharness`, `internal/testutil`, and `internal/testvectors` own
-  shared runners, mutation tools, and canonical fixtures.
+  shared runners, mutation and restart tools, limits-aware fixtures, and
+  canonical vectors.
 
-## Transport Model
+Internal packages are implementation details, not stable APIs.
 
-Protocol starts and inbound handlers return `tss.Envelope` values. The library
-does not open sockets, authenticate peers, encrypt messages, or retry delivery.
+## Receive and Dispatch Path
 
-The receive path is:
+Protocol starts and handlers emit `tss.Envelope` values. The library does not
+open sockets, authenticate peers, encrypt messages, collect acknowledgments,
+or retry delivery.
 
 ```text
-raw bytes + authenticated transport facts
+raw bytes + transport-verified ReceiveInfo + optional certificate
   -> tss.OpenEnvelope
   -> tssrun.Dispatcher.Dispatch
   -> ProtocolSession.Handle
-  -> caller transport
+  -> caller-provided tssrun.Transport.SendAll
 ```
 
-`OpenEnvelope` validates the envelope wire record and binds
-`ReceiveInfo.Peer`. `EnvelopeGuard` then checks protocol, semantic version,
-session, sender, recipient, delivery mode, confidentiality, sender signature,
-broadcast certificate, and replay slot before protocol payload decoding.
+`OpenEnvelope` performs canonical envelope decoding and binds the decoded
+sender to transport facts. `EnvelopeGuard` then checks the expected protocol
+and session, allowed sender set, recipient, registered delivery policy,
+portable sender signature when required, channel confidentiality, broadcast
+certificate, and replay slot. The semantic `tss.ProtocolVersion` is bound into
+digests and transcripts; it is not a mutable envelope field or a separate
+guard check.
 
 Secret-bearing direct payloads require authenticated confidential transport.
-Broadcast payloads require the policy's complete consistency certificate.
+Broadcast-mode protocol policies require a complete verifier-backed
+`BroadcastCertificate`.
 
-## Protocol Handler Transactions
+## State-Machine Transaction Boundary
 
-All state-machine handlers follow:
+The receive boundary first opens the canonical envelope and applies the guard,
+including its atomic replay-slot decision. The protocol handler then follows
+this ownership sequence for the payload:
 
 ```text
-decode -> policy validate -> cryptographic verify
+decode -> semantic validate -> cryptographic verify
        -> prepare transition and outbound envelopes
-       -> commit replay, state, store, and secret ownership
+       -> commit protocol state, durable effects, and secret ownership
        -> release effects
 ```
 
-Rejected input cannot mutate accepted state or emit envelopes. Prepared secret
-objects remain owned by a cleanup stack until commit transfers ownership.
-Outbound envelopes are constructed before the state that authorizes them is
-committed.
+Rejected input must not mutate accepted protocol state or emit envelopes.
+Prepared secret values stay under cleanup ownership until commit transfers
+them to the session or durable store. Outbound envelopes are constructed
+before the state that makes them visible is committed.
 
 Identical duplicates follow the phase's explicit idempotence rule. Conflicting
-duplicates are replay, equivocation, or verification failures and never
-overwrite accepted state. Readiness is derived from authoritative accepted
-party slots rather than a separate message counter.
+duplicates are rejected as replay, equivocation, or verification failures and
+never replace accepted state. Readiness is derived from accepted party slots,
+not from an independent message counter.
 
-## Key and Epoch Model
+## Identity and Generation Model
 
-`GenerationBinding` identifies one durable key ID, local generation token, and
-cryptographic authorization `EpochID`.
+These identifiers have different roles:
 
-FROST generations bind their participant set, commitments, public key, chain
-code, and confirmation set.
+| Identifier                 | Scope                                                                         |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| `tss.SessionID`            | One protocol run; bound into envelopes, plans, transcripts, and proofs.       |
+| `tssrun.KeyGeneration`     | Application/store compare-and-swap token for one key lineage.                 |
+| `tssrun.EpochID`           | Cryptographic authorization epoch.                                            |
+| `tssrun.GenerationBinding` | Exact tuple of key ID, generation token, and epoch ID.                        |
+| CGGMP21 `SID` / `RID`      | Stable key-lineage identity and current auxiliary-protocol common randomness. |
 
-Every sign-ready CGGMP21 generation additionally contains a canonical
-`EpochContext` with stable SID, common RID, dynamic Shamir identifiers, public
-shares, independent Paillier and Ring-Pedersen material, auxiliary digest, and
-source epoch. Figure 6 output becomes usable only after Figure 7/F.1 and the
-target confirmation set complete.
+FROST shares bind the participant set, threshold, commitments, public key,
+chain code, lifecycle plan, and confirmation set.
 
-Opaque key-share accessors return defensive public copies. Secret records use
-canonical binary encoding and must be encrypted by the production store.
+Every sign-ready CGGMP21 generation also contains an `EpochContext` with its
+SID, RID, dynamic Shamir identifiers, public shares, separately generated Paillier and
+Ring-Pedersen material, auxiliary digest, and source epoch. Figure 6 output is
+not exposed as a sign-ready key between Figure 6 and Figure 7/F.1.
 
-## Unified Durable Lifecycle
+Opaque share accessors return defensive public copies. Secret records use
+canonical binary encoding and require caller-managed encryption at the
+production storage boundary.
 
-`tssrun.LifecycleStore` is the transaction boundary for:
+## Durable Lifecycle
 
-- loading and validating the exact current generation;
-- acquiring generation-bound run leases;
-- committing available CGGMP21 presigns;
-- atomically claiming a presign with an immutable signing intent and exact
-  outbox;
-- persisting delivery, completion, abort, and burn state;
-- fencing refresh or reshare cutover; and
-- installing the first generation of a distinct child lineage.
+`tssrun.RunStore` records public run acceptance and local status.
+`tssrun.LifecycleStore` is a separate transactional authority for generation
+records and secret-bearing lifecycle state.
 
-`MemoryLifecycleStore` is for tests and examples. `FileLifecycleStore` is an
-encrypted reference implementation. It takes sorted per-lineage OS locks plus
-the global manifest lock, writes immutable encrypted blobs before one fsynced
-manifest swap, and removes unreferenced crash artifacts when reopening state.
-Neither store replaces a production database transaction and KMS/HSM policy.
+Current CGGMP21 presign, sign, refresh, reshare, and child-derivation starts
+load the authoritative generation and acquire their lifecycle lease before
+returning protocol envelopes. CGGMP21 keygen exposes a confirmed share for an
+application-controlled initial-generation install. FROST keygen, refresh, and
+reshare expose caller-owned shares; their persistence and compare-and-swap
+remain application responsibilities. The generic root refresh scheduler is
+only for externally committed refresh protocols such as FROST, not for
+CGGMP21's native cutover flow.
 
-### CGGMP21 presign and sign
+### Presign and online sign
 
-`StartPresign` loads the exact current generation from `LifecycleStore` and
-acquires a lease before releasing Figure 8 envelopes. Successful completion
-atomically stores the normalized tuple and finishes the lease. The public
-session accessor returns only a persisted descriptor.
+```text
+current CGGMP21 generation
+  -> RunPresign lease
+  -> atomically committed available presign
+  -> RunSign lease
+  -> atomically claimed immutable attempt + exact outbox
+  -> durable delivery and durable completion
+```
 
-`StartSign` constructs and verifies the Figure 10 partial before
-`CommitSignAttempt` atomically validates the generation, claims the available
-presign, removes its secret availability, and stores the exact recovery outbox.
-Unknown outcomes may only recover the same attempt. Delivery and final
-signature visibility are separate durable updates.
+`CommitSignAttempt` is the one-use claim point. An outcome-unknown error may
+only be reconciled with the exact `AttemptQuery`; it never authorizes another
+intent or presign reuse.
 
-### Refresh, reshare, and child generation
+### Refresh, reshare, and child lineage
 
-Refresh and reshare use an exclusive lease and generation fence. The final
-cutover transaction installs the target, retires the source, clears its secret
-blob, and burns source-epoch available presigns.
+Refresh and overlap/source-holder reshare use an exclusive lease followed by a
+generation fence and atomic cutover. Cutover installs the target, retires and
+clears the source record, and burns source-epoch available presigns. Old-only
+reshare dealers use the retirement transaction; new-only receivers use an
+authenticated `ReshareReceiverAnchor` and initial-generation transaction.
 
-A non-hardened BIP32 child is not installed by mutating its parent. The child
-plan binds a distinct key ID and generation, applies the public tweak, runs a
-fresh Figure 7/F.1 auxiliary protocol, and atomically creates the first child
-generation. The parent remains current.
+A CGGMP21 child is a distinct key lineage. Its plan binds the parent and target
+descriptor, the protocol derives fresh auxiliary material, and
+`CommitInitialGenerationFromLease` installs the first child generation without
+mutating the parent.
 
-## Signing Lifecycles
+## Reference Stores
 
-FROST Ed25519 signs in two online rounds: nonce commitments and partial
-signatures. Aggregation verifies each partial and produces a standard 64-byte
-Ed25519 signature.
+`MemoryRunStore`, `MemorySessionRegistry`, `MemoryUnknownEnvelopeStore`, and
+`MemoryLifecycleStore` are in-memory test/example helpers.
 
-CGGMP21 separates Figure 8 offline presigning from Figure 10 signing. The
-available presign contains local one-use normalized secret shares and public
-per-signer commitments. Figure 10 checks each partial directly, sums only valid
-partials, and applies low-S normalization to the final ECDSA signature.
+`FileLifecycleStore` is an encrypted reference `LifecycleStore`. It keeps one
+manifest across all lineages, acquires sorted lineage locks followed by a
+manifest lock, writes immutable encrypted blobs before the fsynced manifest
+swap, and removes unreferenced crash artifacts when state is reopened. It
+demonstrates ordering and crash semantics but does not replace a production
+database transaction or KMS/HSM design.
 
-## Public vs Internal
+## Protocol Outputs
 
-Public packages expose plans, party-local sessions, public metadata snapshots,
-and durability interfaces. Internal packages are deliberately narrow and are
-not stable APIs. Their documentation exists so protocol reviewers can trace
-equations, transcript domains, resource limits, ownership, and failure
-behavior.
+FROST signing has two online rounds and produces a standard 64-byte Ed25519
+signature. CGGMP21 separates a three-round Figure 8 presign from one-round
+Figure 10 signing; every partial is verified directly before valid partials
+are combined into a low-S ECDSA signature.
+
+Protocol equations, proof domains, and phase-specific failure behavior belong
+in the protocol documents, while deployment policy belongs in
+[`deployment.md`](deployment.md).
