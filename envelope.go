@@ -359,6 +359,8 @@ func OpenEnvelopeWithLimits(raw []byte, info ReceiveInfo, limits EnvelopeLimits,
 }
 
 // Digest computes the domain-separated digest of the envelope metadata and payload.
+// This digest is used for envelope equality checks and not for signing.
+// For the digest that the sender signs, use SigningDigest.
 func (e Envelope) Digest() EnvelopeDigest {
 	// The protocol/version/session/round tuple keeps transcripts from one
 	// algorithm or session from being replayed into another.
@@ -375,6 +377,13 @@ func (e Envelope) Digest() EnvelopeDigest {
 		t.AppendBytes("sender_signature", e.SenderSignature)
 	}
 	return t.Sum32()
+}
+
+// SigningDigest computes the domain-separated digest of the envelope metadata and payload,
+// excluding the sender signature. This is the digest that the sender signs to produce
+// SenderSignature.
+func (e Envelope) SigningDigest() [32]byte {
+	return EnvelopeSigningDigest(e)
 }
 
 // ValidateEnvelopePolicy checks delivery mode and confidentiality against a PolicySet.

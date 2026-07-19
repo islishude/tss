@@ -46,13 +46,14 @@ func TestEnvelopeDigestBindsEveryField(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := Envelope{
-		Protocol:    "test",
-		SessionID:   session,
-		Round:       1,
-		From:        1,
-		To:          2,
-		PayloadType: "payload",
-		Payload:     []byte("body"),
+		Protocol:        "test",
+		SessionID:       session,
+		Round:           1,
+		From:            1,
+		To:              2,
+		PayloadType:     "payload",
+		Payload:         []byte("body"),
+		SenderSignature: []byte("signature"),
 	}
 	baseDigest := base.Digest()
 
@@ -81,18 +82,25 @@ func TestEnvelopeDigestStableAfterVersionFieldRemoval(t *testing.T) {
 	t.Parallel()
 
 	env := Envelope{
-		Protocol:    "test",
-		SessionID:   SessionID{1, 2, 3},
-		Round:       4,
-		From:        5,
-		To:          6,
-		PayloadType: "payload",
-		Payload:     []byte("body"),
+		Protocol:        "test",
+		SessionID:       SessionID{1, 2, 3},
+		Round:           4,
+		From:            5,
+		To:              6,
+		PayloadType:     "payload",
+		Payload:         []byte("body"),
+		SenderSignature: []byte("signature"),
 	}
-	got := env.Digest()
-	const wantHex = "c7d9842684509cc7caa8c7de35922993e60f7adc5d25008e859cb9e15a782d48"
-	if hex.EncodeToString(got[:]) != wantHex {
-		t.Fatalf("envelope digest changed: got %x, want %s", got, wantHex)
+	digest := env.Digest()
+	const wantDigest = "db016a81683585071887416577ac88a11ad4f3bb2ad5cff221e6c8efd587a2c0"
+	if hex.EncodeToString(digest[:]) != wantDigest {
+		t.Fatalf("envelope digest changed: got %x, want %s", digest, wantDigest)
+	}
+
+	signingDigest := env.SigningDigest()
+	const wantSigningDigest = "3255eb117a3c05d3a50b531115082926202867d7d8cb36ffde39d58af831eb65"
+	if hex.EncodeToString(signingDigest[:]) != wantSigningDigest {
+		t.Fatalf("envelope signing digest changed: got %x, want %s", signingDigest, wantSigningDigest)
 	}
 }
 
@@ -104,13 +112,14 @@ func TestEnvelopeDigestIsComputedOutsideWireSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	env, err := NewEnvelope(EnvelopeInput{
-		Protocol:    "test",
-		SessionID:   session,
-		Round:       1,
-		From:        1,
-		To:          2,
-		PayloadType: "payload",
-		Payload:     []byte("body"),
+		Protocol:        "test",
+		SessionID:       session,
+		Round:           1,
+		From:            1,
+		To:              2,
+		PayloadType:     "payload",
+		Payload:         []byte("body"),
+		SenderSignature: []byte("signature"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +153,9 @@ func TestEnvelopeDigestIsComputedOutsideWireSchema(t *testing.T) {
 	if got, want := decoded.Digest(), env.Digest(); got != want {
 		t.Fatal("unmarshal changed the envelope digest")
 	}
+	if got, want := decoded.SigningDigest(), env.SigningDigest(); got != want {
+		t.Fatal("unmarshal changed the envelope signing digest")
+	}
 }
 
 func TestEnvelopeUnmarshalRejectsRetiredFieldsAndWrongFrameVersion(t *testing.T) {
@@ -154,12 +166,14 @@ func TestEnvelopeUnmarshalRejectsRetiredFieldsAndWrongFrameVersion(t *testing.T)
 		t.Fatal(err)
 	}
 	env, err := NewEnvelope(EnvelopeInput{
-		Protocol:    "test",
-		SessionID:   session,
-		Round:       1,
-		From:        1,
-		PayloadType: "payload",
-		Payload:     []byte("body"),
+		Protocol:        "test",
+		SessionID:       session,
+		Round:           1,
+		From:            1,
+		To:              2,
+		PayloadType:     "payload",
+		Payload:         []byte("body"),
+		SenderSignature: []byte("signature"),
 	})
 	if err != nil {
 		t.Fatal(err)
