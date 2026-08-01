@@ -14,6 +14,7 @@ run:
 linters:
   default: standard
   enable:
+    - modernize
     - govet
     - errorlint
     - gosec

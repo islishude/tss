@@ -157,7 +157,6 @@ func TestFinishCenteredSignedPlaintextPreservesDeltaAndSigmaRelations(t *testing
 		{name: "sigma", domain: []byte("negative-sigma-response"), a: 7, b: 11, mask: 83},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			a := big.NewInt(tc.a)
 			b := big.NewInt(tc.b)

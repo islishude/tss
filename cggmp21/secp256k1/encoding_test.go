@@ -33,8 +33,8 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	}
 	reordered := cloneKeyShareValue(shares[1])
 	reordered.state.PartyData = make(map[tss.PartyID]keySharePartyData, len(reordered.state.Parties))
-	for i := len(reordered.state.Parties) - 1; i >= 0; i-- {
-		id := reordered.state.Parties[i]
+	for _, v := range slices.Backward(reordered.state.Parties) {
+		id := v
 		reordered.state.PartyData[id] = shares[1].state.PartyData[id].Clone()
 	}
 	raw3, err := reordered.MarshalBinary()

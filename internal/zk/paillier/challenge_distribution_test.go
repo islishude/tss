@@ -51,7 +51,7 @@ func TestModulusProofChallengeDistribution(t *testing.T) {
 		// Verify the y values across rounds are distinct (collision test).
 		// With N ≈ 2^3072, the birthday bound is astronomically large,
 		// so any collision would indicate a severe hash bias.
-		for j := 0; j < i; j++ {
+		for j := range i {
 			yj, _ := deriveModulusY(n, proof.TranscriptHash, j)
 			if y.Cmp(yj) == 0 {
 				t.Fatalf("round %d: y collision with round %d (extremely unlikely)", i, j)
@@ -86,7 +86,7 @@ func TestModulusProofChallengeDistribution(t *testing.T) {
 		yBytes := y.Bytes()
 		for byteIdx := 0; byteIdx < 32 && byteIdx < len(yBytes); byteIdx++ {
 			b := yBytes[len(yBytes)-1-byteIdx] // LSB first
-			for bitIdx := 0; bitIdx < 8; bitIdx++ {
+			for bitIdx := range 8 {
 				if b&(1<<bitIdx) != 0 {
 					bitCounts[byteIdx*8+bitIdx]++
 				}
