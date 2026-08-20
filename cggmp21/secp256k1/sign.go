@@ -941,7 +941,6 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 	}
 }
 
-//nolint:unparam // This helper returns the Handle result shape; duplicate rejection intentionally emits no envelopes.
 func (s *PresignSession) rejectAcceptedPresignDuplicate(env tss.InboundEnvelope, cause error) ([]tss.Envelope, error) {
 	base := env.Envelope()
 	if err := s.validateInbound(env); err != nil {

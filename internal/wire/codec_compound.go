@@ -582,11 +582,11 @@ func (fs fieldSchema) decodeCustom(fv reflect.Value, raw []byte, limitSet FieldL
 // valueMarshaler returns the ValueMarshaler implemented by v, trying the
 // value first and then the addressable pointer (for pointer-receiver methods).
 func valueMarshaler(v reflect.Value) ValueMarshaler {
-	if m, ok := v.Interface().(ValueMarshaler); ok {
+	if m, ok := reflect.TypeAssert[ValueMarshaler](v); ok {
 		return m
 	}
 	if v.CanAddr() {
-		if m, ok := v.Addr().Interface().(ValueMarshaler); ok {
+		if m, ok := reflect.TypeAssert[ValueMarshaler](v.Addr()); ok {
 			return m
 		}
 	}
@@ -596,11 +596,11 @@ func valueMarshaler(v reflect.Value) ValueMarshaler {
 // valueUnmarshaler returns the ValueUnmarshaler implemented by v, trying the
 // value first and then the addressable pointer (for pointer-receiver methods).
 func valueUnmarshaler(v reflect.Value) ValueUnmarshaler {
-	if u, ok := v.Interface().(ValueUnmarshaler); ok {
+	if u, ok := reflect.TypeAssert[ValueUnmarshaler](v); ok {
 		return u
 	}
 	if v.CanAddr() {
-		if u, ok := v.Addr().Interface().(ValueUnmarshaler); ok {
+		if u, ok := reflect.TypeAssert[ValueUnmarshaler](v.Addr()); ok {
 			return u
 		}
 	}

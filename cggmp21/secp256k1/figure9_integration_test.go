@@ -271,8 +271,7 @@ func TestIntegration_CGGMP21_Presign_AggregateZeroDeltaIsUnattributed(t *testing
 	if err == nil || ready {
 		t.Fatalf("zero aggregate delta completion ready=%v err=%v", ready, err)
 	}
-	var redAlert *presignRedAlertError
-	if errors.As(err, &redAlert) {
+	if redAlert, ok := errors.AsType[*presignRedAlertError](err); ok {
 		t.Fatalf("zero aggregate delta incorrectly entered attributed Figure 9 kind %s", redAlert.kind)
 	}
 	if s1.identifying || s1.redAlertKind != "" || len(s1.redAlertPayloads) != 0 {

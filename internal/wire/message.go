@@ -164,7 +164,7 @@ func runBeforeMarshalHook(msg any, v reflect.Value) error {
 		return bm.BeforeMarshalWire()
 	}
 	if v.CanAddr() {
-		if bm, ok := v.Addr().Interface().(BeforeMarshaler); ok {
+		if bm, ok := reflect.TypeAssert[BeforeMarshaler](v.Addr()); ok {
 			return bm.BeforeMarshalWire()
 		}
 	}
@@ -178,7 +178,7 @@ func runValidateHook(msg any, v reflect.Value) error {
 		return val.Validate()
 	}
 	if v.CanAddr() {
-		if val, ok := v.Addr().Interface().(Validator); ok {
+		if val, ok := reflect.TypeAssert[Validator](v.Addr()); ok {
 			return val.Validate()
 		}
 	}
@@ -216,7 +216,7 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 	m, ok := msg.(Message)
 	if !ok {
 		if v.CanAddr() {
-			m, ok = v.Addr().Interface().(Message)
+			m, ok = reflect.TypeAssert[Message](v.Addr())
 		}
 		if !ok {
 			return nil, fmt.Errorf("wire.Marshal: %s does not implement Message", v.Type())
@@ -259,7 +259,7 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 		return raw, nil
 	}
 	if v.CanAddr() {
-		if mm, ok := v.Addr().Interface().(MessageMarshaler); ok {
+		if mm, ok := reflect.TypeAssert[MessageMarshaler](v.Addr()); ok {
 			raw, err := mm.MarshalWireMessage(opts...)
 			if err != nil {
 				return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)

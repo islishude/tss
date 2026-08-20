@@ -148,12 +148,12 @@ func marshalRecordValue(v reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	}
 
 	// BeforeMarshalWire hook.
-	if bm, ok := v.Interface().(BeforeMarshaler); ok {
+	if bm, ok := reflect.TypeAssert[BeforeMarshaler](v); ok {
 		if err := bm.BeforeMarshalWire(); err != nil {
 			return nil, fmt.Errorf("record BeforeMarshalWire: %w", err)
 		}
 	} else if v.CanAddr() {
-		if bm, ok := v.Addr().Interface().(BeforeMarshaler); ok {
+		if bm, ok := reflect.TypeAssert[BeforeMarshaler](v.Addr()); ok {
 			if err := bm.BeforeMarshalWire(); err != nil {
 				return nil, fmt.Errorf("record BeforeMarshalWire: %w", err)
 			}
@@ -161,12 +161,12 @@ func marshalRecordValue(v reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	}
 
 	// Validate before marshal.
-	if val, ok := v.Interface().(Validator); ok {
+	if val, ok := reflect.TypeAssert[Validator](v); ok {
 		if err := val.Validate(); err != nil {
 			return nil, fmt.Errorf("record Validate: %w", err)
 		}
 	} else if v.CanAddr() {
-		if val, ok := v.Addr().Interface().(Validator); ok {
+		if val, ok := reflect.TypeAssert[Validator](v.Addr()); ok {
 			if err := val.Validate(); err != nil {
 				return nil, fmt.Errorf("record Validate: %w", err)
 			}
@@ -242,12 +242,12 @@ func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits, f
 
 	// AfterUnmarshalWire hook — try value, then pointer.
 	if work.CanAddr() {
-		if au, ok := work.Addr().Interface().(AfterUnmarshaler); ok {
+		if au, ok := reflect.TypeAssert[AfterUnmarshaler](work.Addr()); ok {
 			if err := au.AfterUnmarshalWire(); err != nil {
 				return fmt.Errorf("record %s AfterUnmarshalWire: %w", typ.Name(), err)
 			}
 		}
-	} else if au, ok := work.Interface().(AfterUnmarshaler); ok {
+	} else if au, ok := reflect.TypeAssert[AfterUnmarshaler](work); ok {
 		if err := au.AfterUnmarshalWire(); err != nil {
 			return fmt.Errorf("record %s AfterUnmarshalWire: %w", typ.Name(), err)
 		}
@@ -255,12 +255,12 @@ func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits, f
 
 	// Validate after unmarshal.
 	if work.CanAddr() {
-		if val, ok := work.Addr().Interface().(Validator); ok {
+		if val, ok := reflect.TypeAssert[Validator](work.Addr()); ok {
 			if err := val.Validate(); err != nil {
 				return fmt.Errorf("record %s Validate: %w", typ.Name(), err)
 			}
 		}
-	} else if val, ok := work.Interface().(Validator); ok {
+	} else if val, ok := reflect.TypeAssert[Validator](work); ok {
 		if err := val.Validate(); err != nil {
 			return fmt.Errorf("record %s Validate: %w", typ.Name(), err)
 		}
