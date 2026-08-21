@@ -89,14 +89,14 @@ func testElogRelation(t *testing.T) (ElogStatement, ElogWitness) {
 	y := secp.ScalarFromBigInt(big.NewInt(13))
 	lambda := secp.ScalarFromBigInt(big.NewInt(17))
 	return ElogStatement{
-			Generator:         g,
-			LambdaCommitment:  secp.ScalarMult(g, lambda),
-			ElGamalCommitment: secp.Add(secp.ScalarMult(g, y), secp.ScalarMult(x, lambda)),
-			ElGamalBase:       x,
-			ResultCommitment:  secp.ScalarMult(h, y),
-			ResultBase:        h,
-		}, ElogWitness{
-			Y:      testSecpSecretScalar(t, big.NewInt(13)),
-			Lambda: testSecpSecretScalar(t, big.NewInt(17)),
-		}
+		Generator:         g,
+		LambdaCommitment:  secp.ScalarMult(g, lambda),
+		ElGamalCommitment: secp.Add(secp.ScalarMult(g, y), secp.ScalarMult(x, lambda)),
+		ElGamalBase:       x,
+		ResultCommitment:  secp.ScalarMult(h, y),
+		ResultBase:        h,
+	}, ElogWitness{
+		Y:      testSecpSecretScalar(t, big.NewInt(13)),
+		Lambda: testSecpSecretScalar(t, big.NewInt(17)),
+	}
 }
