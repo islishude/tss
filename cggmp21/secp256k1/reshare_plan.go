@@ -93,6 +93,28 @@ type resharePlanState struct {
 	SourceEpochID             []byte                 `wire:"18,bytes,len=32"`                                 // Explicit source-epoch identity; must equal SourceEpoch.EpochID.
 }
 
+func (s *resharePlanState) clone() *resharePlanState {
+	if s == nil {
+		return nil
+	}
+	out := *s
+	out.OldKeygenTranscriptHash = bytes.Clone(s.OldKeygenTranscriptHash)
+	out.OldPlanHash = bytes.Clone(s.OldPlanHash)
+	out.OldGroupPublicKey = bytes.Clone(s.OldGroupPublicKey)
+	out.OldGroupCommitments = clone.ByteSlices(s.OldGroupCommitments)
+	out.OldVerificationShares = make(map[tss.PartyID][]byte, len(s.OldVerificationShares))
+	for id, share := range s.OldVerificationShares {
+		out.OldVerificationShares[id] = bytes.Clone(share)
+	}
+	out.OldParties = s.OldParties.Clone()
+	out.DealerParties = s.DealerParties.Clone()
+	out.NewParties = s.NewParties.Clone()
+	out.ChainCode = bytes.Clone(s.ChainCode)
+	out.SourceEpoch = s.SourceEpoch.Clone()
+	out.SourceEpochID = bytes.Clone(s.SourceEpochID)
+	return &out
+}
+
 // SessionID returns the reshare session identifier.
 func (p *ResharePlan) SessionID() tss.SessionID {
 	if p == nil || p.state == nil {

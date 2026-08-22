@@ -81,37 +81,12 @@ func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 
 // Handle validates and applies one DKG envelope.
 func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
-	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.completed {
-		return nil, completedSessionError(base.Round, base.From)
-	}
-	if s.aborted {
-		return nil, abortedSessionError(base.Round, base.From)
-	}
-	defer func() {
-		if shouldAbortSession(err) {
-			s.abort()
-		}
-	}()
-	tx, err := s.buildKeygenTransition(env)
-	if err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
-		}
-		return nil, err
-	}
-	defer tx.cleanupOnReject()
-	effects, err := tx.apply(s)
-	if err != nil {
-		return nil, err
-	}
-	tx.markCommitted()
-	return effects.envelopes, nil
+	return handleSessionEnvelope(s, env, s.completed, s.aborted, s.abort, s.buildKeygenTransition)
 }
 
 // KeyShare returns the completed local key share when DKG has finished.

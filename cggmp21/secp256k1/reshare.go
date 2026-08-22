@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/clone"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/planvalidation"
@@ -851,30 +850,7 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 	if in == nil || in.state == nil {
 		return nil
 	}
-	out := &ResharePlan{state: &resharePlanState{
-		SessionID:                 in.state.SessionID,
-		OldPaillierProofSessionID: in.state.OldPaillierProofSessionID,
-		OldKeygenTranscriptHash:   bytes.Clone(in.state.OldKeygenTranscriptHash),
-		OldPlanHash:               bytes.Clone(in.state.OldPlanHash),
-		CurveID:                   in.state.CurveID,
-		OldGroupPublicKey:         bytes.Clone(in.state.OldGroupPublicKey),
-		OldGroupCommitments:       clone.ByteSlices(in.state.OldGroupCommitments),
-		OldParties:                in.state.OldParties.Clone(),
-		OldThreshold:              in.state.OldThreshold,
-		DealerParties:             in.state.DealerParties.Clone(),
-		NewParties:                in.state.NewParties.Clone(),
-		NewThreshold:              in.state.NewThreshold,
-		ChainCode:                 bytes.Clone(in.state.ChainCode),
-		PaillierBits:              in.state.PaillierBits,
-		SecurityParams:            in.state.SecurityParams,
-		SourceEpoch:               in.state.SourceEpoch.Clone(),
-		SourceEpochID:             bytes.Clone(in.state.SourceEpochID),
-	}, limits: in.limits}
-	out.state.OldVerificationShares = make(map[tss.PartyID][]byte, len(in.state.OldVerificationShares))
-	for id, share := range in.state.OldVerificationShares {
-		out.state.OldVerificationShares[id] = bytes.Clone(share)
-	}
-	return out
+	return &ResharePlan{state: in.state.clone(), limits: in.limits}
 }
 
 func sameParties(a, b tss.PartySet) bool {

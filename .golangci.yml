@@ -27,6 +27,8 @@ linters:
     - unconvert
     - wastedassign
     - whitespace
+    - dupl
+    - gocognit
   settings:
     govet:
       enable:
@@ -35,6 +37,10 @@ linters:
     gosec:
       excludes:
         - G115
+    dupl:
+      threshold: 150
+    gocognit:
+      min-complexity: 150
   exclusions:
     rules:
       # Keep unparam focused on production code; constant-only test-helper
@@ -42,7 +48,8 @@ linters:
       - path: _test\.go
         linters:
           - unparam
-
+          - dupl
+          - gocognit
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -873,6 +873,28 @@ func validateMemoryLifecycleStateForKey(memory *MemoryLifecycleStore, keyID stri
 	if memory == nil || keyID != fileLifecycleGlobalKeyID {
 		return ErrLifecycleCorrupt
 	}
+	if err := validateMemoryLifecycleGenerations(memory); err != nil {
+		return err
+	}
+	if err := validateMemoryLifecycleLeases(memory); err != nil {
+		return err
+	}
+	if err := validateMemoryLifecycleLeaseEffects(memory); err != nil {
+		return err
+	}
+	if err := validateMemoryLifecycleRefreshDisabled(memory); err != nil {
+		return err
+	}
+	if err := validateMemoryLifecyclePresigns(memory); err != nil {
+		return err
+	}
+	if err := validateMemoryLifecycleAttempts(memory); err != nil {
+		return err
+	}
+	return validateMemoryLifecycleCutovers(memory)
+}
+
+func validateMemoryLifecycleGenerations(memory *MemoryLifecycleStore) error {
 	currentCounts := make(map[string]int, len(memory.current))
 	for indexedKeyID, binding := range memory.current {
 		if indexedKeyID != binding.KeyID || binding.Validate() != nil {
@@ -900,6 +922,10 @@ func validateMemoryLifecycleStateForKey(memory *MemoryLifecycleStore, keyID stri
 			return fmt.Errorf("%w: invalid current generation count", ErrLifecycleCorrupt)
 		}
 	}
+	return nil
+}
+
+func validateMemoryLifecycleLeases(memory *MemoryLifecycleStore) error {
 	if len(memory.leasesByToken) != len(memory.leaseBySession) {
 		return fmt.Errorf("%w: lease index mismatch", ErrLifecycleCorrupt)
 	}
@@ -958,6 +984,10 @@ func validateMemoryLifecycleStateForKey(memory *MemoryLifecycleStore, keyID stri
 			return fmt.Errorf("%w: active exclusive lease overlaps another lease", ErrLifecycleCorrupt)
 		}
 	}
+	return nil
+}
+
+func validateMemoryLifecycleLeaseEffects(memory *MemoryLifecycleStore) error {
 	for token, effect := range memory.leaseEffects {
 		lease := memory.leasesByToken[token]
 		if effect == nil || effect.LeaseToken != token || lease == nil || lease.lease.State == RunLeaseActive {
@@ -1009,6 +1039,10 @@ func validateMemoryLifecycleStateForKey(memory *MemoryLifecycleStore, keyID stri
 			return fmt.Errorf("%w: unknown lease effect", ErrLifecycleCorrupt)
 		}
 	}
+	return nil
+}
+
+func validateMemoryLifecycleRefreshDisabled(memory *MemoryLifecycleStore) error {
 	for disabledKeyID, disabled := range memory.refreshDisabled {
 		if disabled.KeyID != disabledKeyID || !disabled.SessionID.Valid() || validateLifecycleReason(disabled.Reason) != nil {
 			return fmt.Errorf("%w: invalid refresh-disabled record", ErrLifecycleCorrupt)
@@ -1018,6 +1052,10 @@ func validateMemoryLifecycleStateForKey(memory *MemoryLifecycleStore, keyID stri
 			return fmt.Errorf("%w: refresh-disabled record missing lease effect", ErrLifecycleCorrupt)
 		}
 	}
+	return nil
+}
+
+func validateMemoryLifecyclePresigns(memory *MemoryLifecycleStore) error {
 	artifactOwners := make(map[string]string, len(memory.presigns))
 	for presignID, presign := range memory.presigns {
 		if presign == nil || validateLifecycleIdentifier(presignID) != nil || presign.binding.Validate() != nil || len(presign.artifactDigest) != sha256.Size {
@@ -1057,6 +1095,10 @@ func validateMemoryLifecycleStateForKey(memory *MemoryLifecycleStore, keyID stri
 			return fmt.Errorf("%w: invalid presign state", ErrLifecycleCorrupt)
 		}
 	}
+	return nil
+}
+
+func validateMemoryLifecycleAttempts(memory *MemoryLifecycleStore) error {
 	for attemptID, attempt := range memory.attempts {
 		if attempt == nil || attempt.record.Intent.AttemptID != attemptID {
 			return fmt.Errorf("%w: invalid attempt index", ErrLifecycleCorrupt)
@@ -1104,6 +1146,10 @@ func validateMemoryLifecycleStateForKey(memory *MemoryLifecycleStore, keyID stri
 			return fmt.Errorf("%w: attempt missing public presign metadata", ErrLifecycleCorrupt)
 		}
 	}
+	return nil
+}
+
+func validateMemoryLifecycleCutovers(memory *MemoryLifecycleStore) error {
 	activeCutovers := 0
 	for token, cutover := range memory.cutoversByToken {
 		if cutover == nil || cutover.fence.Token != token || token > memory.nextCutoverToken || validateCutoverFence(cutover.fence) != nil {

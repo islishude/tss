@@ -62,6 +62,13 @@ type storedAttempt struct {
 	record SignAttemptRecord
 }
 
+type attemptProgressKind uint8
+
+const (
+	attemptProgressDelivery attemptProgressKind = iota + 1
+	attemptProgressCompletion
+)
+
 type storedCutoverState uint8
 
 const (
@@ -574,47 +581,35 @@ func (s *MemoryLifecycleStore) QueryAttemptOutcome(ctx context.Context, query At
 // MarkAttemptDelivered durably records exact delivery evidence. Repeating the
 // same evidence is idempotent; conflicting evidence fails closed.
 func (s *MemoryLifecycleStore) MarkAttemptDelivered(ctx context.Context, query AttemptQuery, delivery []byte) (SignAttemptRecord, error) {
-	if err := ctx.Err(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	if err := query.Validate(); err != nil {
-		return SignAttemptRecord{}, err
-	}
-	if err := validateLifecycleBlob(delivery, true); err != nil {
-		return SignAttemptRecord{}, fmt.Errorf("%w: invalid delivery evidence", err)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	record, err := s.mutableAttemptLocked(query)
-	if err != nil {
-		return SignAttemptRecord{}, err
-	}
-	if record.Aborted {
-		return SignAttemptRecord{}, ErrAttemptConflict
-	}
-	if record.Delivered {
-		if bytes.Equal(record.Delivery, delivery) {
-			return record.Clone(), nil
-		}
-		return SignAttemptRecord{}, ErrAttemptConflict
-	}
-	record.Delivery = bytes.Clone(delivery)
-	record.Delivered = true
-	s.clearAttemptSecretsIfTerminalLocked(record)
-	return record.Clone(), nil
+	return s.recordAttemptProgress(ctx, query, delivery, attemptProgressDelivery)
 }
 
 // CompleteAttempt durably records an exact completion result. The attempt is
 // terminal only when delivery is also durable.
 func (s *MemoryLifecycleStore) CompleteAttempt(ctx context.Context, query AttemptQuery, completion []byte) (SignAttemptRecord, error) {
+	return s.recordAttemptProgress(ctx, query, completion, attemptProgressCompletion)
+}
+
+func (s *MemoryLifecycleStore) recordAttemptProgress(
+	ctx context.Context,
+	query AttemptQuery,
+	value []byte,
+	kind attemptProgressKind,
+) (SignAttemptRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	if err := query.Validate(); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if err := validateLifecycleBlob(completion, true); err != nil {
-		return SignAttemptRecord{}, fmt.Errorf("%w: invalid completion", err)
+	label := "delivery evidence"
+	if kind == attemptProgressCompletion {
+		label = "completion"
+	} else if kind != attemptProgressDelivery {
+		return SignAttemptRecord{}, ErrLifecycleCorrupt
+	}
+	if err := validateLifecycleBlob(value, true); err != nil {
+		return SignAttemptRecord{}, fmt.Errorf("%w: invalid %s", err, label)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -625,14 +620,29 @@ func (s *MemoryLifecycleStore) CompleteAttempt(ctx context.Context, query Attemp
 	if record.Aborted {
 		return SignAttemptRecord{}, ErrAttemptConflict
 	}
-	if record.Completed {
-		if bytes.Equal(record.Completion, completion) {
+	var recorded bool
+	var existing []byte
+	switch kind {
+	case attemptProgressDelivery:
+		recorded = record.Delivered
+		existing = record.Delivery
+	case attemptProgressCompletion:
+		recorded = record.Completed
+		existing = record.Completion
+	}
+	if recorded {
+		if bytes.Equal(existing, value) {
 			return record.Clone(), nil
 		}
 		return SignAttemptRecord{}, ErrAttemptConflict
 	}
-	record.Completion = bytes.Clone(completion)
-	record.Completed = true
+	if kind == attemptProgressDelivery {
+		record.Delivery = bytes.Clone(value)
+		record.Delivered = true
+	} else {
+		record.Completion = bytes.Clone(value)
+		record.Completed = true
+	}
 	s.clearAttemptSecretsIfTerminalLocked(record)
 	return record.Clone(), nil
 }
