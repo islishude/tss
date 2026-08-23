@@ -254,17 +254,6 @@ golden-verify-all: vectors-verify-wire vectors-verify-protocol ## Alias: verify 
 vet: ## Run go vet.
 	$(GO) vet $(PKGS)
 
-.PHONY: fix
-fix: go-fix ## Alias for go-fix.
-
-.PHONY: go-fix
-go-fix: ## Run go fix on all packages; modifies source when fixes apply.
-	$(GO) fix $(PKGS)
-
-.PHONY: go-fix-check
-go-fix-check: ## Run go fix on all packages and print the patch as a unified diff
-	$(GO) fix --diff $(PKGS)
-
 .PHONY: lint
 lint: ## Run golangci-lint.
 	$(GOLANGCI_LINT) run
@@ -354,10 +343,10 @@ check-cggmp21-paper-paths: ## Reject retired CGGMP21 presign/sign production pat
 # -----------------------------------------------------------------------------
 
 .PHONY: fix-all
-fix-all: go-fix lint-fix fmt tidy ## Apply source-modifying fixes, formatting, and module tidy.
+fix-all: lint-fix fmt tidy ## Apply source-modifying fixes, formatting, and module tidy.
 
 .PHONY: check
-check: build vet lint fmt-check tidy-check verify check-wire-api check-transcript-api check-cggmp21-paper-paths go-fix-check ## Fast local pre-commit check.
+check: build vet lint fmt-check tidy-check verify check-wire-api check-transcript-api check-cggmp21-paper-paths ## Fast local pre-commit check.
 
 .PHONY: ci
 ci: check test-fast ## PR-grade checks; excludes source-modifying fixes, slowcrypto, race, stress, and long fuzzing.
