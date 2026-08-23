@@ -20,6 +20,19 @@ type recordingPresignLifecycleStore struct {
 	failCommit error
 }
 
+type failAfterFirstPresignEnvelopeSigner struct {
+	calls int
+	err   error
+}
+
+func (s *failAfterFirstPresignEnvelopeSigner) SignEnvelopeDigest([32]byte) ([]byte, error) {
+	s.calls++
+	if s.calls > 1 {
+		return nil, s.err
+	}
+	return []byte{1}, nil
+}
+
 func (s *recordingPresignLifecycleStore) LoadCurrentGeneration(ctx context.Context, keyID string) (tssrun.GenerationRecord, error) {
 	s.calls = append(s.calls, "load")
 	return s.LifecycleStore.LoadCurrentGeneration(ctx, keyID)
@@ -62,7 +75,7 @@ func TestPresignRuntimeLoadsClaimsAndPersistsAuthoritatively(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer session.Destroy()
+		defer closeTestSession(t, session)
 		if len(out) == 0 {
 			t.Fatal("StartPresign returned no Figure 8 envelopes")
 		}
@@ -77,11 +90,35 @@ func TestPresignRuntimeLoadsClaimsAndPersistsAuthoritatively(t *testing.T) {
 		}
 	})
 
+	t.Run("post-construction_failure_retains_session_when_abort_is_not_durable", func(t *testing.T) {
+		sessionID := mustPresignRuntimeSessionID(t)
+		plan := testAuthoritativePresignPlan(t, shares[1], sessionID)
+		store, runtime := testAuthoritativePresignRuntime(t, shares[1], plan, nil)
+		finishStore := &failOnceFinishLeaseStore{LifecycleStore: store}
+		runtime.LifecycleStore = finishStore
+		signErr := errors.New("injected post-construction envelope failure")
+		runtime.Local.EnvelopeSigner = &failAfterFirstPresignEnvelopeSigner{err: signErr}
+		session, out, err := StartPresign(plan, runtime)
+		if !errors.Is(err, signErr) || session == nil || len(out) != 0 {
+			t.Fatalf("StartPresign session=%v out=%d err=%v", session != nil, len(out), err)
+		}
+		if session.Status() != tssrun.SessionClosePending {
+			t.Fatalf("failed start status=%v", session.Status())
+		}
+		if err := session.Close(context.Background()); err != nil {
+			t.Fatalf("retry Close after failed start: %v", err)
+		}
+		queried, err := store.QueryRunLease(context.Background(), runtime.Binding, tssrun.RunPresign, sessionID)
+		if err != nil || queried.State != tssrun.RunLeaseAborted {
+			t.Fatalf("retried failed-start lease=%+v err=%v", queried, err)
+		}
+	})
+
 	t.Run("completion_is_persisted_before_descriptor", func(t *testing.T) {
 		sessions, stores := runAuthoritativePresign(t, shares, nil)
 		for party, session := range sessions {
 			descriptor, ok := session.Presign()
-			if !ok || !session.Completed() {
+			if !ok || session.Status() != tssrun.SessionSucceeded {
 				t.Fatalf("party %d did not expose a durable descriptor", party)
 			}
 			if session.key != nil || !session.leaseFinished {
@@ -103,29 +140,39 @@ func TestPresignRuntimeLoadsClaimsAndPersistsAuthoritatively(t *testing.T) {
 			if !ok || again.SlotID() != descriptor.SlotID() {
 				t.Fatalf("party %d descriptor accessor is not repeatable", party)
 			}
-			session.Destroy()
+			closeTestSession(t, session)
 		}
 	})
 
-	t.Run("commit_failure_aborts_and_exposes_nothing", func(t *testing.T) {
+	t.Run("commit_failure_retains_exact_candidate_for_retry", func(t *testing.T) {
 		injected := errors.New("injected presign commit failure")
 		sessions, stores, runErr := runAuthoritativePresignE(t, shares, map[tss.PartyID]error{1: injected})
 		if !errors.Is(runErr, injected) {
 			t.Fatalf("run error = %v, want injected commit failure", runErr)
 		}
 		failed := sessions[1]
-		if failed == nil || !failed.aborted || failed.completed || failed.key != nil || failed.persistedPresign != nil {
-			t.Fatal("commit failure did not destroy and abort the presign session")
+		if failed == nil || failed.aborted || failed.completed || failed.lifecycleCandidate == nil || failed.persistedPresign != nil || failed.Status() != tssrun.SessionCommitPending {
+			t.Fatal("commit failure did not retain one pending presign candidate")
 		}
 		if descriptor, ok := failed.Presign(); ok || descriptor.SlotID() != "" {
 			t.Fatal("commit failure exposed a persisted descriptor")
 		}
-		if !slices.Contains(stores[1].calls, fmt.Sprintf("finish-%d", tssrun.LeaseAborted)) {
-			t.Fatalf("commit failure did not abort lease: %v", stores[1].calls)
+		if slices.Contains(stores[1].calls, fmt.Sprintf("finish-%d", tssrun.LeaseAborted)) {
+			t.Fatalf("commit-pending failure incorrectly aborted its lease: %v", stores[1].calls)
+		}
+		if err := failed.Close(context.Background()); !errors.Is(err, tssrun.ErrLifecycleCommitPending) {
+			t.Fatalf("close pending presign candidate = %v", err)
+		}
+		stores[1].failCommit = nil
+		if err := failed.RetryLifecycleCommit(context.Background()); err != nil {
+			t.Fatalf("retry exact presign commit: %v", err)
+		}
+		if descriptor, ok := failed.Presign(); !ok || descriptor.SlotID() == "" || failed.Status() != tssrun.SessionSucceeded {
+			t.Fatal("exact retry did not expose the persisted descriptor")
 		}
 		for _, session := range sessions {
 			if session != nil {
-				session.Destroy()
+				closeTestSession(t, session)
 			}
 		}
 	})
@@ -202,7 +249,7 @@ func runAuthoritativePresignE(t testing.TB, shares map[tss.PartyID]*KeyShare, fa
 			if party == env.From || (env.To != tss.BroadcastPartyId && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[party].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				return sessions, stores, err
 			}

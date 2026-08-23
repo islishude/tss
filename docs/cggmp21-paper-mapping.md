@@ -36,8 +36,7 @@ the recipient. The accepted early records are subsequently covered by the
 final transcript and epoch auxiliary digest.
 
 Figure 6/7 keygen and interactive trusted import return an in-memory confirmed
-`KeyShare`. A caller must serialize it and call
-`tssrun.LifecycleStore.InstallInitialGeneration` before any store-backed
+`KeyShare`. A caller must use `secp256k1.InstallKeyShare` before any store-backed
 presign, sign, refresh, reshare, or child-derivation start. Later generations
 are installed by their lifecycle transaction.
 

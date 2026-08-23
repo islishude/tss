@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
@@ -78,7 +79,7 @@ func TestKeygenSessionDestroyClearsFigure6AndAuxInfoSecrets(t *testing.T) {
 		pending: &KeyShare{state: &keyShareState{Secret: pendingSecret, ChainCode: pendingChain}},
 	}
 
-	s.Destroy()
+	_ = s.Close(context.Background())
 
 	if !s.aborted || s.state != keygenAborted || s.figure6 != nil || s.auxInfo != nil || s.pending != nil {
 		t.Fatal("keygen session retained terminal secret state")
@@ -154,7 +155,7 @@ func TestPresignSessionDestroyClearsFigure8Secrets(t *testing.T) {
 		}},
 	}
 
-	s.Destroy()
+	_ = s.Close(context.Background())
 
 	if !s.aborted || s.kShare != nil || s.gamma != nil || s.a != nil || s.b != nil || s.xBar != nil || s.paillier != nil || s.derivation != nil || s.parties != nil || len(s.partyIndex) != 0 {
 		t.Fatal("presign session retained terminal secret state")
@@ -186,7 +187,7 @@ func TestSignSessionDestroyClearsAttemptAndPartials(t *testing.T) {
 	}
 	s.attempt.ExactOutbox = exactOutbox
 
-	s.Destroy()
+	_ = s.Close(context.Background())
 
 	if !s.aborted || s.digest != nil || s.publicKey != nil || s.signature != nil || len(s.partials) != 0 || s.attempt.ExactOutbox != nil {
 		t.Fatal("sign session retained terminal attempt state")
@@ -212,7 +213,7 @@ func TestRefreshSessionDestroyClearsPreparedEpoch(t *testing.T) {
 		newShare: &KeyShare{state: &keyShareState{Secret: newSecret, ChainCode: chainCode}},
 	}
 
-	s.Destroy()
+	_ = s.Close(context.Background())
 
 	if !s.aborted || s.auxInfo != nil || s.newShare != nil || len(s.partyData) != 0 || s.accepted != nil {
 		t.Fatal("refresh session retained prepared epoch state")
@@ -280,17 +281,17 @@ func TestProtocolDestroyIsIdempotent(t *testing.T) {
 	refresh := &RefreshSession{partyData: make(map[tss.PartyID]*refreshPartyData)}
 
 	for range 2 {
-		keygen.Destroy()
-		presign.Destroy()
-		sign.Destroy()
-		refresh.Destroy()
+		closeTestSession(t, keygen)
+		_ = presign.Close(context.Background())
+		closeTestSession(t, sign)
+		closeTestSession(t, refresh)
 	}
 	var nilKeygen *KeygenSession
 	var nilPresign *PresignSession
 	var nilSign *SignSession
 	var nilRefresh *RefreshSession
-	nilKeygen.Destroy()
-	nilPresign.Destroy()
-	nilSign.Destroy()
-	nilRefresh.Destroy()
+	_ = nilKeygen.Close(context.Background())
+	_ = nilPresign.Close(context.Background())
+	_ = nilSign.Close(context.Background())
+	_ = nilRefresh.Close(context.Background())
 }

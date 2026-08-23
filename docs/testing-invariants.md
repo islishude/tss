@@ -52,8 +52,16 @@ decode -> policy validate -> cryptographic verify -> prepare transition -> commi
 - A non-bufferable early message rejects without mutation. An explicitly
   bufferable message is stored without processing or advancement and is fully
   revalidated after its prerequisites arrive.
-- Completion, abort, and destruction are terminal unless the public API
-  explicitly defines otherwise.
+- `Status` distinguishes starting, active, commit-pending, success, abort,
+  close-pending, and closed. `CommitPending` accepts only its exact
+  retry/resume path; `ClosePending` preserves recovery metadata and allows an
+  identical `Abort`/`Close` retry.
+- All public session methods serialize on the same lock. Concurrent
+  `Handle/Status/Abort/Close`, registry lookup followed by retire/close, and
+  repeated close remain race-free and do not drop staged candidates.
+- Cancellation at gate wait, decode, proof/party loop, post-prepare, or
+  pre-commit returns without unsafe mutation/effects. After durable mutation
+  begins, the result is authoritative or explicitly unknown.
 
 ## 2. Canonical Wire and Vectors
 
@@ -99,6 +107,10 @@ agree before processing.
   completes; old and new committee shares cannot be mixed.
 - Direct/broadcast policy, confidentiality, and broadcast certificates are
   enforced before handler execution.
+- Production starts require the exact canonical protocol `PolicySet` digest;
+  runtime guard dependency replacement and test-policy use in production fail.
+- Broadcast ACK-before-commit, wrong envelope identity, mixed digest sets, and
+  re-verification failure make both `Complete` and `Certificate` fail closed.
 - Replay and equivocation are detected deterministically.
 - Round transitions remain monotonic under duplicates, corruption,
   out-of-order delivery, wrong recipients, non-signers, invalid thresholds, and
@@ -245,19 +257,19 @@ below refer to that revision.
 One public `PresignID` under one exact `GenerationBinding` has at most one
 transition from available to a committed attempt or burn.
 
-- Dealerless keygen and trusted import return in-memory key shares. The caller
-  must explicitly commit the initial lifecycle generation with
-  `InstallInitialGeneration` before `StartPresign` can load it.
+- Keygen intent has no source binding and predeclares only target key ID and
+  generation. Each protocol's `InstallKeyShare` helper validates and
+  canonically encodes the confirmed share, derives a non-zero canonical epoch,
+  and installs the exact initial generation before store-backed work.
 - `StartPresign` loads and canonically validates the exact current generation
   before acquiring a `RunPresign` lease or emitting output.
 - Figure 8 success atomically stores one available presign and completes the
   lease before exposing its public descriptor. Known non-commit leaves no
   descriptor, candidate secret, or active lease.
-- A `CommitAvailablePresignFromLease` error can be outcome-unknown: the atomic
-  rename may already be durable. The session exposes no descriptor and destroys
-  its local candidate; the store is authoritative. Reconcile by re-reading the
-  exact slot or retrying the exact lease/artifact, never by starting a new
-  presign run.
+- A `CommitAvailablePresignFromLease` error leaves the live session in
+  `CommitPending`: it exposes no descriptor and retains exactly one candidate
+  for `RetryLifecycleCommit`. Ordinary handle/abort/close cannot discard it;
+  never start a new presign run for the slot.
 - Artifact copies and encoding round trips cannot create a second slot.
 - Concurrent different intents have exactly one winner; exact retries recover
   the same immutable attempt and envelope. Conflict, burn, successful commit,
@@ -341,6 +353,9 @@ the phase has those boundaries.
 | Child first generation committed             | Parent and distinct child lineages current                                 |
 
 `LifecycleStore` is the durability boundary.
+`QueryRunLease` recovers the exact binding/kind/session lease and terminal
+state after a crash. Production stores are not required to implement file
+compaction; `LifecycleCompactor` is a separate optional boundary.
 `CommitAvailablePresignFromLease` atomically stores availability and finishes
 the exact lease. `CommitSignAttempt` is the only online-sign linearization
 point: it binds the presign and persists the exact canonical base envelope
@@ -350,6 +365,12 @@ before any partial is returned or emitted. Cover `AttemptCreated`,
 External stores run `tssrun/conformance.RunConformance` and add backend tests
 for encrypted secret blobs, atomic generation comparison, lease fencing, opaque
 identifiers, crash consistency, KMS policy, and database transactions.
+
+The file reference additionally covers one Argon2id derivation per open,
+wrapped random DEK ownership, immutable lineage snapshots, 16-bit global index
+buckets, every write/fsync/root-rename crash boundary, cross-process locking,
+multi-lineage atomicity, strict `manifest.enc` rejection, orphan cleanup only
+on open/recovery/compact, and compaction tombstones that prevent reuse.
 
 Delivery is durable attempt state. Cover ACK idempotency, certificate
 persistence, mismatched payload/transcript/recipient rejection, and cessation of
@@ -378,9 +399,11 @@ blame behavior.
 
 ### Destruction
 
-`Destroy()` provides API-level safety: destroyed key shares, presigns, and
-sessions reject cryptographic use and serialization; repeat destruction is
-idempotent; and the public-metadata-after-destruction contract is explicit.
+`Destroy()` remains the API-level cleanup boundary for secret-bearing key
+shares, private presigns, contributions, and reconstructed secrets. Sessions
+use context-aware `Abort` and `Close`; repeat close is idempotent only after
+durable disposition, and returned persistence errors must be asserted rather
+than ignored.
 
 Do not claim memory-forensic zeroization. Go may copy or retain stack, heap,
 `big.Int`, and slice storage. Test API inaccessibility after destruction, not

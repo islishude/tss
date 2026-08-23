@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	stded25519 "crypto/ed25519"
 	"errors"
 	"io"
@@ -214,11 +215,10 @@ func startFROSTReshareReceiver(oldKey *KeyShare, oldParties, newParties tss.Part
 
 func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig {
 	return tss.LocalConfig{
-		Self:         config.Self,
-		Rand:         config.Rand,
-		Context:      config.Context,
-		RoundTimeout: config.RoundTimeout,
-		Log:          config.Log,
+		Self:    config.Self,
+		Rand:    config.Rand,
+		Context: config.Context,
+		Log:     config.Log,
 	}
 }
 
@@ -230,7 +230,7 @@ func testFROSTPolicies() tss.PolicySet {
 		relaxed[i] = p
 		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
 	}
-	ps, err := tss.NewPolicySet(relaxed...)
+	ps, err := tss.NewTestPolicySet(relaxed...)
 	if err != nil {
 		panic(err)
 	}
@@ -298,10 +298,10 @@ func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := s1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
+	if out, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate commitment should be ignored, out=%d err=%v", len(out), err)
 	} else if len(out) != 0 {
 		t.Fatalf("duplicate commitment produced unexpected output, out=%d", len(out))
@@ -327,12 +327,12 @@ func TestFROSTRejectsConflictingCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	conflict := out3[0]
 	conflict.From = 2
-	_, err = s1.Handle(testutil.DeliverEnvelope(conflict))
+	_, err = s1.Handle(context.Background(), testutil.DeliverEnvelope(conflict))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting commitment, got %v", err)
 	}
@@ -351,10 +351,10 @@ func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
 	if partialFrom2.Payload == nil {
 		t.Fatal("missing partial from party 2")
 	}
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(partialFrom2)); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(partialFrom2)); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := sessions[1].Handle(testutil.DeliverEnvelope(partialFrom2)); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
+	if out, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(partialFrom2)); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate partial should be ignored, out=%d err=%v", len(out), err)
 	} else if len(out) != 0 {
 		t.Fatalf("duplicate partial produced unexpected output, out=%d", len(out))
@@ -376,12 +376,12 @@ func TestFROSTRejectsConflictingPartial(t *testing.T) {
 	if partialFrom2.Payload == nil || partialFrom3.Payload == nil {
 		t.Fatal("missing partials")
 	}
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(partialFrom2)); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(partialFrom2)); err != nil {
 		t.Fatal(err)
 	}
 	conflict := partialFrom3
 	conflict.From = 2
-	_, err := sessions[1].Handle(testutil.DeliverEnvelope(conflict))
+	_, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(conflict))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting partial, got %v", err)
 	}
@@ -407,7 +407,7 @@ func TestFROSTConcurrentMessageHandling(t *testing.T) {
 	errs := make(chan error, 2)
 	for range 2 {
 		wg.Go(func() {
-			_, err := s1.Handle(testutil.DeliverEnvelope(out2[0]))
+			_, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0]))
 			errs <- err
 		})
 	}
@@ -445,7 +445,7 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -480,7 +480,7 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 			continue
 		}
 		delivered = true
-		if _, err := sessions[id].Handle(testutil.DeliverEnvelope(round2[0])); err == nil {
+		if _, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(round2[0])); err == nil {
 			t.Fatal("expected bad partial rejection")
 		}
 	}
@@ -500,15 +500,16 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kg1.Destroy()
+	defer closeTestSession(t, kg1)
 	kg2, _, err := startFROSTKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kg2.Destroy()
-	round2From2, err := kg2.Handle(testutil.DeliverEnvelope(
+	defer closeTestSession(t, kg2)
+	round2From2, err := kg2.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, out1, payloadKeygenCommitments, tss.BroadcastPartyId),
 	))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,13 +517,13 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 	t.Run("broadcast", func(t *testing.T) {
 		mutated := share
 		mutated.To = 0
-		_, err := kg1.Handle(testutil.DeliverEnvelope(mutated))
+		_, err := kg1.Handle(context.Background(), testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrExpectedDirectMessage) {
 			t.Fatalf("expected ErrExpectedDirectMessage, got %v", err)
 		}
 	})
 	t.Run("non-confidential", func(t *testing.T) {
-		_, err := kg1.Handle(testutil.DeliverEnvelopeWithProtection(share, tss.ChannelPlaintext))
+		_, err := kg1.Handle(context.Background(), testutil.DeliverEnvelopeWithProtection(share, tss.ChannelPlaintext))
 		if !errors.Is(err, tss.ErrMissingConfidentiality) {
 			t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
 		}
@@ -545,7 +546,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := unmarshalReshareSharePayload(out2[1].Payload)
@@ -568,7 +569,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.Handle(testutil.DeliverEnvelope(out2[1]))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelope(out2[1]))
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
 		t.Fatal("invalid FROST reshare share did not carry evidence")
@@ -603,7 +604,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		env := out[0]
 		env.To = 2
-		_, err = keygen.Handle(testutil.DeliverEnvelope(env))
+		_, err = keygen.Handle(context.Background(), testutil.DeliverEnvelope(env))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeCompleted)
 	})
 
@@ -623,12 +624,12 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		env := out2[0]
 		env.Payload = []byte("malformed")
-		_, err = sign.Handle(testutil.DeliverEnvelope(env))
+		_, err = sign.Handle(context.Background(), testutil.DeliverEnvelope(env))
 		protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		if protocolErr.Blame == nil || !sign.aborted {
 			t.Fatal("malformed nonce commitment did not cause an attributable terminal abort")
 		}
-		_, err = sign.Handle(testutil.DeliverEnvelope(out2[0]))
+		_, err = sign.Handle(context.Background(), testutil.DeliverEnvelope(out2[0]))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 	})
 
@@ -648,11 +649,11 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 			sessions[id] = session
 			round1 = append(round1, out[0])
 		}
-		round2, err := sessions[2].Handle(testutil.DeliverEnvelope(round1[0]))
+		round2, err := sessions[2].Handle(context.Background(), testutil.DeliverEnvelope(round1[0]))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := sessions[1].Handle(testutil.DeliverEnvelope(round1[1])); err != nil {
+		if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(round1[1])); err != nil {
 			t.Fatal(err)
 		}
 		payload, err := unmarshalSignPartialPayload(round2[0].Payload)
@@ -675,9 +676,9 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		bad := round2[0]
 		bad.Payload = mutated
-		_, err = sessions[1].Handle(testutil.DeliverEnvelope(bad))
+		_, err = sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(bad))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
-		_, err = sessions[1].Handle(testutil.DeliverEnvelope(round2[0]))
+		_, err = sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(round2[0]))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 	})
 }
@@ -801,7 +802,7 @@ func deliverFROSTKeygenMessages(t testing.TB, parties tss.PartySet, sessions map
 				continue
 			}
 			delivered := env
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(delivered))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(delivered))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -840,7 +841,7 @@ func frostSigningRound2(t *testing.T, threshold, n int, signers tss.PartySet, me
 			if id == env.From {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1058,7 +1059,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 }
 
 type frostKeyShareSession interface {
-	Handle(tss.InboundEnvelope) ([]tss.Envelope, error)
+	Handle(context.Context, tss.InboundEnvelope) ([]tss.Envelope, error)
 	KeyShare() (*KeyShare, bool)
 }
 
@@ -1075,7 +1076,7 @@ func deliverReshareMessages[S frostKeyShareSession](t *testing.T, receivers tss.
 				continue
 			}
 			delivered := env
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(delivered))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(delivered))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -1380,14 +1381,14 @@ func TestFROSTSignAcceptsPartialBeforeCommitment(t *testing.T) {
 	}
 
 	// Party 1 receives party 2's commitment → emits party 1's partial.
-	round2, err := s1.Handle(testutil.DeliverEnvelope(out2[0]))
+	round2, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Party 2 receives party 1's partial before party 1's commitment.
 	// This is accepted — the partial is stored.
-	_, err = s2.Handle(testutil.DeliverEnvelope(round2[0]))
+	_, err = s2.Handle(context.Background(), testutil.DeliverEnvelope(round2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1441,7 +1442,7 @@ func TestFROSTSignRejectsMismatchedMessage(t *testing.T) {
 
 	// Deliver commitment from party 2 (who signed "msg2") to party 1 (who signed "msg1").
 	// The plan hash binds the message, so the mismatch is rejected before a partial.
-	_, err = s1.Handle(testutil.DeliverEnvelope(out2[0]))
+	_, err = s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0]))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	// The session should still be alive; lifecycle plan mismatches are non-mutating rejects.
 	if s1.aborted {
@@ -1476,6 +1477,6 @@ func TestFROSTReshareRejectsUnknownSender(t *testing.T) {
 		To:          1,
 		PayloadType: payloadReshareCommitments,
 	}
-	_, err = session.Handle(testutil.DeliverEnvelope(fakeEnv))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelope(fakeEnv))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 }

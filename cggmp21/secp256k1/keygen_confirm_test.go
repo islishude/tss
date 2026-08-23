@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -243,7 +244,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -261,7 +262,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if fromParty2.PayloadType == "" {
 		t.Fatal("missing confirmation from party 2")
 	}
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(fromParty2)); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(fromParty2)); err != nil {
 		t.Fatal(err)
 	}
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
@@ -279,7 +280,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = sessions[1].Handle(testutil.DeliverEnvelope(conflicting))
+	_, err = sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(conflicting))
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
 		t.Fatal("aborted session returned a key share")
@@ -318,7 +319,7 @@ func TestKeygenSessionBuffersConfirmationBeforeLocalFigure7Completion(t *testing
 			if id == env.From || (env.To != tss.BroadcastPartyId && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("prepare party %d with %s from %d: %v", id, env.PayloadType, env.From, err)
 			}
@@ -341,7 +342,7 @@ func TestKeygenSessionBuffersConfirmationBeforeLocalFigure7Completion(t *testing
 		paperConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
 		paperAccepted:      make(map[paperKeygenMessageKey]struct{}),
 	}
-	if _, err := receiver.handlePaperKeygenConfirmationLocked(testutil.DeliverEnvelope(early), newPaperKeygenMessageKey(early)); err != nil {
+	if _, err := receiver.handlePaperKeygenConfirmationLocked(context.Background(), testutil.DeliverEnvelope(early), newPaperKeygenMessageKey(early)); err != nil {
 		t.Fatalf("early confirmation: %v", err)
 	}
 	if receiver.aborted || receiver.paperConfirmations[2] == nil {

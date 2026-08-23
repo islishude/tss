@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -38,7 +39,7 @@ func BenchmarkFROSTSign2of3(b *testing.B) {
 				if id == env.From {
 					continue
 				}
-				_, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+				_, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 				if err != nil {
 					b.Fatal(err)
 				}

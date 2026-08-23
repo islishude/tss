@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 
@@ -554,41 +555,67 @@ func (s *PresignSession) commitPresignCompletion(p *preparedPresignCompletion) e
 		p.committed = true
 		return s.abortPresignRun(errors.New("prepared presign has no valid public metadata"))
 	}
-	expectedSlot, err := PresignSlotID(metadata.PresignID)
-	if err != nil {
+	if _, err := PresignSlotID(metadata.PresignID); err != nil {
 		p.presign.Destroy()
 		p.presign = nil
 		p.committed = true
 		return s.abortPresignRun(err)
 	}
-	storeCtx, cancel := durableStoreContext(s.config.Ctx(), s.lifecycleTimeout)
-	slot, err := PersistPresignFromLeaseWithLimits(storeCtx, s.lifecycleStore, s.lifecycleLease, p.presign, s.limits)
+	s.lifecycleCandidate = p.presign
+	p.presign = nil
+	p.committed = true
+	return s.commitPendingPresignLifecycle(s.config.Ctx())
+}
+
+func (s *PresignSession) commitPendingPresignLifecycle(ctx context.Context) error {
+	if s.lifecycleCandidate == nil {
+		return tssrun.ErrLifecycleCommitPending
+	}
+	metadata, ok := s.lifecycleCandidate.PublicMetadata()
+	if !ok {
+		return tssrun.ErrLifecycleCorrupt
+	}
+	expectedSlot, err := PresignSlotID(metadata.PresignID)
+	if err != nil {
+		return err
+	}
+	storeCtx, cancel := durableStoreContext(ctx, s.lifecycleTimeout)
+	slot, err := PersistPresignFromLeaseWithLimits(storeCtx, s.lifecycleStore, s.lifecycleLease, s.lifecycleCandidate, s.limits)
 	cancel()
 	if err != nil {
-		p.presign.Destroy()
-		p.presign = nil
-		p.committed = true
-		return s.abortPresignRun(fmt.Errorf("persist completed presign: %w", err))
+		return fmt.Errorf("persist completed presign: %w", err)
 	}
 	if slot != expectedSlot {
 		// PersistPresignFromLease validates this before the atomic store call, so
 		// reaching this branch means the local lifecycle integration is corrupt.
-		p.presign.Destroy()
-		p.presign = nil
-		p.committed = true
-		return s.abortPresignRun(fmt.Errorf("%w: persisted presign slot mismatch", tssrun.ErrLifecycleCorrupt))
+		return fmt.Errorf("%w: persisted presign slot mismatch", tssrun.ErrLifecycleCorrupt)
 	}
 	s.leaseFinished = true
 	s.persistedPresign = func() *PersistedPresign {
 		descriptor := newPersistedPresign(slot, metadata)
 		return &descriptor
 	}()
-	p.presign.Destroy()
-	p.presign = nil
-	p.committed = true
+	s.lifecycleCandidate.Destroy()
+	s.lifecycleCandidate = nil
 	s.completed = true
 	s.clearCompletedWitnesses()
 	return nil
+}
+
+// RetryLifecycleCommit retries the exact staged available-presign commit.
+func (s *PresignSession) RetryLifecycleCommit(ctx context.Context) error {
+	if s == nil {
+		return errors.New("nil presign session")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lifecycleCandidate == nil {
+		if s.completed {
+			return nil
+		}
+		return tssrun.ErrLifecycleCommitPending
+	}
+	return s.commitPendingPresignLifecycle(ctx)
 }
 
 func (s *PresignSession) clearCompletedWitnesses() {

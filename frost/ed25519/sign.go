@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 // SignSession tracks a two-round FROST signing exchange for one local party.
 type SignSession struct {
 	mu               sync.Mutex
+	sessionCtx       context.Context
 	key              *KeyShare                       // Caller-owned long-lived key share used to sign.
 	sessionID        tss.SessionID                   // Signing session ID bound into envelopes and planHash.
 	log              tss.Logger                      // Optional protocol logger.
@@ -38,6 +40,7 @@ type SignSession struct {
 	partialSent      bool                            // Whether this party already emitted its partial signature.
 	completed        bool                            // Terminal success flag after signature aggregation.
 	aborted          bool                            // Terminal failure/destruction flag.
+	closed           bool                            // Final caller cleanup completed.
 	signature        []byte                          // Final aggregate Ed25519 signature.
 	commitMessage    tss.Envelope                    // Local round-1 commitment envelope for replay to callers.
 	guard            *tss.EnvelopeGuard              // Transport replay, identity, and policy guard.
@@ -147,7 +150,7 @@ func startSignWithNonceGenerator(
 	if err := key.ValidateWithLimits(plan.limits); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolFROSTEd25519, plan.state.intent.SessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolFROSTEd25519, plan.state.intent.SessionID, local.Self, FROSTPolicies()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	// Validate the local key against the immutable plan before deriving nonce
@@ -262,6 +265,7 @@ func startSignWithNonceGenerator(
 		return nil, nil, err
 	}
 	s := &SignSession{
+		sessionCtx:       runtime.Local.Ctx(),
 		key:              key,
 		sessionID:        plan.state.intent.SessionID,
 		log:              tss.NopLogger(),
@@ -307,13 +311,16 @@ func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
 }
 
 // Handle validates and applies one FROST signing envelope.
-func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *SignSession) Handle(ctx context.Context, env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := tss.CheckHandlerContext(ctx, s.sessionCtx); err != nil {
+		return nil, err
+	}
 	if s.completed {
 		return nil, completedSessionError(base.Round, base.From)
 	}
@@ -331,6 +338,9 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 		return nil, err
 	}
 	defer tx.cleanupOnReject()
+	if err := tss.CheckHandlerContext(ctx, s.sessionCtx); err != nil {
+		return nil, err
+	}
 	effects, err := tx.apply(s)
 	if err != nil {
 		return nil, err

@@ -44,14 +44,14 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 		return err
 	}
 	defer payload.S.Destroy()
-	if s.guard == nil || s.guard.AckVerifier == nil {
+	if s.guard == nil || s.guard.AckVerifier() == nil {
 		return tss.ErrMissingAckVerifier
 	}
 	if ack != nil {
 		if !s.outbox.DeliveryPolicy.Recipients.Contains(ack.Party) {
 			return errors.New("broadcast acknowledgement party is not a delivery recipient")
 		}
-		if err := tss.VerifyBroadcastAck(env, *ack, s.guard.AckVerifier); err != nil {
+		if err := tss.VerifyBroadcastAck(env, *ack, s.guard.AckVerifier()); err != nil {
 			return err
 		}
 		for i := range s.deliveryAcks {
@@ -71,7 +71,7 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 	if certificate == nil {
 		return nil
 	}
-	if err := certificate.VerifyFull(env, s.outbox.DeliveryPolicy.Recipients, s.guard.AckVerifier); err != nil {
+	if err := certificate.VerifyFull(env, s.outbox.DeliveryPolicy.Recipients, s.guard.AckVerifier()); err != nil {
 		return err
 	}
 	acks := slices.Clone(certificate.Acks)
@@ -81,7 +81,7 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 		return err
 	}
 	delivery := deliveryForOutbox(s.outbox, canonical)
-	rawDelivery, err := marshalSignAttemptDelivery(delivery, s.limits, s.guard.AckVerifier)
+	rawDelivery, err := marshalSignAttemptDelivery(delivery, s.limits, s.guard.AckVerifier())
 	if err != nil {
 		return err
 	}
@@ -124,13 +124,16 @@ func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
 // Handle validates and applies one online signing envelope.
 //
 // Follows the handler template (see doc.go).
-func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *SignSession) Handle(ctx context.Context, env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := tss.CheckHandlerContext(ctx, s.sessionCtx); err != nil {
+		return nil, err
+	}
 	if s.completed {
 		return nil, completedSessionError(base.Round, base.From)
 	}
@@ -142,7 +145,10 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 		if shouldAbortSession(err) {
 			if s.coordinator != nil {
 				if abortErr := s.coordinator.abort(s.coordinatorCtx, "terminal online-sign protocol rejection"); abortErr != nil {
+					s.closePending = true
 					err = errors.Join(err, fmt.Errorf("persist sign attempt abort: %w", abortErr))
+				} else {
+					s.closePending = false
 				}
 			}
 			s.abort()
@@ -153,6 +159,9 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 		return nil, err
 	}
 	defer tx.cleanupOnReject()
+	if err := tss.CheckHandlerContext(ctx, s.sessionCtx); err != nil {
+		return nil, err
+	}
 	effects, err := tx.apply(s)
 	if err != nil {
 		return nil, err

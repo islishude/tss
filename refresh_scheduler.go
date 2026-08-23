@@ -23,12 +23,12 @@ type RefreshRunConfig struct {
 // install or otherwise durably commit their candidate share themselves.
 type RefreshSession[K KeyShare] interface {
 	// Handle validates and applies one inbound refresh envelope.
-	Handle(InboundEnvelope) ([]Envelope, error)
+	Handle(context.Context, InboundEnvelope) ([]Envelope, error)
 	// KeyShare returns an independent caller-owned share after completion. The
-	// returned share must remain valid after Destroy is called on the session.
+	// returned share must remain valid after Close is called on the session.
 	KeyShare() (K, bool)
-	// Destroy clears secret material retained by the session.
-	Destroy()
+	// Close clears secret material retained by the session and reports cleanup failures.
+	Close(context.Context) error
 }
 
 // RefreshRunner adapts an algorithm-specific, externally committed refresh
@@ -211,7 +211,11 @@ func (s *RefreshScheduler[K]) runOnce(ctx context.Context) (runErr error) {
 	if isNilRefreshValue(session) {
 		return errors.New("start refresh returned nil session")
 	}
-	defer session.Destroy()
+	defer func() {
+		if closeErr := session.Close(context.WithoutCancel(ctx)); closeErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("close refresh session: %w", closeErr))
+		}
+	}()
 
 	if err := sendRefreshEnvelopes(ctx, s.opts.Transport, out); err != nil {
 		return fmt.Errorf("send initial refresh envelopes: %w", err)
@@ -237,7 +241,7 @@ func (s *RefreshScheduler[K]) runOnce(ctx context.Context) (runErr error) {
 		if err != nil {
 			return fmt.Errorf("receive refresh envelope: %w", err)
 		}
-		out, err := session.Handle(in)
+		out, err := session.Handle(ctx, in)
 		if err != nil {
 			return fmt.Errorf("handle refresh envelope: %w", err)
 		}

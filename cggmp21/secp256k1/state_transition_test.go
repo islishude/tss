@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ func TestPresignSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadPresignRound1,
 		Payload:     []byte{},
 	}
-	_, err = s.Handle(testutil.DeliverEnvelope(env))
+	_, err = s.Handle(context.Background(), testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil session rejection")
 	}
@@ -53,7 +54,7 @@ func TestSignSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadSignPartial,
 		Payload:     []byte{},
 	}
-	_, err = s.Handle(testutil.DeliverEnvelope(env))
+	_, err = s.Handle(context.Background(), testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil session rejection")
 	}
@@ -75,7 +76,7 @@ func TestKeygenSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadFigure6Commitment,
 		Payload:     []byte{},
 	}
-	_, err = s.Handle(testutil.DeliverEnvelope(env))
+	_, err = s.Handle(context.Background(), testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil keygen session rejection")
 	}

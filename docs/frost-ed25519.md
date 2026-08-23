@@ -64,8 +64,11 @@ behavior.
 
 Construct and validate outbound envelopes before making the state that
 authorizes them visible. Register a started session before releasing its first
-outbound envelope, and keep routing until `Completed()` or the relevant output
-accessor reports completion.
+outbound envelope, and keep routing while `Status() == SessionActive`. Treat
+`CommitPending`, `Succeeded`, `Aborted`, `ClosePending`, and `Closed` as
+distinct outcomes. `Handle` checks its delivery context with the session
+context at decode, proof/party-loop, preparation, and pre-commit boundaries;
+one curve operation is not interrupted mid-call.
 
 FROST refresh and reshare return staged key shares; the application owns the
 durable compare-and-swap cutover. Do not select a generation from process-local
@@ -103,6 +106,12 @@ bytes or enter plan digests.
 fixed-width secret scalar and chain-code buffer. This is best-effort
 process-memory cleanup, not a secure-erasure guarantee; see
 [`security.md`](security.md#go-memory-erasure-boundary).
+
+After confirmed keygen, `GenerationBindingForKeyShare` derives the same
+canonical non-zero epoch at every party from the shared public result.
+`InstallKeyShare` fully validates and canonically encodes the share before
+installing the caller-predeclared key ID and generation in a `LifecycleStore`.
+Keygen admission therefore has no caller-selected epoch.
 
 ## Distributed Key Generation
 
@@ -313,7 +322,9 @@ An authenticated malformed nonce commitment or partial payload, including a
 non-canonical partial scalar, is an attributable terminal verification failure.
 The session clears package-owned nonce, partial, message, commitment, and
 derivation state on a best-effort basis. `Signature()` returns a copy of the
-completed 64-byte signature; `Destroy()` also clears the retained signature.
+completed 64-byte signature. `Close(context.Context)` clears retained session
+state and returns any lifecycle error; secret-bearing shares still use
+`Destroy()`.
 
 ## Refresh and Reshare
 

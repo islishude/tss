@@ -1,13 +1,16 @@
 package tss
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
-	"time"
+	"testing"
+
+	"github.com/islishude/tss/internal/transcript"
 )
 
 // DeliveryPolicy defines the transport requirements for one protocol message kind.
@@ -38,24 +41,68 @@ type policyKey struct {
 // (protocol, round, payloadType). Use [NewPolicySet] to construct.
 // It must return [ErrUnknownPayloadPolicy] for unregistered payload types.
 type PolicySet struct {
-	entries []DeliveryPolicy
-	index   map[policyKey]int // maps key → index into entries
+	entries  []DeliveryPolicy
+	index    map[policyKey]int // maps key → index into entries
+	testOnly bool
 }
 
 // NewPolicySet builds a PolicySet from a list of delivery policies.
 // It clones the input slice so callers cannot mutate the policy entries
 // after construction. Duplicate keys are rejected.
 func NewPolicySet(policies ...DeliveryPolicy) (PolicySet, error) {
+	return newPolicySet(false, policies...)
+}
+
+// NewTestPolicySet builds a structurally valid policy set whose mandatory
+// broadcast-consistency or sender-signature requirements may be relaxed for
+// deterministic tests. It panics outside a Go test binary and production
+// guards reject the returned set.
+func NewTestPolicySet(policies ...DeliveryPolicy) (PolicySet, error) {
+	if !testing.Testing() {
+		panic("NewTestPolicySet must only be called from tests")
+	}
+	return newPolicySet(true, policies...)
+}
+
+func newPolicySet(testOnly bool, policies ...DeliveryPolicy) (PolicySet, error) {
+	if len(policies) == 0 {
+		return PolicySet{}, errors.New("delivery policy set must not be empty")
+	}
 	cloned := slices.Clone(policies)
 	idx := make(map[policyKey]int, len(cloned))
 	for i, p := range cloned {
+		if err := validateDeliveryPolicy(p, testOnly); err != nil {
+			return PolicySet{}, err
+		}
 		k := policyKey{protocol: p.Protocol, round: p.Round, payloadType: p.PayloadType}
 		if _, exists := idx[k]; exists {
 			return PolicySet{}, fmt.Errorf("duplicate delivery policy for protocol=%q round=%d payloadType=%q", p.Protocol, p.Round, p.PayloadType)
 		}
 		idx[k] = i
 	}
-	return PolicySet{entries: cloned, index: idx}, nil
+	return PolicySet{entries: cloned, index: idx, testOnly: testOnly}, nil
+}
+
+func validateDeliveryPolicy(p DeliveryPolicy, testOnly bool) error {
+	if p.Protocol == "" || p.PayloadType == "" {
+		return errors.New("delivery policy protocol and payload type must not be empty")
+	}
+	if p.Mode != DeliveryDirect && p.Mode != DeliveryBroadcast {
+		return fmt.Errorf("invalid delivery mode %d for %q", p.Mode, p.PayloadType)
+	}
+	if p.Confidentiality > ConfidentialityRequired {
+		return fmt.Errorf("invalid confidentiality policy %d for %q", p.Confidentiality, p.PayloadType)
+	}
+	if p.BroadcastConsistency > BroadcastConsistencyRequired {
+		return fmt.Errorf("invalid broadcast consistency policy %d for %q", p.BroadcastConsistency, p.PayloadType)
+	}
+	if p.Mode == DeliveryDirect && p.BroadcastConsistency != BroadcastConsistencyNone {
+		return fmt.Errorf("direct message %q must not require a broadcast certificate", p.PayloadType)
+	}
+	if !testOnly && p.Mode == DeliveryBroadcast && p.BroadcastConsistency != BroadcastConsistencyRequired {
+		return fmt.Errorf("broadcast message %q must require broadcast consistency", p.PayloadType)
+	}
+	return nil
 }
 
 // ValidateBroadcastConsistency checks that every broadcast-mode DeliveryPolicy requires
@@ -68,6 +115,36 @@ func (ps PolicySet) ValidateBroadcastConsistency() error {
 		}
 	}
 	return nil
+}
+
+// Digest returns the canonical delivery-policy digest. Registration order does
+// not affect the result; every field that changes guard behavior is bound.
+func (ps PolicySet) Digest() [32]byte {
+	entries := slices.Clone(ps.entries)
+	slices.SortFunc(entries, func(a, b DeliveryPolicy) int {
+		if n := cmp.Compare(a.Protocol, b.Protocol); n != 0 {
+			return n
+		}
+		if n := cmp.Compare(a.Round, b.Round); n != 0 {
+			return n
+		}
+		return cmp.Compare(a.PayloadType, b.PayloadType)
+	})
+	t := transcript.New("tss-delivery-policy")
+	for _, p := range entries {
+		t.AppendString("protocol", string(p.Protocol))
+		t.AppendUint8("round", p.Round)
+		t.AppendString("payload_type", string(p.PayloadType))
+		t.AppendUint8("mode", uint8(p.Mode))
+		t.AppendUint8("confidentiality", uint8(p.Confidentiality))
+		t.AppendUint8("broadcast_consistency", uint8(p.BroadcastConsistency))
+		t.AppendBool("require_sender_signature", p.RequireSenderSignature)
+	}
+	return t.Sum32()
+}
+
+func (ps PolicySet) valid() bool {
+	return len(ps.entries) != 0 && ps.index != nil
 }
 
 func (ps PolicySet) requiresSenderSignature() bool {
@@ -86,9 +163,6 @@ func (ps PolicySet) requiresSenderSignature() bool {
 func MustNewPolicySet(policies ...DeliveryPolicy) PolicySet {
 	ps, err := NewPolicySet(policies...)
 	if err != nil {
-		panic(err)
-	}
-	if err := ps.ValidateBroadcastConsistency(); err != nil {
 		panic(err)
 	}
 	return ps
@@ -142,19 +216,26 @@ type GuardConfig struct {
 // Production deployments must provide a non-nil AckVerifier; test code should use
 // [NewTestEnvelopeGuard] instead.
 func (c GuardConfig) BuildGuard() (*EnvelopeGuard, error) {
+	if c.Policies.testOnly {
+		return nil, errors.New("test-only delivery policy cannot build a production guard")
+	}
 	if c.AckVerifier == nil {
 		return nil, ErrMissingAckVerifier
 	}
 	if c.Policies.requiresSenderSignature() && c.EnvelopeVerifier == nil {
 		return nil, ErrMissingEnvelopeSignatureVerifier
 	}
-	g, err := NewEnvelopeGuard(c.Self, c.Parties, c.Protocol, c.SessionID, c.Policies, c.Cache)
-	if err != nil {
-		return nil, err
-	}
-	g.AckVerifier = c.AckVerifier
-	g.EnvelopeVerifier = c.EnvelopeVerifier
-	return g, nil
+	return newEnvelopeGuard(
+		c.Self,
+		c.Parties,
+		c.Protocol,
+		c.SessionID,
+		c.Policies,
+		c.Cache,
+		c.AckVerifier,
+		c.EnvelopeVerifier,
+		false,
+	)
 }
 
 // TestGuardConfig returns a GuardConfig suitable for tests using an in-memory replay cache.
@@ -178,7 +259,6 @@ type ThresholdConfig struct {
 	SessionID      SessionID
 	Rand           io.Reader       `json:"-"`
 	Context        context.Context `json:"-"`
-	RoundTimeout   time.Duration   `json:"-"`
 	Log            Logger          `json:"-"`
 	EnvelopeSigner EnvelopeSigner  `json:"-"`
 }
@@ -191,7 +271,6 @@ type LocalConfig struct {
 	Self           PartyID
 	Rand           io.Reader       `json:"-"`
 	Context        context.Context `json:"-"`
-	RoundTimeout   time.Duration   `json:"-"`
 	Log            Logger          `json:"-"`
 	EnvelopeSigner EnvelopeSigner  `json:"-"`
 }
@@ -218,6 +297,22 @@ func (c ThresholdConfig) Ctx() context.Context {
 		return c.Context
 	}
 	return context.Background()
+}
+
+// CheckHandlerContext checks both the per-delivery context and the session
+// context. Protocol handlers call it at state-transition boundaries; it does
+// not claim to interrupt one indivisible cryptographic operation.
+func CheckHandlerContext(delivery, session context.Context) error {
+	if delivery == nil {
+		return errors.New("nil handler context")
+	}
+	if err := delivery.Err(); err != nil {
+		return err
+	}
+	if session != nil {
+		return session.Err()
+	}
+	return nil
 }
 
 // Validate checks threshold, party-set, and local-party invariants using

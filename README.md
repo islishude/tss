@@ -106,10 +106,21 @@ Each participant runs one local state machine. A deployment must:
    registered local session. Secret direct messages require confidential
    transport; broadcast messages require the configured consistency
    certificate.
-5. Persist key generations and protocol results at their documented durable
-   boundary. Current CGGMP21 presign, sign, refresh, reshare, and child flows
-   use `tssrun.LifecycleStore` directly; FROST keygen, refresh, and reshare
-   return caller-owned shares for application-managed persistence.
+5. Treat `tssrun.DispatchResult` as a caller-owned outbox transaction: persist
+   it durably, deliver only the persisted envelopes, record delivery, and then
+   call `Destroy`. `Dispatcher` never sends automatically.
+6. Persist key generations and protocol results at their documented durable
+   boundary. Both protocol packages provide `InstallKeyShare` helpers for a
+   confirmed initial generation; CGGMP21 presign, sign, refresh, reshare, and
+   child flows use `tssrun.LifecycleStore` directly.
+7. Drive sessions through `Status`, reconcile `CommitPending` with the exact
+   protocol recovery method, and retry `Abort`/`Close` while `ClosePending`.
+   `Handle` is cooperatively cancelable at decode, proof-loop, preparation, and
+   pre-commit boundaries.
+
+Production protocol starts require the exact canonical digest of
+`FROSTPolicies()` or `CGGMP21Policies()`. Relaxed policy sets and guards are
+test-only and cannot be constructed as production guards.
 
 See [`docs/tssrun.md`](docs/tssrun.md) for API contracts,
 [`docs/integration.md`](docs/integration.md) for the end-to-end flow, and

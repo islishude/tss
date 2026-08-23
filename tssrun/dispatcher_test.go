@@ -9,32 +9,39 @@ import (
 	"github.com/islishude/tss"
 )
 
-func TestDispatcherRoutesSessionAndSendsOutbox(t *testing.T) {
+func TestDispatcherReturnsCallerOwnedOutbox(t *testing.T) {
 	ctx := context.Background()
 	in := testInboundEnvelope(t)
 	registry := NewMemorySessionRegistry()
 	out := testEnvelope(t, in.SessionID(), 1, 2)
-	session := &testSession{out: []tss.Envelope{out}}
+	session := &testSession{out: []tss.Envelope{out}, descriptor: testDispatchDescriptor(in, 2)}
 	key := SessionKey{Protocol: in.Protocol(), SessionID: in.SessionID(), Party: 2}
 	if err := registry.Put(ctx, key, session); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	transport := &captureTransport{}
-	dispatcher := Dispatcher{Self: 2, Registry: registry, Transport: transport}
-	if err := dispatcher.Dispatch(ctx, in); err != nil {
+	dispatcher := Dispatcher{Self: 2, Registry: registry}
+	result, err := dispatcher.Dispatch(ctx, in)
+	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
+	defer result.Destroy()
 	if session.handled != 1 {
 		t.Fatalf("session handled %d envelopes, want 1", session.handled)
 	}
-	if len(transport.sent) != 1 || transport.sent[0].From != out.From {
-		t.Fatalf("transport sent %#v, want one outbox envelope", transport.sent)
+	if len(result.Outbox) != 1 || result.Outbox[0].From != out.From || result.InputDigest != in.Digest() {
+		t.Fatalf("dispatch result %#v, want one exact outbox envelope", result)
+	}
+	clone := result.Clone()
+	defer clone.Destroy()
+	result.Outbox[0].Payload[0] ^= 0xff
+	if slices.Equal(result.Outbox[0].Payload, clone.Outbox[0].Payload) {
+		t.Fatal("DispatchResult.Clone exposed an outbox alias")
 	}
 }
 
 func TestDispatcherRejectsUnknownByDefault(t *testing.T) {
 	dispatcher := Dispatcher{Self: 2, Registry: NewMemorySessionRegistry()}
-	err := dispatcher.Dispatch(context.Background(), testInboundEnvelope(t))
+	_, err := dispatcher.Dispatch(context.Background(), testInboundEnvelope(t))
 	if !errors.Is(err, ErrUnknownSession) {
 		t.Fatalf("expected ErrUnknownSession, got %v", err)
 	}
@@ -49,7 +56,7 @@ func TestDurableBufferUnknownSessionStoresWithoutDelivery(t *testing.T) {
 		Registry: NewMemorySessionRegistry(),
 		Unknown:  DurableBufferUnknownSession{Store: store},
 	}
-	if err := dispatcher.Dispatch(ctx, in); err != nil {
+	if _, err := dispatcher.Dispatch(ctx, in); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
 	buffered, err := store.LoadBySession(ctx, in.Protocol(), in.SessionID())
@@ -110,13 +117,15 @@ func TestDispatchInboundOpensRawEnvelopeBeforeRouting(t *testing.T) {
 		t.Fatalf("MarshalBinary: %v", err)
 	}
 	registry := NewMemorySessionRegistry()
-	session := &testSession{}
+	session := &testSession{descriptor: SessionDescriptor{
+		Protocol: env.Protocol, Kind: RunKeygen, SessionID: env.SessionID, Party: 2, PlanDigest: make([]byte, 32),
+	}}
 	key := SessionKey{Protocol: env.Protocol, SessionID: env.SessionID, Party: 2}
 	if err := registry.Put(ctx, key, session); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 	dispatcher := Dispatcher{Self: 2, Registry: registry}
-	err = DispatchInbound(ctx, EnvelopeReceiver{}, &dispatcher, raw, tss.ReceiveInfo{
+	_, err = DispatchInbound(ctx, EnvelopeReceiver{}, &dispatcher, raw, tss.ReceiveInfo{
 		Peer:       env.From,
 		Protection: tss.ChannelConfidential,
 	})
@@ -129,29 +138,36 @@ func TestDispatchInboundOpensRawEnvelopeBeforeRouting(t *testing.T) {
 }
 
 type testSession struct {
-	out       []tss.Envelope
-	err       error
-	handled   int
-	completed bool
-	destroyed bool
+	out        []tss.Envelope
+	err        error
+	handled    int
+	completed  bool
+	destroyed  bool
+	descriptor SessionDescriptor
 }
 
-func (s *testSession) Handle(tss.InboundEnvelope) ([]tss.Envelope, error) {
+func (s *testSession) Handle(context.Context, tss.InboundEnvelope) ([]tss.Envelope, error) {
 	s.handled++
 	return slices.Clone(s.out), s.err
 }
 
-func (s *testSession) Completed() bool { return s.completed }
+func (s *testSession) Descriptor() SessionDescriptor { return s.descriptor.Clone() }
 
-func (s *testSession) Destroy() { s.destroyed = true }
-
-type captureTransport struct {
-	sent []tss.Envelope
+func (s *testSession) Status() SessionState {
+	if s.completed {
+		return SessionSucceeded
+	}
+	return SessionActive
 }
 
-func (t *captureTransport) SendAll(_ context.Context, envelopes []tss.Envelope) error {
-	t.sent = append(t.sent, envelopes...)
-	return nil
+func (s *testSession) Abort(context.Context, string) error { return nil }
+
+func (s *testSession) Close(context.Context) error { s.destroyed = true; return nil }
+
+func testDispatchDescriptor(in tss.InboundEnvelope, party tss.PartyID) SessionDescriptor {
+	return SessionDescriptor{
+		Protocol: in.Protocol(), Kind: RunKeygen, SessionID: in.SessionID(), Party: party, PlanDigest: make([]byte, 32),
+	}
 }
 
 func testInboundEnvelope(t *testing.T) tss.InboundEnvelope {

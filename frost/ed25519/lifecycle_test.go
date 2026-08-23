@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/tssrun"
 )
 
 func assertFROSTDerivationPathCleared(t *testing.T, name string, path tss.DerivationPath) {
@@ -102,9 +104,9 @@ func TestFROSTSessionCompletedStatusDoesNotCloneOutputs(t *testing.T) {
 		name      string
 		completed func() bool
 	}{
-		{name: "keygen", completed: keygen.Completed},
-		{name: "reshare holder", completed: reshare.Completed},
-		{name: "sign", completed: sign.Completed},
+		{name: "keygen", completed: func() bool { return keygen.Status() == tssrun.SessionSucceeded }},
+		{name: "reshare holder", completed: func() bool { return reshare.Status() == tssrun.SessionSucceeded }},
+		{name: "sign", completed: func() bool { return sign.Status() == tssrun.SessionSucceeded }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,7 +124,7 @@ func TestFROSTSessionCompletedStatusDoesNotCloneOutputs(t *testing.T) {
 	}
 
 	dealerOnly := &ReshareSession{completed: true}
-	if !dealerOnly.Completed() {
+	if dealerOnly.Status() != tssrun.SessionSucceeded {
 		t.Fatal("completed dealer-only reshare reported incomplete without a new share")
 	}
 }
@@ -147,7 +149,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 		t.Fatal("keygen did not complete")
 	}
 	publicKey := share.state.PublicKey.Bytes()
-	keygen.Destroy()
+	closeTestSession(t, keygen)
 	for _, slot := range keygen.round1.slots {
 		if slot.share != nil {
 			t.Fatal("keygen share map was not cleared")
@@ -156,8 +158,8 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if keygen.local != nil {
 		t.Fatal("keygen local material was not released")
 	}
-	if keygen.keyShare == nil || !testutil.IsZeroBytes(keygen.keyShare.state.Secret.FixedBytes()) {
-		t.Fatal("completed key share secret was not cleared")
+	if keygen.keyShare != nil {
+		t.Fatal("closed keygen session retained its completed key share")
 	}
 	if !bytes.Equal(share.state.PublicKey.Bytes(), publicKey) {
 		t.Fatal("keygen public metadata changed")
@@ -180,7 +182,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := out2[0]
-	if _, err := sign.Handle(testutil.DeliverEnvelope(env)); err != nil {
+	if _, err := sign.Handle(context.Background(), testutil.DeliverEnvelope(env)); err != nil {
 		t.Fatal(err)
 	}
 	if sign.dNonce != nil || sign.eNonce != nil {
@@ -202,7 +204,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 		ResolvedPath:   resolvedPath,
 		AdditiveShift:  additiveShift,
 	}
-	sign.Destroy()
+	closeTestSession(t, sign)
 	if sign.dNonce != nil || sign.eNonce != nil {
 		t.Fatal("signing nonces were not released")
 	}

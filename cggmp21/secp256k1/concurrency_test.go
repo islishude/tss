@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"math/rand/v2"
 	"sync"
@@ -51,7 +52,7 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 					}
 					s := sessions[id]
 					s.mu.Lock()
-					out, err := s.Handle(testutil.DeliverEnvelope(env))
+					out, err := s.Handle(context.Background(), testutil.DeliverEnvelope(env))
 					s.mu.Unlock()
 					if err != nil {
 						t.Errorf("concurrent keygen delivery from %d to %d: %v", env.From, id, err)
@@ -129,7 +130,7 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 					if env.To != 0 && env.To != id {
 						continue
 					}
-					out, _ := sess[id].Handle(testutil.DeliverEnvelope(env))
+					out, _ := sess[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 					nextRound = append(nextRound, out...)
 				}
 			}
@@ -171,7 +172,7 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 				if id == env.From {
 					continue
 				}
-				_, _ = signSessions[id].Handle(testutil.DeliverEnvelope(env))
+				_, _ = signSessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			}
 		}
 		for _, id := range signers {

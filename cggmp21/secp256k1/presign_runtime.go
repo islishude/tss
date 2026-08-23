@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -64,17 +63,10 @@ func (s *PresignSession) abortPresignRun(cause error) error {
 	finishErr := s.lifecycleStore.FinishRunLease(storeCtx, s.lifecycleLease, tssrun.LeaseAborted)
 	cancel()
 	if finishErr != nil {
+		s.closePending = true
 		return errors.Join(cause, fmt.Errorf("abort presign run lease: %w", finishErr))
 	}
 	s.leaseFinished = true
+	s.closePending = false
 	return cause
-}
-
-func abortPresignLeaseBestEffort(ctx context.Context, store tssrun.LifecycleStore, lease tssrun.RunLease, timeout time.Duration) {
-	if store == nil || lease.Token == 0 || lease.State != tssrun.RunLeaseActive {
-		return
-	}
-	storeCtx, cancel := durableStoreContext(ctx, timeout)
-	_ = store.FinishRunLease(storeCtx, lease, tssrun.LeaseAborted)
-	cancel()
 }

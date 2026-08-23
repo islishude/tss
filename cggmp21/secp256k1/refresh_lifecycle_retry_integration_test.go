@@ -98,7 +98,7 @@ func TestCGGMP21_Refresh_LifecycleRetryRetainsSessionAndCommitsOnce(t *testing.T
 	if session == nil {
 		t.Fatal("StartRefresh discarded the retryable session")
 	}
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	if len(out) != 0 {
 		t.Fatalf("StartRefresh exposed %d envelopes before durable cutover", len(out))
 	}

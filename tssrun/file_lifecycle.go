@@ -9,47 +9,47 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
-	"sort"
 	"sync"
 
 	"github.com/islishude/tss"
 )
 
 const (
-	fileLifecycleKeysDirectory  = "keys"
-	fileLifecycleLocksDirectory = "locks"
-	fileLifecycleBlobsDirectory = "blobs"
-	fileLifecycleManifestName   = "manifest.enc"
-	fileLifecycleGlobalKeyID    = "tssrun-global-lifecycle"
+	fileLifecycleKeysDirectory      = "keys"
+	fileLifecycleLocksDirectory     = "locks"
+	fileLifecycleManifestName       = "manifest.enc"
+	fileLifecycleSnapshotsDirectory = "snapshots"
+	fileLifecycleIndexesDirectory   = "indexes"
+	fileLifecycleRootName           = "root.enc"
+	fileLifecycleGlobalKeyID        = "tssrun-global-lifecycle"
 )
 
 // FileLifecycleFaultPoint identifies one crash-simulation boundary in the
-// immutable-blob and manifest persistence sequence.
+// immutable-snapshot and root persistence sequence.
 type FileLifecycleFaultPoint string
 
 const (
-	// FileLifecycleFaultAfterBlobWrite occurs after an immutable ciphertext is
-	// fully written but before it is fsynced.
+	// FileLifecycleFaultAfterBlobWrite occurs after an immutable lineage or
+	// index ciphertext is fully written but before it is fsynced.
 	FileLifecycleFaultAfterBlobWrite FileLifecycleFaultPoint = "after-blob-write"
-	// FileLifecycleFaultAfterBlobSync occurs after an immutable ciphertext is
-	// fsynced but before its reference can enter a manifest.
+	// FileLifecycleFaultAfterBlobSync occurs after an immutable lineage or index
+	// ciphertext is fsynced but before its reference can enter the root.
 	FileLifecycleFaultAfterBlobSync FileLifecycleFaultPoint = "after-blob-fsync"
-	// FileLifecycleFaultAfterManifestWrite occurs after the replacement
-	// manifest is fully written but before it is fsynced.
-	FileLifecycleFaultAfterManifestWrite FileLifecycleFaultPoint = "after-manifest-write"
-	// FileLifecycleFaultAfterManifestSync occurs after the replacement
-	// manifest is fsynced but before the atomic rename.
-	FileLifecycleFaultAfterManifestSync FileLifecycleFaultPoint = "after-manifest-fsync"
-	// FileLifecycleFaultAfterManifestRename occurs immediately after the
-	// atomic manifest swap but before the containing directory is fsynced. A
+	// FileLifecycleFaultAfterRootWrite occurs after the replacement root is
+	// fully written but before it is fsynced.
+	FileLifecycleFaultAfterRootWrite FileLifecycleFaultPoint = "after-root-write"
+	// FileLifecycleFaultAfterRootSync occurs after the replacement root is
+	// fsynced but before the atomic rename.
+	FileLifecycleFaultAfterRootSync FileLifecycleFaultPoint = "after-root-fsync"
+	// FileLifecycleFaultAfterRootRename occurs immediately after the atomic
+	// root swap but before the containing directory is fsynced. A
 	// returned error at this point has unknown outcome.
-	FileLifecycleFaultAfterManifestRename FileLifecycleFaultPoint = "after-manifest-rename"
-	// FileLifecycleFaultAfterManifestDirectorySync occurs after the atomic
-	// manifest swap and its containing directory are fsynced. The transaction is
+	FileLifecycleFaultAfterRootRename FileLifecycleFaultPoint = "after-root-rename"
+	// FileLifecycleFaultAfterRootDirectorySync occurs after the atomic root
+	// swap and its containing directory are fsynced. The transaction is
 	// durable even though an injected error must still be reconciled by exact
 	// query or idempotent retry.
-	FileLifecycleFaultAfterManifestDirectorySync FileLifecycleFaultPoint = "after-manifest-directory-fsync"
+	FileLifecycleFaultAfterRootDirectorySync FileLifecycleFaultPoint = "after-root-directory-fsync"
 )
 
 // FileLifecycleFaultInjector returns an injected crash error at selected
@@ -75,32 +75,33 @@ func WithFileLifecycleFaultInjector(injector FileLifecycleFaultInjector) FileLif
 	}
 }
 
-// FileLifecycleStore is an encrypted reference LifecycleStore backed by one
-// atomic manifest covering every key lineage. Each operation takes both its
-// lineage OS advisory lock and the manifest OS advisory lock. The manifest lock
-// prevents distinct lineages from overwriting one another while the lineage
-// lock makes ownership explicit for cross-process callers. Immutable ciphertext
-// blobs are fsynced before the encrypted manifest references them; renaming the
-// fsynced manifest is the only transaction linearization point.
+// FileLifecycleStore is an encrypted reference LifecycleStore backed by
+// immutable per-lineage snapshots, partitioned global indexes, and one atomic
+// encrypted root. Each operation takes the fixed cross-process root lock.
+// Immutable ciphertexts are fsynced before the encrypted root
+// references them; renaming the fsynced root is the only transaction
+// linearization point.
 //
 // This passphrase-based implementation is a reference helper. Production
 // deployments should use a database transaction and KMS or HSM protection.
 type FileLifecycleStore struct {
 	mu sync.RWMutex
 
-	directory     string
-	passphrase    []byte
-	params        tss.PassphraseParams
-	faultInjector FileLifecycleFaultInjector
-	closed        bool
+	directory      string
+	dek            []byte
+	storeID        []byte
+	kdfDerivations uint64
+	faultInjector  FileLifecycleFaultInjector
+	closed         bool
 }
 
 var _ LifecycleStore = (*FileLifecycleStore)(nil)
 
 // NewFileLifecycleStore opens or creates an encrypted reference lifecycle
 // store. directory and its store-owned descendants must not be symlinks and
-// must be private to the current account. passphrase is copied. A nil params
-// value selects [tss.DefaultPassphraseParams].
+// must be private to the current account. passphrase is copied only while the
+// DEK is wrapped or unwrapped and is then cleared. A nil params value selects
+// [tss.DefaultPassphraseParams].
 func NewFileLifecycleStore(directory string, passphrase []byte, params *tss.PassphraseParams, opts ...FileLifecycleStoreOption) (*FileLifecycleStore, error) {
 	if directory == "" || len(passphrase) == 0 {
 		return nil, ErrInvalidLifecycleRecord
@@ -118,38 +119,49 @@ func NewFileLifecycleStore(directory string, passphrase []byte, params *tss.Pass
 		params = tss.DefaultPassphraseParams()
 	}
 	paramsCopy := *params
-	passphraseCopy := bytes.Clone(passphrase)
-	probe, err := tss.EncryptSignAttemptWithPassphrase([]byte("tssrun-lifecycle-probe"), passphraseCopy, "tssrun-lifecycle-probe", &paramsCopy)
-	if err != nil {
-		clearBytes(passphraseCopy)
-		return nil, fmt.Errorf("validate lifecycle passphrase parameters: %w", err)
-	}
-	clearBytes(probe)
 
 	absolute, err := filepath.Abs(directory)
 	if err != nil {
-		clearBytes(passphraseCopy)
 		return nil, fmt.Errorf("resolve lifecycle store directory: %w", err)
 	}
 	if err := preparePrivateLifecycleDirectory(absolute); err != nil {
-		clearBytes(passphraseCopy)
 		return nil, err
 	}
-	for _, child := range []string{fileLifecycleKeysDirectory, fileLifecycleLocksDirectory} {
+	legacyKeys := filepath.Join(absolute, fileLifecycleKeysDirectory)
+	if _, err := os.Lstat(legacyKeys); err == nil {
+		if err := preparePrivateLifecycleDirectory(legacyKeys); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect retired lifecycle keys directory: %w", err)
+	}
+	for _, child := range []string{fileLifecycleLocksDirectory, fileLifecycleSnapshotsDirectory, fileLifecycleIndexesDirectory} {
 		if err := preparePrivateLifecycleDirectory(filepath.Join(absolute, child)); err != nil {
-			clearBytes(passphraseCopy)
 			return nil, err
 		}
 	}
-	return &FileLifecycleStore{
-		directory:     absolute,
-		passphrase:    passphraseCopy,
-		params:        paramsCopy,
-		faultInjector: config.faultInjector,
-	}, nil
+	passphraseCopy := bytes.Clone(passphrase)
+	dek, storeID, err := openOrCreateFileLifecycleKey(absolute, passphraseCopy, paramsCopy)
+	clear(passphraseCopy)
+	if err != nil {
+		return nil, err
+	}
+	store := &FileLifecycleStore{
+		directory:      absolute,
+		dek:            dek,
+		storeID:        storeID,
+		kdfDerivations: 1,
+		faultInjector:  config.faultInjector,
+	}
+	if err := recoverFileLifecycleSnapshotArtifacts(store); err != nil {
+		clear(store.dek)
+		clear(store.storeID)
+		return nil, err
+	}
+	return store, nil
 }
 
-// Close clears the store's passphrase copy. It does not remove durable state.
+// Close clears the unwrapped data-encryption key. It does not remove durable state.
 func (s *FileLifecycleStore) Close() error {
 	if s == nil {
 		return nil
@@ -159,8 +171,10 @@ func (s *FileLifecycleStore) Close() error {
 	if s.closed {
 		return nil
 	}
-	clearBytes(s.passphrase)
-	s.passphrase = nil
+	clear(s.dek)
+	clear(s.storeID)
+	s.dek = nil
+	s.storeID = nil
 	s.closed = true
 	return nil
 }
@@ -190,6 +204,13 @@ func (s *FileLifecycleStore) AcquireRunLease(ctx context.Context, binding Genera
 func (s *FileLifecycleStore) AcquireReshareReceiverLease(ctx context.Context, anchor ReshareReceiverAnchor) (RunLease, error) {
 	return mutateFileLifecycleState(ctx, s, []string{anchor.Source.KeyID}, func(memory *MemoryLifecycleStore) (RunLease, error) {
 		return memory.AcquireReshareReceiverLease(ctx, anchor)
+	})
+}
+
+// QueryRunLease implements LifecycleStore.
+func (s *FileLifecycleStore) QueryRunLease(ctx context.Context, binding GenerationBinding, kind RunKind, sessionID tss.SessionID) (RunLease, error) {
+	return readFileLifecycleState(ctx, s, []string{binding.KeyID}, func(memory *MemoryLifecycleStore) (RunLease, error) {
+		return memory.QueryRunLease(ctx, binding, kind, sessionID)
 	})
 }
 
@@ -225,7 +246,7 @@ func (s *FileLifecycleStore) PreparePresignCandidate(ctx context.Context, bindin
 
 // CommitSignAttempt implements LifecycleStore. A persistence failure is always
 // returned as AttemptOutcomeUnknownError because the caller cannot infer
-// whether the manifest swap became durable.
+// whether the root swap became durable.
 func (s *FileLifecycleStore) CommitSignAttempt(ctx context.Context, binding GenerationBinding, presignID string, intent SignAttemptIntent, exactOutbox []byte) (AttemptCommit, error) {
 	commit, err := mutateFileLifecycleState(ctx, s, []string{binding.KeyID}, func(memory *MemoryLifecycleStore) (AttemptCommit, error) {
 		return memory.CommitSignAttempt(ctx, binding, presignID, intent, exactOutbox)
@@ -381,24 +402,16 @@ func withFileLifecycleState[T any](ctx context.Context, store *FileLifecycleStor
 	if store.closed {
 		return zero, ErrFileLifecycleStoreClosed
 	}
-	storageKeyID := fileLifecycleGlobalKeyID
 	release, err := store.acquireLifecycleLocks(ctx, keyIDs)
 	if err != nil {
 		return zero, err
 	}
 	defer release()
-	keyDirectory, err := store.prepareKeyDirectory(storageKeyID)
-	if err != nil {
-		return zero, err
-	}
-	memory, cache, err := loadFileLifecycleState(store, keyDirectory, storageKeyID)
+	memory, root, oldIndexes, err := loadSnapshotLifecycleState(store, keyIDs)
 	if err != nil {
 		return zero, err
 	}
 	defer clearMemoryLifecycleState(memory)
-	if err := reconcileFileLifecycleArtifacts(keyDirectory, cache); err != nil {
-		return zero, err
-	}
 	result, err := operation(memory)
 	if err != nil {
 		return zero, err
@@ -406,7 +419,7 @@ func withFileLifecycleState[T any](ctx context.Context, store *FileLifecycleStor
 	if !persist {
 		return result, nil
 	}
-	if err := persistFileLifecycleState(store, keyDirectory, storageKeyID, memory, cache); err != nil {
+	if err := persistSnapshotLifecycleState(store, keyIDs, memory, root, oldIndexes); err != nil {
 		return zero, &fileLifecyclePersistError{cause: err}
 	}
 	return result, nil
@@ -419,41 +432,13 @@ type fileProcessSemaphore struct {
 var fileLifecycleProcessLocks sync.Map
 
 func (s *FileLifecycleStore) acquireLifecycleLocks(ctx context.Context, keyIDs []string) (func(), error) {
-	unique := make(map[string]struct{}, len(keyIDs))
-	lineages := make([]string, 0, len(keyIDs))
-	for _, keyID := range keyIDs {
-		lockID := "lineage:" + keyID
-		if _, duplicate := unique[lockID]; duplicate {
-			continue
-		}
-		unique[lockID] = struct{}{}
-		lineages = append(lineages, lockID)
+	if len(keyIDs) == 0 {
+		return nil, ErrInvalidLifecycleRecord
 	}
-	sort.Strings(lineages)
-	releases := make([]func(), 0, len(lineages)+1)
-	releaseAll := func() {
-		for _, release := range slices.Backward(releases) {
-			release()
-		}
-	}
-	for _, lineage := range lineages {
-		release, err := s.acquireKeyLock(ctx, lineage)
-		if err != nil {
-			releaseAll()
-			return nil, err
-		}
-		releases = append(releases, release)
-	}
-	// The single manifest is the compare-and-swap object for every lineage. It
-	// is acquired after the sorted lineage locks and held through load,
-	// mutation, and rename, preventing distinct keys from losing updates.
-	releaseManifest, err := s.acquireKeyLock(ctx, "manifest:"+fileLifecycleGlobalKeyID)
-	if err != nil {
-		releaseAll()
-		return nil, err
-	}
-	releases = append(releases, releaseManifest)
-	return releaseAll, nil
+	// The encrypted root is the sole compare-and-swap object for every lineage.
+	// One fixed cross-process lock serializes root reads and replacements without
+	// creating per-lineage lock files during an otherwise read-only operation.
+	return s.acquireKeyLock(ctx, "root:"+fileLifecycleGlobalKeyID)
 }
 
 func (s *FileLifecycleStore) acquireKeyLock(ctx context.Context, keyID string) (func(), error) {
@@ -493,17 +478,6 @@ func (s *FileLifecycleStore) acquireKeyLock(ctx context.Context, keyID string) (
 		_ = file.Close()
 		<-semaphore.ch
 	}, nil
-}
-
-func (s *FileLifecycleStore) prepareKeyDirectory(keyID string) (string, error) {
-	keyDirectory := filepath.Join(s.directory, fileLifecycleKeysDirectory, fileLifecycleKeyHash(keyID))
-	if err := preparePrivateLifecycleDirectory(keyDirectory); err != nil {
-		return "", err
-	}
-	if err := preparePrivateLifecycleDirectory(filepath.Join(keyDirectory, fileLifecycleBlobsDirectory)); err != nil {
-		return "", err
-	}
-	return keyDirectory, nil
 }
 
 func (s *FileLifecycleStore) injectFault(point FileLifecycleFaultPoint) error {

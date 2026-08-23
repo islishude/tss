@@ -78,6 +78,19 @@ func (km *keyMaterial) signerFor(party tss.PartyID) tss.BroadcastAckSigner {
 	return &ed25519Signer{priv: priv}
 }
 
+func fullFlowGuard(t *testing.T, self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID, km *keyMaterial) *tss.EnvelopeGuard {
+	t.Helper()
+	guard, err := (tss.GuardConfig{
+		Self: self, Parties: parties, Protocol: tss.ProtocolCGGMP21Secp256k1,
+		SessionID: sessionID, Policies: CGGMP21Policies(), Cache: tss.NewInMemoryReplayCache(),
+		AckVerifier: km.verifier, EnvelopeVerifier: km.verifier,
+	}).BuildGuard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return guard
+}
+
 // buildBroadcastCertificate creates a certificate proving all parties saw
 // the same broadcast envelope. Every party (including the sender) signs an ack
 // over the same digest.
@@ -159,12 +172,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			SessionID:      kgSessionID,
 			EnvelopeSigner: km.signerFor(id).(*ed25519Signer),
 		}
-		g, err := tss.NewEnvelopeGuard(id, parties, tss.ProtocolCGGMP21Secp256k1, kgSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
-		if err != nil {
-			t.Fatal(err)
-		}
-		g.AckVerifier = km.verifier
-		g.EnvelopeVerifier = km.verifier
+		g := fullFlowGuard(t, id, parties, kgSessionID, km)
 		session, out, err := startCGGMP21Keygen(cfg, g)
 		if err != nil {
 			t.Fatal(err)
@@ -182,7 +190,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 				continue
 			}
 			delivered := deliverWithCertificate(t, env, id, parties, km)
-			out, err := kgSessions[id].Handle(delivered)
+			out, err := kgSessions[id].Handle(context.Background(), delivered)
 			if err != nil {
 				t.Fatalf("keygen delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
 			}
@@ -210,12 +218,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	queue = nil
 
 	for _, id := range signers {
-		g, err := tss.NewEnvelopeGuard(id, signers, tss.ProtocolCGGMP21Secp256k1, presignSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
-		if err != nil {
-			t.Fatal(err)
-		}
-		g.AckVerifier = km.verifier
-		g.EnvelopeVerifier = km.verifier
+		g := fullFlowGuard(t, id, signers, presignSessionID, km)
 		plan, err := NewPresignPlan(PresignPlanOption{Key: shares[id], SessionID: presignSessionID, PresignID: presignSessionID[:], Signers: signers, Context: testPresignContext(), Limits: testLimitsPtr(), SecurityParams: testSecurityParamsPtr()})
 		if err != nil {
 			t.Fatal(err)
@@ -240,7 +243,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 				continue
 			}
 			delivered := deliverWithCertificate(t, env, id, signers, km)
-			out, err := psSessions[id].Handle(delivered)
+			out, err := psSessions[id].Handle(context.Background(), delivered)
 			if err != nil {
 				t.Fatalf("presign delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
 			}
@@ -266,12 +269,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	queue = nil
 
 	for _, id := range signers {
-		g, err := tss.NewEnvelopeGuard(id, signers, tss.ProtocolCGGMP21Secp256k1, signSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
-		if err != nil {
-			t.Fatal(err)
-		}
-		g.AckVerifier = km.verifier
-		g.EnvelopeVerifier = km.verifier
+		g := fullFlowGuard(t, id, signers, signSessionID, km)
 		session, out, err := startCGGMP21SignWithLocal(shares[id], presigns[id], signSessionID, tss.SignRequest{
 			Context: testPresignContext(),
 			Message: []byte("hello guard-protected world"),
@@ -291,7 +289,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 				continue
 			}
 			delivered := deliverWithCertificate(t, env, id, signers, km)
-			_, err := signSessions[id].Handle(delivered)
+			_, err := signSessions[id].Handle(context.Background(), delivered)
 			if err != nil {
 				t.Fatalf("sign delivery from %d to %d: %v", env.From, id, err)
 			}
@@ -324,12 +322,7 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	km := newKeyMaterial(t, parties)
 
 	cfg := tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 71, SessionID: sessionID, EnvelopeSigner: km.signerFor(71).(*ed25519Signer)}
-	g, err := tss.NewEnvelopeGuard(71, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
-	if err != nil {
-		t.Fatal(err)
-	}
-	g.AckVerifier = km.verifier
-	g.EnvelopeVerifier = km.verifier
+	g := fullFlowGuard(t, 71, parties, sessionID, km)
 	session, _, err := startCGGMP21Keygen(cfg, g)
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +351,7 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.Handle(in)
+	_, err = session.Handle(context.Background(), in)
 	if !errors.Is(err, tss.ErrInvalidBroadcastCertificate) {
 		t.Fatalf("expected ErrInvalidBroadcastCertificate for mismatched cert, got %v", err)
 	}

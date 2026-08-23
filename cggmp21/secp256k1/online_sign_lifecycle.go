@@ -41,7 +41,7 @@ func StartSign(plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelop
 	if err := validateSignLifecycleIdentifier(runtime.AttemptID); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid SignRuntime.AttemptID"))
 	}
-	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self, CGGMP21Policies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
@@ -327,6 +327,7 @@ func buildSignAttemptOutbox(
 	}
 	defer decodedPayload.S.Destroy()
 	validationSession := &SignSession{
+		sessionCtx:   context.Background(),
 		verification: publicContext.clone(),
 		sessionID:    sessionID,
 		limits:       limits,
@@ -427,7 +428,7 @@ func signSessionFromLifecycleAttempt(ctx context.Context, key *KeyShare, record 
 	}
 	var verifier tss.BroadcastAckVerifier
 	if guard != nil {
-		verifier = guard.AckVerifier
+		verifier = guard.AckVerifier()
 	}
 	var outbox signAttemptOutbox
 	if len(record.ExactOutbox) != 0 {
@@ -450,7 +451,7 @@ func signSessionFromLifecycleAttempt(ctx context.Context, key *KeyShare, record 
 			clearSignAttemptOutbox(&outbox)
 		}
 	}()
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, record.Intent.SessionID, publicContext.Party); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, record.Intent.SessionID, publicContext.Party, CGGMP21Policies()); err != nil {
 		return nil, nil, err
 	}
 	if err := validateLifecycleAttemptBindings(key, publicContext, record, outbox); err != nil {
@@ -488,6 +489,7 @@ func signSessionFromLifecycleAttempt(ctx context.Context, key *KeyShare, record 
 	sessionRecord.PresignMetadata = nil
 	sessionRecord.ExactOutbox = nil
 	s := &SignSession{
+		sessionCtx:       ctx,
 		key:              key,
 		ownsKey:          key != nil,
 		verification:     publicContext,
@@ -512,20 +514,20 @@ func signSessionFromLifecycleAttempt(ctx context.Context, key *KeyShare, record 
 	if len(s.outbox.CanonicalEnvelope) != 0 {
 		env, payload, decodeErr := decodeSignAttemptEnvelopeWithLimits(s.outbox.CanonicalEnvelope, limits)
 		if decodeErr != nil {
-			s.Destroy()
+			_ = s.Close(context.Background())
 			return nil, nil, fmt.Errorf("%w: decode exact sign outbox: %w", ErrSignAttemptCorrupt, decodeErr)
 		}
 		defer payload.S.Destroy()
 		partial, verifyErr := s.verifySignPartial(key.state.Party, payload)
 		if verifyErr != nil {
-			s.Destroy()
+			_ = s.Close(context.Background())
 			return nil, nil, fmt.Errorf("%w: local sign partial verification failed: %w", ErrSignAttemptCorrupt, verifyErr)
 		}
 		s.partials[key.state.Party] = partial
 		s.partialEnvelopes[key.state.Party] = env.Clone()
 		if !record.Completed && coordinator != nil {
 			if _, err := s.tryCompleteSign(s.coordinatorCtx); err != nil {
-				s.Destroy()
+				_ = s.Close(context.Background())
 				return nil, nil, err
 			}
 		}

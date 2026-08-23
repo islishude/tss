@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestThresholdECDSAReshareRunsFreshFigure7Epoch(t *testing.T) {
 			share.Destroy()
 		}
 		for _, session := range sessions {
-			session.Destroy()
+			closeTestSession(t, session)
 		}
 	}()
 
@@ -114,16 +115,16 @@ func testReshareRejectsCrossEpochHandoff(t *testing.T, oldShares map[tss.PartyID
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sender.Destroy()
+	defer closeTestSession(t, sender)
 	receiver, _, err := startCGGMP21ReshareReceiver(otherPlan, targets[1], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer receiver.Destroy()
+	defer closeTestSession(t, receiver)
 	if len(out) == 0 || out[0].PayloadType != payloadReshareReceiverMaterial {
 		t.Fatal("source epoch sender omitted temporary receiver material")
 	}
-	produced, err := receiver.Handle(testutil.DeliverEnvelope(out[0]))
+	produced, err := receiver.Handle(context.Background(), testutil.DeliverEnvelope(out[0]))
 	if err == nil || !errors.Is(err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("cross-epoch handoff error = %v, want plan mismatch", err)
 	}
@@ -151,7 +152,7 @@ func testReshareRejectsWrongFigure7RID(t *testing.T, oldShares map[tss.PartyID]*
 	sessions, queue := startReshareIntegrationSessions(t, oldShares, plan, dealers, targets)
 	defer func() {
 		for _, session := range sessions {
-			session.Destroy()
+			closeTestSession(t, session)
 		}
 	}()
 	for len(queue) > 0 {
@@ -172,7 +173,7 @@ func testReshareRejectsWrongFigure7RID(t *testing.T, oldShares map[tss.PartyID]*
 				if decodeErr != nil {
 					t.Fatal(decodeErr)
 				}
-				out, handleErr := session.Handle(testutil.DeliverEnvelope(mutated))
+				out, handleErr := session.Handle(context.Background(), testutil.DeliverEnvelope(mutated))
 				if handleErr == nil {
 					t.Fatal("reshare Figure 7 accepted a wrong RID")
 				}
@@ -181,7 +182,7 @@ func testReshareRejectsWrongFigure7RID(t *testing.T, oldShares map[tss.PartyID]*
 				}
 				return
 			}
-			out, handleErr := session.Handle(testutil.DeliverEnvelope(env))
+			out, handleErr := session.Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if handleErr != nil {
 				t.Fatalf("deliver %s from %d to %d before wrong-RID mutation: %v", env.PayloadType, env.From, id, handleErr)
 			}

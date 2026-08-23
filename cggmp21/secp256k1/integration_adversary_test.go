@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"testing"
@@ -114,7 +115,7 @@ func assertSignPartialBlamesOnlySender(t *testing.T, sessions map[tss.PartyID]*S
 		if id == env.From {
 			continue
 		}
-		_, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+		_, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 		if err == nil {
 			t.Fatal("expected rejection of tampered sign partial")
 		}
@@ -166,7 +167,7 @@ func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].Handle(testutil.DeliverEnvelope(env)); err != nil {
+			if _, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env)); err != nil {
 				t.Fatalf("unexpected error for valid partial from %d to %d: %v", env.From, id, err)
 			}
 		}
@@ -273,7 +274,7 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := presignSessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := presignSessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				if tampered {
 					assertPresignRound3Blame(t, err, env.From)
@@ -400,7 +401,7 @@ func TestIntegration_PresignRound3TamperedSEntersFigure9(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) || sessions[id].completed {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -520,7 +521,7 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	originalS.Destroy()
 
 	// Step 4: Deliver tampered partial to honest signer.
-	_, err = honestSession.Handle(testutil.DeliverEnvelope(maliciousPartial))
+	_, err = honestSession.Handle(context.Background(), testutil.DeliverEnvelope(maliciousPartial))
 
 	// Step 5: Expect immediate ErrCodeVerification.
 	if err == nil {

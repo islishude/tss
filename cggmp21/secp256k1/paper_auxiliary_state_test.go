@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -129,7 +130,7 @@ func (r *auxInfoResult) partyDataOwnerForTest() tss.PartyID {
 
 func applyAuxInfoForTest(t testing.TB, state *auxInfoState, env tss.Envelope) []tss.Envelope {
 	t.Helper()
-	prepared, err := state.prepareInbound(env)
+	prepared, err := state.prepareInbound(context.Background(), env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +139,72 @@ func applyAuxInfoForTest(t testing.TB, state *auxInfoState, env tss.Envelope) []
 		t.Fatal(err)
 	}
 	return prepared.out
+}
+
+type cancelAfterChecksContext struct {
+	context.Context
+	remaining int
+}
+
+func (c *cancelAfterChecksContext) Err() error {
+	c.remaining--
+	if c.remaining <= 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+func TestFigure7ProofLoopCancellationRejectsWithoutMutation(t *testing.T) {
+	parties := tss.NewPartySet(1, 2)
+	sid := tss.SessionID(bytes.Repeat([]byte{0x81}, 32))
+	stableSID := tss.SessionID(bytes.Repeat([]byte{0x82}, 32))
+	planHash := bytes.Repeat([]byte{0x83}, 32)
+	contribution1 := testSecretScalar(t, 5)
+	defer contribution1.Destroy()
+	contribution2 := testSecretScalar(t, 7)
+	defer contribution2.Destroy()
+	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(12)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule := auxInfoSchedule{CommitmentRound: 1, RevealRound: 2, ProofRound: 3}
+	start := func(self tss.PartyID, contribution *secret.Scalar, seed int64) (*auxInfoState, []tss.Envelope) {
+		state, out, err := startAuxInfo(auxInfoStartOption{
+			Config:    tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: self, SessionID: sid, Rand: testutil.DeterministicReader(seed)},
+			StableSID: stableSID, Limits: testLimits(), SecurityParams: testSecurityParams(), PlanHash: planHash,
+			ExpectedPublicKey: publicKey, Contribution: contribution, Schedule: schedule,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state, out
+	}
+	state1, round1From1 := start(1, contribution1, 2101)
+	defer state1.destroy()
+	state2, round1From2 := start(2, contribution2, 2102)
+	defer state2.destroy()
+	round2From2 := applyAuxInfoForTest(t, state2, round1From1[0])
+	round2From1 := applyAuxInfoForTest(t, state1, round1From2[0])
+	round3From2 := applyAuxInfoForTest(t, state2, round2From1[0])
+	_ = applyAuxInfoForTest(t, state1, round2From2[0])
+	var proofEnvelope tss.Envelope
+	for _, env := range round3From2 {
+		if env.PayloadType == payloadAuxInfoProofs {
+			proofEnvelope = env
+			break
+		}
+	}
+	if proofEnvelope.PayloadType == "" {
+		t.Fatal("missing Figure 7 proof envelope")
+	}
+	cancelCtx := &cancelAfterChecksContext{Context: context.Background(), remaining: 3}
+	prepared, err := state1.prepareInbound(cancelCtx, proofEnvelope)
+	if prepared != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("proof-loop cancellation prepared=%v err=%v", prepared, err)
+	}
+	if state1.slots[2].proofs != nil || state1.result != nil {
+		t.Fatal("proof-loop cancellation mutated accepted Figure 7 state")
+	}
 }
 
 func TestFigure7DecryptionErrorAccusationAuthenticatesDirectEnvelopeAndAttributesFailure(t *testing.T) {
@@ -193,7 +260,7 @@ func TestFigure7DecryptionErrorAccusationAuthenticatesDirectEnvelopeAndAttribute
 			}
 			wrongEpoch := env.Clone()
 			wrongEpoch.Payload = mutatedProofs
-			prepared, prepareErr := state1.prepareInbound(wrongEpoch)
+			prepared, prepareErr := state1.prepareInbound(context.Background(), wrongEpoch)
 			if prepareErr == nil || prepared != nil || state1.slots[2].proofs != nil {
 				t.Fatal("wrong Figure 7 EpochID committed proofs or emitted effects")
 			}
@@ -225,7 +292,7 @@ func TestFigure7DecryptionErrorAccusationAuthenticatesDirectEnvelopeAndAttribute
 	if err != nil {
 		t.Fatal(err)
 	}
-	localPrepared, err := state1.prepareInbound(mutatedDirect)
+	localPrepared, err := state1.prepareInbound(context.Background(), mutatedDirect)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +335,7 @@ func TestFigure7DecryptionErrorAccusationAuthenticatesDirectEnvelopeAndAttribute
 	if err != nil {
 		t.Fatal(err)
 	}
-	falsePrepared, err := state2.prepareInbound(falseEnvelope)
+	falsePrepared, err := state2.prepareInbound(context.Background(), falseEnvelope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +350,7 @@ func TestFigure7DecryptionErrorAccusationAuthenticatesDirectEnvelopeAndAttribute
 	if !state1.aborted || state1.local != nil {
 		t.Fatal("local accusation did not terminally destroy Figure 7 witness state")
 	}
-	remotePrepared, err := state2.prepareInbound(localPrepared.out[0])
+	remotePrepared, err := state2.prepareInbound(context.Background(), localPrepared.out[0])
 	if err != nil {
 		t.Fatal(err)
 	}

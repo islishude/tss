@@ -1,32 +1,124 @@
 package ed25519
 
 import (
+	"context"
+	"errors"
+
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/tssrun"
 )
 
-// Destroy clears local secret material retained by the keygen session.
-func (s *KeygenSession) Destroy() {
-	if s == nil {
-		return
+func validateSessionDisposition(ctx context.Context, reason string) error {
+	if ctx == nil {
+		return errors.New("nil session disposition context")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.abort()
-	if s.keyShare != nil {
-		s.keyShare.Destroy()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	if reason == "" {
+		return errors.New("session abort reason must not be empty")
+	}
+	return nil
 }
 
-// Destroy clears local nonces and partial signatures retained by the signing session.
-func (s *SignSession) Destroy() {
+// Abort terminally aborts an active keygen session and clears staged secrets.
+func (s *KeygenSession) Abort(ctx context.Context, reason string) error {
+	if err := validateSessionDisposition(ctx, reason); err != nil {
+		return err
+	}
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed || s.aborted {
+		return nil
+	}
+	if s.completed {
+		return tssrun.ErrRunCompleted
+	}
 	s.abort()
+	return nil
+}
+
+// Close clears all keygen-session state after an authoritative disposition.
+func (s *KeygenSession) Close(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("nil session close context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if !s.completed && !s.aborted {
+		s.abort()
+	}
+	if s.keyShare != nil {
+		s.keyShare.Destroy()
+		s.keyShare = nil
+	}
+	s.closed = true
+	return nil
+}
+
+// Abort terminally aborts an active signing session and clears nonce state.
+func (s *SignSession) Abort(ctx context.Context, reason string) error {
+	if err := validateSessionDisposition(ctx, reason); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.aborted {
+		return nil
+	}
+	if s.completed {
+		return tssrun.ErrRunCompleted
+	}
+	s.abort()
+	return nil
+}
+
+// Close clears all signing-session state after an authoritative disposition.
+func (s *SignSession) Close(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("nil session close context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if !s.completed && !s.aborted {
+		s.abort()
+	} else {
+		s.clearCompletedSigningState()
+		if s.derivation != nil {
+			s.derivation.Destroy()
+			s.derivation = nil
+		}
+		clear(s.signature)
+		s.signature = nil
+	}
+	s.closed = true
+	return nil
 }
 
 func (s *SignSession) abort() {
@@ -79,18 +171,51 @@ func (s *SignSession) clearSigningCommitments() {
 	s.commitMessage = tss.Envelope{}
 }
 
-// Destroy clears local reshare material retained by the reshare session.
-func (s *ReshareSession) Destroy() {
+// Abort terminally aborts an active refresh or reshare session.
+func (s *ReshareSession) Abort(ctx context.Context, reason string) error {
+	if err := validateSessionDisposition(ctx, reason); err != nil {
+		return err
+	}
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed || s.aborted {
+		return nil
+	}
+	if s.completed {
+		return tssrun.ErrRunCompleted
+	}
 	s.abort()
+	return nil
+}
+
+// Close clears all refresh or reshare session state.
+func (s *ReshareSession) Close(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("nil session close context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if !s.completed && !s.aborted {
+		s.abort()
+	}
 	if s.newShare != nil {
 		s.newShare.Destroy()
+		s.newShare = nil
 	}
-	s.newShare = nil
+	s.closed = true
+	return nil
 }
 
 func (s *ReshareSession) abort() {

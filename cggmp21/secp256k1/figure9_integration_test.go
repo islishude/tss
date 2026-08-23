@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -104,7 +105,7 @@ func TestIntegration_CGGMP21_Presign_InvalidFigure9ProofBlamesOnlyDirectSender(t
 			mutated.DecProof.TranscriptHash[0] ^= 1
 			env := mustFigure9Envelope(t, s2, mutated)
 
-			out, err := s1.Handle(testutil.DeliverEnvelope(env))
+			out, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if len(out) != 0 {
 				t.Fatalf("invalid Figure 9 proof emitted %d envelopes", len(out))
 			}
@@ -128,7 +129,7 @@ func TestIntegration_CGGMP21_Presign_AllValidFigure9ProofsAbortWithoutBlame(t *t
 
 	// An otherwise valid Figure 9 envelope received before the red-alert phase is
 	// active must not reserve its replay slot or abort the presign.
-	out, err := s1.Handle(testutil.DeliverEnvelope(sender.envelope))
+	out, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(sender.envelope))
 	if len(out) != 0 {
 		t.Fatalf("early Figure 9 envelope emitted %d envelopes", len(out))
 	}
@@ -138,7 +139,7 @@ func TestIntegration_CGGMP21_Presign_AllValidFigure9ProofsAbortWithoutBlame(t *t
 	}
 
 	s1.commitPresignRedAlert(receiver)
-	out, err = s1.Handle(testutil.DeliverEnvelope(sender.envelope))
+	out, err = s1.Handle(context.Background(), testutil.DeliverEnvelope(sender.envelope))
 	if len(out) != 0 {
 		t.Fatalf("all-valid Figure 9 fallback emitted %d envelopes", len(out))
 	}
@@ -283,8 +284,8 @@ func figure9ReadyPresignSessions(t *testing.T) (*PresignSession, *PresignSession
 	t.Helper()
 	s1, s2, round3From1, round3From2 := presignSessionsWithRound3Outputs(t)
 	t.Cleanup(func() {
-		s1.Destroy()
-		s2.Destroy()
+		_ = s1.Close(context.Background())
+		_ = s2.Close(context.Background())
 	})
 
 	tx2, err := s1.buildAcceptPresignRound3Tx(round3From2)

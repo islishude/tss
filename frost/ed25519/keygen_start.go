@@ -58,7 +58,7 @@ func resolveFROSTKeygenStart(plan *KeygenPlan, local tss.LocalConfig, guard *tss
 	if err != nil {
 		return tss.ThresholdConfig{}, Limits{}, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, cfg.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, cfg.SessionID, cfg.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, cfg.SessionID, cfg.Self, FROSTPolicies()); err != nil {
 		return tss.ThresholdConfig{}, Limits{}, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, cfg.Self, err)
 	}
 	cfg.Parties = cfg.SortedParties()

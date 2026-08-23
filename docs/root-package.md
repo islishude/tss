@@ -33,7 +33,6 @@ type LocalConfig struct {
     Self           PartyID
     Rand           io.Reader
     Context        context.Context
-    RoundTimeout   time.Duration
     Log            Logger
     EnvelopeSigner EnvelopeSigner
 }
@@ -115,13 +114,20 @@ type DeliveryPolicy struct {
 ```
 
 Unregistered payload types fail closed. `MustNewPolicySet` also rejects any
-broadcast-mode entry that does not require broadcast consistency.
+malformed entry or broadcast-mode entry that does not require broadcast
+consistency. `PolicySet.Digest` is canonical and independent of registration
+order.
 
 Production code builds a guard with `GuardConfig.BuildGuard`. It requires a
 non-nil replay cache and broadcast-ack verifier; if any policy requires sender
 signatures, it also requires an `EnvelopeSignatureVerifier`. CGGMP21 starts
 that emit signed direct messages additionally need
 `LocalConfig.EnvelopeSigner`.
+
+`EnvelopeGuard` has no exported mutable fields. Its accessors return values or
+copies, and production protocol starts require its policy digest to equal the
+exact canonical protocol policy set. Relaxed policies can be created only with
+`NewTestPolicySet` and used only by a test-only guard.
 
 For each inbound envelope, the guard verifies:
 
@@ -155,9 +161,10 @@ binary decoders reject duplicate, out-of-order, missing, and mismatched
 records.
 
 The root package also provides `BroadcastConsistency` to collect verified
-acknowledgments for one broadcast and detect conflicting digests. Persisting
-the resulting certificate and delivery decision remains an application
-responsibility.
+acknowledgments for one broadcast and detect conflicting digests. `Commit`
+must fix the exact envelope before `AddAck`; `Complete` and `Certificate`
+re-verify the full committed set. Persisting the resulting certificate and
+delivery decision remains an application responsibility.
 
 ## Replay Cache
 
@@ -260,7 +267,8 @@ scheduler.
 The passphrase helpers encrypt key-share, presign, and sign-attempt bytes with
 Argon2id-derived ChaCha20-Poly1305 keys. Record type, KDF parameters, and key ID
 are authenticated; decryptors that accept an expected key ID reject a valid
-record for another ID.
+record for another ID. Every public encryption and decryption entry point
+rejects an empty passphrase before parsing or key derivation.
 
 These helpers are reference/demo primitives, not a database or production key
 management system. See [`deployment.md`](deployment.md) for storage

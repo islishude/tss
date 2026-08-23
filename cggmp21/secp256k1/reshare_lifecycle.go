@@ -90,9 +90,11 @@ func (s *ReshareSession) commitPendingReshareLifecycle(ctx context.Context) erro
 		err := s.lifecycleStore.FinishRunLease(storeCtx, s.lifecycleLease, tssrun.LeaseAborted)
 		cancel()
 		if err != nil {
+			s.closePending = true
 			return fmt.Errorf("abort reshare run lease: %w", err)
 		}
 		s.lifecycleFinished = true
+		s.closePending = false
 	}
 	return nil
 }

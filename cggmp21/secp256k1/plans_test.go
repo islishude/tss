@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -316,7 +317,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		PayloadType: payloadKeygenConfirmation,
 		Payload:     payload,
 	}
-	_, err = s.handlePaperKeygenConfirmationLocked(testutil.DeliverEnvelope(env), newPaperKeygenMessageKey(env))
+	_, err = s.handlePaperKeygenConfirmationLocked(context.Background(), testutil.DeliverEnvelope(env), newPaperKeygenMessageKey(env))
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if !errors.Is(protocolErr.Err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("confirmation error = %v, want plan mismatch sentinel", protocolErr.Err)

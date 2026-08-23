@@ -171,21 +171,19 @@ func TestFileLifecycleStoreAttemptPayloadsAreEncryptedAtRest(t *testing.T) {
 
 func fileLifecycleTestBlobPaths(t *testing.T, directory string, want int) []string {
 	t.Helper()
-	blobDirectory := filepath.Join(
-		directory,
-		fileLifecycleKeysDirectory,
-		fileLifecycleKeyHash(fileLifecycleGlobalKeyID),
-		fileLifecycleBlobsDirectory,
-	)
-	entries, err := os.ReadDir(blobDirectory)
-	if err != nil {
-		t.Fatalf("read lifecycle blob directory: %v", err)
-	}
-	paths := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".enc") {
-			paths = append(paths, filepath.Join(blobDirectory, entry.Name()))
+	snapshotDirectory := filepath.Join(directory, fileLifecycleSnapshotsDirectory)
+	var paths []string
+	err := filepath.WalkDir(snapshotDirectory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".enc") {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk lifecycle snapshot directory: %v", err)
 	}
 	sort.Strings(paths)
 	if len(paths) != want {

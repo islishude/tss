@@ -481,7 +481,6 @@ func (p *ChildDerivationPlan) thresholdConfig(local tss.LocalConfig) (tss.Thresh
 		SessionID:      p.state.SessionID,
 		Rand:           local.Rand,
 		Context:        local.Context,
-		RoundTimeout:   local.RoundTimeout,
 		Log:            local.Log,
 		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil

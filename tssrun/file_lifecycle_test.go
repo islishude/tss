@@ -96,10 +96,10 @@ func TestFileLifecycleStoreCrashBoundariesResolveByExactQuery(t *testing.T) {
 	}{
 		{point: FileLifecycleFaultAfterBlobWrite},
 		{point: FileLifecycleFaultAfterBlobSync},
-		{point: FileLifecycleFaultAfterManifestWrite},
-		{point: FileLifecycleFaultAfterManifestSync},
-		{point: FileLifecycleFaultAfterManifestRename, committed: true},
-		{point: FileLifecycleFaultAfterManifestDirectorySync, committed: true},
+		{point: FileLifecycleFaultAfterRootWrite},
+		{point: FileLifecycleFaultAfterRootSync},
+		{point: FileLifecycleFaultAfterRootRename, committed: true},
+		{point: FileLifecycleFaultAfterRootDirectorySync, committed: true},
 	} {
 		t.Run(string(tc.point), func(t *testing.T) {
 			ctx := context.Background()
@@ -175,8 +175,8 @@ func TestFileLifecycleStoreLeaseEffectCrashAtomicity(t *testing.T) {
 		point     FileLifecycleFaultPoint
 		committed bool
 	}{
-		{name: "before rename", point: FileLifecycleFaultAfterManifestSync},
-		{name: "after rename", point: FileLifecycleFaultAfterManifestRename, committed: true},
+		{name: "before rename", point: FileLifecycleFaultAfterRootSync},
+		{name: "after rename", point: FileLifecycleFaultAfterRootRename, committed: true},
 	} {
 		t.Run("presign/"+tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -347,6 +347,53 @@ func TestFileLifecycleStoreLeaseEffectCrashAtomicity(t *testing.T) {
 	}
 }
 
+func TestFileLifecycleStoreIndexBucketCrashDoesNotPublishPartialRoot(t *testing.T) {
+	for _, point := range []FileLifecycleFaultPoint{FileLifecycleFaultAfterBlobWrite, FileLifecycleFaultAfterBlobSync} {
+		t.Run(string(point), func(t *testing.T) {
+			ctx := context.Background()
+			directory := t.TempDir()
+			passphrase := []byte("index-bucket-crash-passphrase")
+			binding := testGenerationBinding("index-crash-key", "gen-1", "index-crash-epoch")
+			setup := newTestFileLifecycleStore(t, directory, passphrase)
+			if _, err := setup.InstallInitialGeneration(ctx, binding, []byte("generation-secret"), nil); err != nil {
+				t.Fatal(err)
+			}
+			if err := setup.Close(); err != nil {
+				t.Fatal(err)
+			}
+			injected := errors.New("injected index bucket crash")
+			calls := 0
+			faultStore := newTestFileLifecycleStore(t, directory, passphrase, WithFileLifecycleFaultInjector(func(got FileLifecycleFaultPoint) error {
+				if got != point {
+					return nil
+				}
+				calls++
+				if calls == 2 {
+					return injected
+				}
+				return nil
+			}))
+			sessionID := fileLifecycleSessionID(t, "index-bucket-crash-session")
+			if _, err := faultStore.AcquireRunLease(ctx, binding, RunSign, sessionID); !errors.Is(err, injected) {
+				t.Fatalf("AcquireRunLease at index crash = %v", err)
+			}
+			if calls != 2 {
+				t.Fatalf("fault point calls=%d, want lineage then index bucket", calls)
+			}
+			if err := faultStore.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened := newTestFileLifecycleStore(t, directory, passphrase)
+			if _, err := reopened.QueryRunLease(ctx, binding, RunSign, sessionID); !errors.Is(err, ErrRunLeaseNotFound) {
+				t.Fatalf("partial index transaction became visible: %v", err)
+			}
+			if _, err := reopened.AcquireRunLease(ctx, binding, RunSign, sessionID); err != nil {
+				t.Fatalf("retry after index crash: %v", err)
+			}
+		})
+	}
+}
+
 func TestFileLifecycleStoreCutoverCommitCrashAtomicity(t *testing.T) {
 	for _, tc := range []struct {
 		point     FileLifecycleFaultPoint
@@ -354,10 +401,10 @@ func TestFileLifecycleStoreCutoverCommitCrashAtomicity(t *testing.T) {
 	}{
 		{point: FileLifecycleFaultAfterBlobWrite},
 		{point: FileLifecycleFaultAfterBlobSync},
-		{point: FileLifecycleFaultAfterManifestWrite},
-		{point: FileLifecycleFaultAfterManifestSync},
-		{point: FileLifecycleFaultAfterManifestRename, committed: true},
-		{point: FileLifecycleFaultAfterManifestDirectorySync, committed: true},
+		{point: FileLifecycleFaultAfterRootWrite},
+		{point: FileLifecycleFaultAfterRootSync},
+		{point: FileLifecycleFaultAfterRootRename, committed: true},
+		{point: FileLifecycleFaultAfterRootDirectorySync, committed: true},
 	} {
 		t.Run(string(tc.point), func(t *testing.T) {
 			ctx := context.Background()
@@ -422,10 +469,10 @@ func TestFileLifecycleStoreReshareReceiverCrashAtomicity(t *testing.T) {
 	}{
 		{point: FileLifecycleFaultAfterBlobWrite},
 		{point: FileLifecycleFaultAfterBlobSync},
-		{point: FileLifecycleFaultAfterManifestWrite},
-		{point: FileLifecycleFaultAfterManifestSync},
-		{point: FileLifecycleFaultAfterManifestRename, committed: true},
-		{point: FileLifecycleFaultAfterManifestDirectorySync, committed: true},
+		{point: FileLifecycleFaultAfterRootWrite},
+		{point: FileLifecycleFaultAfterRootSync},
+		{point: FileLifecycleFaultAfterRootRename, committed: true},
+		{point: FileLifecycleFaultAfterRootDirectorySync, committed: true},
 	} {
 		t.Run(string(tc.point), func(t *testing.T) {
 			ctx := context.Background()
@@ -476,10 +523,10 @@ func TestFileLifecycleStoreRetirementCrashAtomicity(t *testing.T) {
 		point     FileLifecycleFaultPoint
 		committed bool
 	}{
-		{point: FileLifecycleFaultAfterManifestWrite},
-		{point: FileLifecycleFaultAfterManifestSync},
-		{point: FileLifecycleFaultAfterManifestRename, committed: true},
-		{point: FileLifecycleFaultAfterManifestDirectorySync, committed: true},
+		{point: FileLifecycleFaultAfterRootWrite},
+		{point: FileLifecycleFaultAfterRootSync},
+		{point: FileLifecycleFaultAfterRootRename, committed: true},
+		{point: FileLifecycleFaultAfterRootDirectorySync, committed: true},
 	} {
 		t.Run(string(tc.point), func(t *testing.T) {
 			ctx := context.Background()
@@ -553,7 +600,7 @@ func TestFileLifecycleStoreCiphertextsAreImmutableAndRedacted(t *testing.T) {
 	commitTestAvailablePresign(t, store, binding, "public-presign-id", []byte("presign-plaintext-secret"), []byte("presign-plaintext-metadata"), "encrypted-blobs")
 	after := lifecycleRegularFiles(t, directory)
 	for path, content := range before {
-		if strings.HasSuffix(path, fileLifecycleManifestName) || strings.HasSuffix(path, ".lock") {
+		if strings.HasSuffix(path, fileLifecycleRootName) || strings.HasSuffix(path, ".lock") {
 			continue
 		}
 		if updated, ok := after[path]; !ok || !bytes.Equal(content, updated) {
@@ -573,6 +620,36 @@ func TestFileLifecycleStoreCiphertextsAreImmutableAndRedacted(t *testing.T) {
 		}
 		if strings.Contains(path, binding.KeyID) || strings.Contains(path, "public-presign-id") {
 			t.Fatalf("public identifiers leaked into lifecycle path %s", path)
+		}
+	}
+}
+
+func TestFileLifecycleStoreOrdinaryReadsDoNotModifyDisk(t *testing.T) {
+	ctx := context.Background()
+	directory := t.TempDir()
+	store := newTestFileLifecycleStore(t, directory, []byte("read-only-disk-passphrase"))
+	binding := testGenerationBinding("read-only-key", "gen-1", "read-only-epoch")
+	if _, err := store.InstallInitialGeneration(ctx, binding, []byte("generation-secret"), nil); err != nil {
+		t.Fatal(err)
+	}
+	sessionID := fileLifecycleSessionID(t, "read-only-session")
+	if _, err := store.AcquireRunLease(ctx, binding, RunSign, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	before := lifecycleRegularFiles(t, directory)
+	if _, err := store.LoadCurrentGeneration(ctx, binding.KeyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.QueryRunLease(ctx, binding, RunSign, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	after := lifecycleRegularFiles(t, directory)
+	if len(after) != len(before) {
+		t.Fatalf("ordinary reads changed file count from %d to %d", len(before), len(after))
+	}
+	for path, content := range before {
+		if !bytes.Equal(content, after[path]) {
+			t.Fatalf("ordinary read changed lifecycle file %s", path)
 		}
 	}
 }
@@ -632,7 +709,7 @@ func TestFileLifecycleStoreConcurrentInstancesClaimOnce(t *testing.T) {
 	}
 }
 
-func TestFileLifecycleStoreConcurrentLineagesPreserveGlobalManifest(t *testing.T) {
+func TestFileLifecycleStoreConcurrentLineagesPreserveAtomicRoot(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	passphrase := []byte("concurrent-lineage-file-store-passphrase")
@@ -672,11 +749,7 @@ func TestFileLifecycleStoreConcurrentLineagesPreserveGlobalManifest(t *testing.T
 			t.Fatalf("lineage %q binding=%v blob=%q err=%v", binding.KeyID, record.Binding, record.Blob, err)
 		}
 	}
-	for _, lockID := range []string{
-		"manifest:" + fileLifecycleGlobalKeyID,
-		"lineage:" + bindings[0].KeyID,
-		"lineage:" + bindings[1].KeyID,
-	} {
+	for _, lockID := range []string{"metadata:" + fileLifecycleGlobalKeyID, "root:" + fileLifecycleGlobalKeyID} {
 		path := filepath.Join(directory, fileLifecycleLocksDirectory, fileLifecycleKeyHash(lockID)+".lock")
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
@@ -703,21 +776,21 @@ func TestFileLifecycleStoreReopenRemovesOrphanArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile referenced blob: %v", err)
 	}
-	keyDirectory := filepath.Dir(filepath.Dir(referencedPath))
-	orphanPath := filepath.Join(filepath.Dir(referencedPath), strings.Repeat("0", fileLifecycleBlobIDBytes*2)+".enc")
+	keyDirectory := filepath.Dir(referencedPath)
+	orphanPath := filepath.Join(keyDirectory, strings.Repeat("0", fileLifecycleSnapshotIDBytes*2)+".enc")
 	if orphanPath == referencedPath {
-		orphanPath = filepath.Join(filepath.Dir(referencedPath), strings.Repeat("1", fileLifecycleBlobIDBytes*2)+".enc")
+		orphanPath = filepath.Join(keyDirectory, strings.Repeat("1", fileLifecycleSnapshotIDBytes*2)+".enc")
 	}
 	// #nosec G304 G703 -- orphanPath is a fixed valid blob filename beneath the
 	// test-owned private blob directory.
 	if err := os.WriteFile(orphanPath, ciphertext, 0o600); err != nil {
 		t.Fatalf("WriteFile orphan blob: %v", err)
 	}
-	temporaryPath := filepath.Join(keyDirectory, ".manifest-recovery.tmp")
+	temporaryPath := filepath.Join(directory, ".root-recovery.tmp")
 	// #nosec G304 G703 -- temporaryPath is a fixed store temporary filename
 	// beneath the test-owned private key directory.
 	if err := os.WriteFile(temporaryPath, ciphertext, 0o600); err != nil {
-		t.Fatalf("WriteFile stale manifest temporary: %v", err)
+		t.Fatalf("WriteFile stale root temporary: %v", err)
 	}
 
 	reopened := newTestFileLifecycleStore(t, directory, passphrase)
@@ -833,9 +906,9 @@ func TestFileLifecycleStoreRejectsWrongPassphraseAndUseAfterClose(t *testing.T) 
 	if _, err := store.LoadCurrentGeneration(ctx, binding.KeyID); !errors.Is(err, ErrFileLifecycleStoreClosed) {
 		t.Fatalf("use after close got %v, want ErrFileLifecycleStoreClosed", err)
 	}
-	wrong := newTestFileLifecycleStore(t, directory, []byte("wrong-passphrase"))
-	if _, err := wrong.LoadCurrentGeneration(ctx, binding.KeyID); !errors.Is(err, ErrLifecycleCorrupt) {
-		t.Fatalf("wrong passphrase got %v, want ErrLifecycleCorrupt", err)
+	wrong, err := NewFileLifecycleStore(directory, []byte("wrong-passphrase"), fastFileLifecycleParams)
+	if !errors.Is(err, ErrLifecycleCorrupt) || wrong != nil {
+		t.Fatalf("wrong passphrase open got store=%v err=%v, want ErrLifecycleCorrupt", wrong, err)
 	}
 }
 

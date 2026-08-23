@@ -133,7 +133,7 @@ func testCGGMP21Policies() tss.PolicySet {
 		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
 		relaxed[i].RequireSenderSignature = false
 	}
-	ps, err := tss.NewPolicySet(relaxed...)
+	ps, err := tss.NewTestPolicySet(relaxed...)
 	if err != nil {
 		panic(err)
 	}
@@ -447,7 +447,6 @@ func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig 
 		Self:           config.Self,
 		Rand:           config.Rand,
 		Context:        config.Context,
-		RoundTimeout:   config.RoundTimeout,
 		Log:            config.Log,
 		EnvelopeSigner: config.EnvelopeSigner,
 	}
@@ -717,7 +716,7 @@ func deliverKeygenMessagesE(sessions map[tss.PartyID]*KeygenSession, parties tss
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				return fmt.Errorf("deliver %s from %d to %d: %w", env.PayloadType, env.From, id, err)
 			}

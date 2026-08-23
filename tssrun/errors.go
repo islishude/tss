@@ -46,9 +46,6 @@ var ErrInvalidRunResult = errors.New("tssrun: invalid local run result")
 // ErrInvalidSessionKey reports a malformed session registry key.
 var ErrInvalidSessionKey = errors.New("tssrun: invalid session key")
 
-// ErrMissingTransport reports that a dispatcher has outbound envelopes but no transport.
-var ErrMissingTransport = errors.New("tssrun: missing transport")
-
 // ErrInvalidLifecycleRecord reports malformed generation, lease, presign,
 // attempt, or cutover metadata.
 var ErrInvalidLifecycleRecord = errors.New("tssrun: invalid lifecycle record")
@@ -103,3 +100,18 @@ var ErrLifecycleCorrupt = errors.New("tssrun: lifecycle state corrupt")
 // ErrFileLifecycleStoreClosed reports use after a file lifecycle store has
 // released its passphrase.
 var ErrFileLifecycleStoreClosed = errors.New("tssrun: file lifecycle store closed")
+
+// ErrLifecycleCommitPending reports that a session retains an exact durable
+// effect which must be reconciled before it can accept input or close.
+var ErrLifecycleCommitPending = errors.New("tssrun: lifecycle commit pending")
+
+// ErrSessionClosePending reports that an exact durable abort or retirement
+// must be retried before session cleanup is authoritative.
+var ErrSessionClosePending = errors.New("tssrun: session close pending")
+
+// ErrSessionClosed reports use of a fully closed protocol session.
+var ErrSessionClosed = errors.New("tssrun: session closed")
+
+// ErrLifecycleHistoryCompacted reports that an exact identifier is durably
+// tombstoned but its full terminal recovery record was explicitly compacted.
+var ErrLifecycleHistoryCompacted = errors.New("tssrun: lifecycle history compacted")

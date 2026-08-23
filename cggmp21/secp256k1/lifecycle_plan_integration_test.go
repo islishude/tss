@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -52,20 +53,20 @@ func TestCGGMP21RefreshMixedSourceGenerationsRejectsWithoutStateMutation(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer newGenerationSession.Destroy()
+	defer closeTestSession(t, newGenerationSession)
 	oldGenerationSession, oldOut, err := startCGGMP21Refresh(original[2], tss.ThresholdConfig{
 		Threshold: 2, Parties: parties, Self: 2, SessionID: mixedRefreshID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer oldGenerationSession.Destroy()
+	defer closeTestSession(t, oldGenerationSession)
 	if bytes.Equal(newGenerationSession.planHash, oldGenerationSession.planHash) {
 		t.Fatal("mixed source generations produced the same refresh plan hash")
 	}
 
 	oldCommitment := mustRefreshEnvelope(t, oldOut, payloadAuxInfoCommitment)
-	out, err := newGenerationSession.Handle(testutil.DeliverEnvelope(oldCommitment))
+	out, err := newGenerationSession.Handle(context.Background(), testutil.DeliverEnvelope(oldCommitment))
 	if len(out) != 0 {
 		t.Fatalf("mixed-generation commitment emitted %d envelopes", len(out))
 	}
@@ -110,7 +111,7 @@ func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 
 	env := out2[0]
 	before := snapshotCGGMPKeygenSession(s1)
-	out, err := s1.Handle(testutil.DeliverEnvelope(env))
+	out, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(env))
 	if len(out) != 0 {
 		t.Fatalf("plan mismatch emitted %d envelopes", len(out))
 	}

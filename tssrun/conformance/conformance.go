@@ -2,6 +2,7 @@
 package conformance
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -71,7 +72,7 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if err := store.AcceptPlan(ctx, run.RunID, 4, digest); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
 		t.Fatalf("non-participant accept: got %v, want ErrRunPartyNotParticipant", err)
 	}
-	if err := store.MarkStarted(ctx, run.RunID, 4); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+	if err := store.MarkStarted(ctx, run.RunID, 4, digest, runSessionDescriptor(run, 4)); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
 		t.Fatalf("non-participant start: got %v, want ErrRunPartyNotParticipant", err)
 	}
 	if err := store.MarkCompleted(ctx, run.RunID, 4, tssrun.LocalRunResult{OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
@@ -92,19 +93,19 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); err != nil {
 		t.Fatalf("accepted lookup: %v", err)
 	}
-	if err := store.MarkStarted(ctx, run.RunID, 2); !errors.Is(err, tssrun.ErrRunNotAccepted) {
+	if err := store.MarkStarted(ctx, run.RunID, 2, digest, runSessionDescriptor(run, 2)); !errors.Is(err, tssrun.ErrRunNotAccepted) {
 		t.Fatalf("unaccepted start: got %v, want ErrRunNotAccepted", err)
 	}
-	if err := store.MarkStarted(ctx, run.RunID, 1); err != nil {
+	if err := store.MarkStarted(ctx, run.RunID, 1, digest, runSessionDescriptor(run, 1)); err != nil {
 		t.Fatalf("MarkStarted: %v", err)
 	}
 	if err := store.AcceptPlan(ctx, run.RunID, 2, digest); err != nil {
 		t.Fatalf("AcceptPlan second party: %v", err)
 	}
-	if err := store.MarkStarted(ctx, run.RunID, 2); err != nil {
+	if err := store.MarkStarted(ctx, run.RunID, 2, digest, runSessionDescriptor(run, 2)); err != nil {
 		t.Fatalf("MarkStarted second party: %v", err)
 	}
-	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{Binding: run.Binding}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
+	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{Binding: run.SourceBinding}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
 		t.Fatalf("empty completion digest: got %v, want ErrInvalidRunResult", err)
 	}
 	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{Binding: generationBinding("other-key", "gen-1", "other-epoch"), OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
@@ -123,7 +124,7 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); err != nil {
 		t.Fatalf("lookup after one local completion: %v", err)
 	}
-	if err := store.MarkStarted(ctx, run.RunID, 1); !errors.Is(err, tssrun.ErrRunCompleted) {
+	if err := store.MarkStarted(ctx, run.RunID, 1, digest, runSessionDescriptor(run, 1)); !errors.Is(err, tssrun.ErrRunCompleted) {
 		t.Fatalf("completed party restart: got %v, want ErrRunCompleted", err)
 	}
 	if err := store.MarkCompleted(ctx, run.RunID, 2, keygenRunResult(run, "out-2")); err != nil {
@@ -162,7 +163,8 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 
 	refresh := testRunIntent(t, "run-refresh-target-binding")
 	refresh.Kind = tssrun.RunRefresh
-	refresh.TargetKeyID = refresh.Binding.KeyID
+	refresh.SourceBinding = generationBinding("key-1", "gen-1", "epoch-1")
+	refresh.TargetKeyID = refresh.SourceBinding.KeyID
 	refresh.TargetKeyGeneration = "gen-2"
 	if err := store.CreateRun(ctx, refresh); err != nil {
 		t.Fatalf("CreateRun refresh: %v", err)
@@ -237,13 +239,21 @@ func runUnknownStore(t *testing.T, newStore func(testing.TB) tssrun.UnknownEnvel
 type testSession struct{}
 
 // Handle accepts an inbound envelope for the conformance stub session.
-func (s *testSession) Handle(tss.InboundEnvelope) ([]tss.Envelope, error) { return nil, nil }
+func (s *testSession) Handle(context.Context, tss.InboundEnvelope) ([]tss.Envelope, error) {
+	return nil, nil
+}
 
-// Completed reports whether the conformance stub session is complete.
-func (s *testSession) Completed() bool { return false }
+// Descriptor returns the conformance session binding.
+func (s *testSession) Descriptor() tssrun.SessionDescriptor { return tssrun.SessionDescriptor{} }
 
-// Destroy releases the conformance stub session.
-func (s *testSession) Destroy() {}
+// Status reports an active conformance session.
+func (s *testSession) Status() tssrun.SessionState { return tssrun.SessionActive }
+
+// Abort terminates the conformance stub session.
+func (s *testSession) Abort(context.Context, string) error { return nil }
+
+// Close releases the conformance stub session.
+func (s *testSession) Close(context.Context) error { return nil }
 
 func testRunIntent(t *testing.T, runID string) tssrun.RunIntent {
 	t.Helper()
@@ -252,14 +262,15 @@ func testRunIntent(t *testing.T, runID string) tssrun.RunIntent {
 		t.Fatalf("NewSessionID: %v", err)
 	}
 	return tssrun.RunIntent{
-		RunID:      runID,
-		Protocol:   tss.ProtocolFROSTEd25519,
-		Kind:       tssrun.RunKeygen,
-		SessionID:  sessionID,
-		Parties:    tss.NewPartySet(1, 2, 3),
-		Threshold:  2,
-		Binding:    generationBinding("key-1", "gen-1", "epoch-1"),
-		PlanDigest: runDigest("plan-digest"),
+		RunID:               runID,
+		Protocol:            tss.ProtocolFROSTEd25519,
+		Kind:                tssrun.RunKeygen,
+		SessionID:           sessionID,
+		Parties:             tss.NewPartySet(1, 2, 3),
+		Threshold:           2,
+		TargetKeyID:         "key-1",
+		TargetKeyGeneration: "gen-1",
+		PlanDigest:          runDigest("plan-digest"),
 	}
 }
 
@@ -270,8 +281,15 @@ func runDigest(label string) []byte {
 
 func keygenRunResult(run tssrun.RunIntent, label string) tssrun.LocalRunResult {
 	return tssrun.LocalRunResult{
-		Binding:      run.Binding,
+		Binding:      generationBinding(run.TargetKeyID, run.TargetKeyGeneration, "keygen-"+label),
 		OutputDigest: runDigest(label),
+	}
+}
+
+func runSessionDescriptor(run tssrun.RunIntent, party tss.PartyID) tssrun.SessionDescriptor {
+	return tssrun.SessionDescriptor{
+		Protocol: run.Protocol, Kind: run.Kind, SessionID: run.SessionID, Party: party,
+		PlanDigest: bytes.Clone(run.PlanDigest),
 	}
 }
 

@@ -121,7 +121,7 @@ func (s *ReshareSession) startReshareAuxInfo() ([]tss.Envelope, error) {
 		StableSID:             s.plan.state.SourceEpoch.SID,
 		Limits:                s.limits,
 		SecurityParams:        s.securityParams,
-		EnvelopeVerifier:      s.guard.EnvelopeVerifier,
+		EnvelopeVerifier:      s.guard.EnvelopeVerifier(),
 		PaillierBits:          s.plan.state.PaillierBits,
 		PlanHash:              s.planHash,
 		SourceEpochID:         s.plan.state.SourceEpochID,

@@ -23,13 +23,13 @@ func (EnvelopeReceiver) Open(raw []byte, info tss.ReceiveInfo, opts ...tss.OpenO
 
 // DispatchInbound opens raw transport bytes, routes the resulting inbound
 // envelope through Dispatcher, and sends any produced outbound envelopes.
-func DispatchInbound(ctx context.Context, receiver Receiver, dispatcher *Dispatcher, raw []byte, info tss.ReceiveInfo, opts ...tss.OpenOption) error {
+func DispatchInbound(ctx context.Context, receiver Receiver, dispatcher *Dispatcher, raw []byte, info tss.ReceiveInfo, opts ...tss.OpenOption) (DispatchResult, error) {
 	if receiver == nil {
 		receiver = EnvelopeReceiver{}
 	}
 	in, err := receiver.Open(raw, info, opts...)
 	if err != nil {
-		return err
+		return DispatchResult{}, err
 	}
 	return dispatcher.Dispatch(ctx, in)
 }

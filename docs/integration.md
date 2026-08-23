@@ -31,11 +31,12 @@ Every interactive run follows the same outer sequence:
 3. Construct the protocol `EnvelopeGuard` and local session.
 4. Register the session with `tssrun.RegisterStartedSession`; only then release
    the initial outbound envelopes.
-5. Open every received wire record with transport-derived `ReceiveInfo` and
-   dispatch the returned `InboundEnvelope`.
+5. Open every received wire record with transport-derived `ReceiveInfo`,
+   dispatch it, durably write the returned `DispatchResult` outbox, and only
+   then deliver those exact envelopes.
 6. Commit the protocol result at the flow-specific durable boundary, record the
-   local `LocalRunResult`, retire the registry entry, and destroy caller-owned
-   secret state.
+   local `LocalRunResult`, retire the registry entry, call session `Close`, and
+   destroy caller-owned secret values.
 
 Each participant reconstructs an equivalent plan; parties never share a Go
 plan object. A typical admission check is:
@@ -109,9 +110,11 @@ if err != nil {
     return err
 }
 if err := tssrun.RegisterStartedSession(
-    ctx, runStore, registry, run, self, session,
+    ctx, runStore, registry, run.RunID, self, session,
 ); err != nil {
-    session.Destroy()
+    return errors.Join(err, session.Abort(context.WithoutCancel(ctx), "registration failed"), session.Close(context.WithoutCancel(ctx)))
+}
+if err := durableOutbox.PutInitial(ctx, run.RunID, session.Descriptor(), out); err != nil {
     return err
 }
 return transport.SendAll(ctx, out)
@@ -128,7 +131,15 @@ func OnEnvelope(raw []byte, info tss.ReceiveInfo, cert *tss.BroadcastCertificate
     if err != nil {
         return err
     }
-    return dispatcher.Dispatch(ctx, in)
+    result, err := dispatcher.Dispatch(ctx, in)
+    if err != nil {
+        return err
+    }
+    defer result.Destroy()
+    if err := durableOutbox.Put(ctx, result); err != nil {
+        return err
+    }
+    return transport.SendAll(ctx, result.Outbox)
 }
 ```
 
@@ -156,12 +167,12 @@ The protocol-specific boundary is:
 
 | Flow                           | Result visible from session                      | Required durable action                                                                                     |
 | ------------------------------ | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| FROST keygen                   | `KeygenSession.KeyShare()`                       | Encrypt and install the caller-owned share before marking it usable.                                        |
+| FROST keygen                   | `KeygenSession.KeyShare()`                       | Call `ed25519.InstallKeyShare` (or explicit-limits variant) before marking it usable.                       |
 | FROST sign                     | `SignSession.Signature()`                        | Persist/expose the verified signature according to application policy.                                      |
 | FROST refresh                  | `RefreshSession.KeyShare()`                      | Compare-and-swap the staged share against the expected current generation.                                  |
 | FROST reshare receiver/overlap | `ReshareSession.KeyShare()`                      | Install the target share; coordinate old-generation retirement externally.                                  |
 | FROST old-only reshare dealer  | terminal session, no share                       | Keep the session active through target confirmations, then record local completion.                         |
-| CGGMP21 keygen                 | confirmed `KeyShare`                             | Canonically encode and call `InstallInitialGeneration` with the exact produced epoch.                       |
+| CGGMP21 keygen                 | confirmed `KeyShare`                             | Call `secp256k1.InstallKeyShare`; it uses the exact protocol-produced epoch.                                |
 | CGGMP21 presign                | public `PersistedPresign`                        | Already committed by `CommitAvailablePresignFromLease`; no caller-owned secret presign is returned.         |
 | CGGMP21 sign                   | `secp256k1.Signature`                            | Attempt is claimed before outbox visibility; completion is durable before `Signature()` returns success.    |
 | CGGMP21 refresh                | confirmed share and `ResultMetadata`             | Native session commits the fenced same-key cutover before terminal success.                                 |
@@ -169,7 +180,10 @@ The protocol-specific boundary is:
 | CGGMP21 child derivation       | `InstalledBinding()`                             | Native session creates the first generation of the distinct child lineage before success.                   |
 
 Completion does not remove the `SessionRegistry` entry. The application must
-retire it after the durable result/abort decision and call `Destroy`.
+retire it after the durable result/abort decision and call `Close`. A
+`CommitPending` session is reconciled only through `RetryLifecycleCommit` or
+`ResumeSign`; a `ClosePending` session keeps its public recovery descriptor and
+requires an identical `Abort`/`Close` retry.
 
 ## FROST API Map
 
@@ -263,7 +277,7 @@ replay still enters through `OpenEnvelope` and the normal guard.
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | Unknown session                                    | Reject, or durably buffer and re-dispatch only after acceptance and registration.                         |
 | Wrong protocol, party, recipient, plan, or session | Reject without state mutation or effects.                                                                 |
-| `Start*` succeeds but initial send fails           | Apply transport retry policy; CGGMP21 sign may replay only the exact committed attempt outbox.            |
+| `Start*` succeeds but initial delivery fails       | Replay only the durably persisted initial outbox; never reconstruct it from mutable session state.        |
 | FROST share persistence/CAS fails                  | Do not expose the target as current; reconcile an outcome-unknown CAS before selecting either generation. |
 | CGGMP21 keygen install fails                       | Do not mark the share usable.                                                                             |
 | Figure 8 persistence fails                         | No available descriptor; finish or reconcile the exact presign lease.                                     |

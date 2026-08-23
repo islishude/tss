@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -188,7 +189,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if fromParty2.PayloadType == "" {
 		t.Fatal("missing confirmation from party 2")
 	}
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(fromParty2)); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(fromParty2)); err != nil {
 		t.Fatal(err)
 	}
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
@@ -206,7 +207,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = sessions[1].Handle(testutil.DeliverEnvelope(conflicting))
+	_, err = sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(conflicting))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting confirmation, got %v", err)
 	}
@@ -267,12 +268,12 @@ func TestFROSTKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.
 	// still accept the complete R1, allowing them to enter R2. Constructing the
 	// party 1 -> party 2 share directly keeps party 1 in the pre-commitment state
 	// whose early-confirmation buffering behavior this test exercises.
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(commitment3)); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(commitment3)); err != nil {
 		t.Fatalf("prepare party 1 with commitment from 3: %v", err)
 	}
 	var round2From2 []tss.Envelope
 	for _, env := range []tss.Envelope{commitment1, commitment3} {
-		out, err := sessions[2].Handle(testutil.DeliverEnvelope(env))
+		out, err := sessions[2].Handle(context.Background(), testutil.DeliverEnvelope(env))
 		if err != nil {
 			t.Fatalf("prepare party 2 with commitment from %d: %v", env.From, err)
 		}
@@ -283,7 +284,7 @@ func TestFROSTKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.
 	}
 	var round2From3 []tss.Envelope
 	for _, env := range []tss.Envelope{commitment1, commitment2} {
-		out, err := sessions[3].Handle(testutil.DeliverEnvelope(env))
+		out, err := sessions[3].Handle(context.Background(), testutil.DeliverEnvelope(env))
 		if err != nil {
 			t.Fatalf("prepare party 3 with commitment from %d: %v", env.From, err)
 		}
@@ -294,7 +295,7 @@ func TestFROSTKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.
 	share3To2 := mustFROSTEnvelope(t, round2From3, payloadKeygenShare, 2)
 	var early tss.Envelope
 	for _, env := range []tss.Envelope{share1To2, share3To2} {
-		out, err := sessions[2].Handle(testutil.DeliverEnvelope(env))
+		out, err := sessions[2].Handle(context.Background(), testutil.DeliverEnvelope(env))
 		if err != nil {
 			t.Fatalf("prepare party 2 with share from %d: %v", env.From, err)
 		}
@@ -307,14 +308,14 @@ func TestFROSTKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.
 	if early.PayloadType == "" {
 		t.Fatal("party 2 did not produce a confirmation")
 	}
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(early)); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(early)); err != nil {
 		t.Fatalf("early confirmation: %v", err)
 	}
 	if sessions[1].aborted || sessions[1].pendingConfirmations[2] == nil {
 		t.Fatal("early confirmation was not buffered without aborting")
 	}
 
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(commitment2)); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(commitment2)); err != nil {
 		t.Fatalf("deliver withheld commitment from 2: %v", err)
 	}
 	if sessions[1].aborted || sessions[1].pendingConfirmations[2] != nil || sessions[1].confirmations.confirmations[2] == nil {
@@ -338,7 +339,7 @@ func routeFROSTKeygenThroughShareRound(
 			if id == env.From || (env.To != tss.BroadcastPartyId && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}

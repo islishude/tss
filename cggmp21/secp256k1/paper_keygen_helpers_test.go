@@ -8,7 +8,7 @@ func paperKeygenTestPolicies() tss.PolicySet {
 		entries[i].BroadcastConsistency = tss.BroadcastConsistencyNone
 		entries[i].RequireSenderSignature = false
 	}
-	policies, err := tss.NewPolicySet(entries...)
+	policies, err := tss.NewTestPolicySet(entries...)
 	if err != nil {
 		panic(err)
 	}

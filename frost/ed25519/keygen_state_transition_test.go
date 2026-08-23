@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -11,13 +12,14 @@ import (
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/zk/schnorred25519"
+	"github.com/islishude/tss/tssrun"
 )
 
 func TestFROSTKeygenCommitmentBuildDoesNotMutate(t *testing.T) {
 	t.Parallel()
 
 	session, remoteOut := frostKeygenTransitionSessions(t)
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	commitment := mustFROSTEnvelope(t, remoteOut, payloadKeygenCommitments, tss.BroadcastPartyId)
 
 	before := snapshotFROSTKeygenSession(session)
@@ -34,7 +36,7 @@ func TestFROSTKeygenInvalidChainCodeCommitRejectAbortsAndClearsSecrets(t *testin
 	t.Parallel()
 
 	session, remoteOut := frostKeygenTransitionSessions(t)
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	bad := mustFROSTEnvelope(t, remoteOut, payloadKeygenCommitments, tss.BroadcastPartyId)
 	var err error
 	bad.Payload, err = testutil.RewriteWireFieldByName(
@@ -48,7 +50,7 @@ func TestFROSTKeygenInvalidChainCodeCommitRejectAbortsAndClearsSecrets(t *testin
 		t.Fatal(err)
 	}
 
-	out, err := session.Handle(testutil.DeliverEnvelope(bad))
+	out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 	if err == nil {
 		t.Fatal("expected invalid chain-code commitment to be rejected")
 	}
@@ -76,11 +78,11 @@ func TestFROSTKeygenRound2ConstructionFailureIsTerminalInvariant(t *testing.T) {
 	t.Parallel()
 
 	session, remoteOut := frostKeygenTransitionSessions(t)
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	session.local.DestroyPolynomial()
 	commitment := mustFROSTEnvelope(t, remoteOut, payloadKeygenCommitments, tss.BroadcastPartyId)
 
-	out, err := session.Handle(testutil.DeliverEnvelope(commitment))
+	out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(commitment))
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeInvariant)
 	if protocolErr.Party != tss.BroadcastPartyId || protocolErr.Blame != nil {
 		t.Fatalf("round-2 construction invariant attribution = %#v", protocolErr)
@@ -97,7 +99,7 @@ func TestFROSTKeygenShareBuildOwnsAndClearsDecodedSecret(t *testing.T) {
 	t.Parallel()
 
 	session, remoteOut := frostKeygenTransitionSessions(t)
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	share := mustFROSTEnvelope(t, remoteOut, payloadKeygenShare, session.cfg.Self)
 
 	before := snapshotFROSTKeygenSession(session)
@@ -128,8 +130,8 @@ func TestFROSTKeygenPendingPrepareDoesNotMutateAndDestroysStagedShare(t *testing
 	t.Parallel()
 
 	session1, out1, session2, out2 := frostTwoPartyKeygenSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
+	defer closeTestSession(t, session1)
+	defer closeTestSession(t, session2)
 	out1, out2 = exchangeFROSTKeygenCommitments(t, session1, out1, session2, out2)
 	installFROSTKeygenRound1(t, session1, out2)
 	installFROSTKeygenRound1(t, session2, out1)
@@ -163,8 +165,8 @@ func TestFROSTKeygenFinalPrepareFailureDoesNotInstallKeyShare(t *testing.T) {
 	t.Parallel()
 
 	session1, out1, session2, out2 := frostTwoPartyKeygenSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
+	defer closeTestSession(t, session1)
+	defer closeTestSession(t, session2)
 	out1, out2 = exchangeFROSTKeygenCommitments(t, session1, out1, session2, out2)
 	installFROSTKeygenRound1(t, session1, out2)
 	installFROSTKeygenRound1(t, session2, out1)
@@ -210,7 +212,7 @@ func TestFROSTKeygenEarlyInvalidConfirmationClearsUnexposedRound3Effect(t *testi
 	t.Run("Handle aborts without effects", func(t *testing.T) {
 		session, remoteShare := frostKeygenEarlyInvalidConfirmationFixture(t)
 
-		out, err := session.Handle(testutil.DeliverEnvelope(remoteShare))
+		out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(remoteShare))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 		if len(out) != 0 {
 			t.Fatalf("invalid early confirmation emitted %d outbound effects", len(out))
@@ -279,22 +281,24 @@ func frostKeygenEarlyInvalidConfirmationFixture(t *testing.T) (*KeygenSession, t
 	t.Helper()
 
 	session1, out1, session2, out2 := frostTwoPartyKeygenSessions(t)
-	t.Cleanup(session1.Destroy)
-	t.Cleanup(session2.Destroy)
+	t.Cleanup(func() { _ = session1.Close(context.Background()) })
+	t.Cleanup(func() { _ = session2.Close(context.Background()) })
 	t.Cleanup(func() {
 		clearEnvelopePayloads(out1)
 		clearEnvelopePayloads(out2)
 	})
 
-	round2From1, err := session1.Handle(testutil.DeliverEnvelope(
+	round2From1, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, out2, payloadKeygenCommitments, tss.BroadcastPartyId),
 	))
+
 	if err != nil {
 		t.Fatal(err)
 	}
-	round2From2, err := session2.Handle(testutil.DeliverEnvelope(
+	round2From2, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, out1, payloadKeygenCommitments, tss.BroadcastPartyId),
 	))
+
 	if err != nil {
 		clearEnvelopePayloads(round2From1)
 		t.Fatal(err)
@@ -304,9 +308,10 @@ func frostKeygenEarlyInvalidConfirmationFixture(t *testing.T) (*KeygenSession, t
 		clearEnvelopePayloads(round2From2)
 	})
 
-	remoteConfirmationOut, err := session2.Handle(testutil.DeliverEnvelope(
+	remoteConfirmationOut, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, round2From1, payloadKeygenShare, session2.cfg.Self),
 	))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +329,7 @@ func frostKeygenEarlyInvalidConfirmationFixture(t *testing.T) (*KeygenSession, t
 	}
 	t.Cleanup(func() { clear(remoteConfirmation.Payload) })
 
-	if out, err := session1.Handle(testutil.DeliverEnvelope(remoteConfirmation)); err != nil {
+	if out, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(remoteConfirmation)); err != nil {
 		t.Fatalf("buffer invalid early confirmation: %v", err)
 	} else if len(out) != 0 {
 		clearEnvelopePayloads(out)
@@ -376,14 +381,13 @@ func TestFROSTKeygenAggregateIdentityAbortsAndClearsSecrets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer session.Destroy()
-
+			defer closeTestSession(t, session)
 			commitment, share := maliciousFROSTIdentityAggregateEnvelopes(t, session, 2)
 			first, last := share, commitment
 			if tc.commitmentFirst {
 				first, last = commitment, share
 			}
-			if out, err := session.Handle(testutil.DeliverEnvelope(first)); err != nil {
+			if out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(first)); err != nil {
 				t.Fatalf("first aggregate-identity input rejected early: %v", err)
 			} else if !tc.commitmentFirst && len(out) != 0 {
 				t.Fatalf("first aggregate-identity input produced %d outbound envelopes", len(out))
@@ -392,7 +396,7 @@ func TestFROSTKeygenAggregateIdentityAbortsAndClearsSecrets(t *testing.T) {
 				clearEnvelopePayloads(out)
 			}
 
-			out, err := session.Handle(testutil.DeliverEnvelope(last))
+			out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(last))
 			protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 			if protocolErr.Blame != nil {
 				t.Fatal("aggregate identity incorrectly blamed one dealer")
@@ -411,7 +415,7 @@ func TestFROSTKeygenAggregateIdentityAbortsAndClearsSecrets(t *testing.T) {
 					t.Fatal("aggregate identity retained a round-1 secret share slot")
 				}
 			}
-			if session.Completed() {
+			if session.Status() == tssrun.SessionSucceeded {
 				t.Fatal("aborted aggregate-identity session reported completed")
 			}
 		})
@@ -437,14 +441,13 @@ func TestFROSTKeygenIdentityVerificationShareAbortsAndClearsSecrets(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer session.Destroy()
-
+			defer closeTestSession(t, session)
 			commitment, share := maliciousFROSTIdentityVerificationShareEnvelopes(t, session, 2)
 			first, last := share, commitment
 			if commitmentFirst {
 				first, last = commitment, share
 			}
-			if out, err := session.Handle(testutil.DeliverEnvelope(first)); err != nil {
+			if out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(first)); err != nil {
 				t.Fatalf("first verification-identity input rejected early: %v", err)
 			} else if !commitmentFirst && len(out) != 0 {
 				t.Fatalf("first verification-identity input produced %d outbound envelopes", len(out))
@@ -453,7 +456,7 @@ func TestFROSTKeygenIdentityVerificationShareAbortsAndClearsSecrets(t *testing.T
 				clearEnvelopePayloads(out)
 			}
 
-			out, err := session.Handle(testutil.DeliverEnvelope(last))
+			out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(last))
 			protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 			if protocolErr.Blame != nil || protocolErr.Party != tss.BroadcastPartyId {
 				t.Fatalf("aggregate verification identity was attributed to one dealer: %#v", protocolErr)
@@ -622,15 +625,16 @@ func maliciousFROSTIdentityAggregateEnvelopes(t *testing.T, session *KeygenSessi
 func frostKeygenTransitionSessions(t *testing.T) (*KeygenSession, []tss.Envelope) {
 	t.Helper()
 	session1, out1, session2, out2 := frostTwoPartyKeygenSessions(t)
-	remoteRound2, err := session2.Handle(testutil.DeliverEnvelope(
+	remoteRound2, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, out1, payloadKeygenCommitments, tss.BroadcastPartyId),
 	))
+
 	if err != nil {
-		session1.Destroy()
-		session2.Destroy()
+		closeTestSession(t, session1)
+		closeTestSession(t, session2)
 		t.Fatal(err)
 	}
-	session2.Destroy()
+	closeTestSession(t, session2)
 	return session1, append(out2, remoteRound2...)
 }
 
@@ -642,15 +646,17 @@ func exchangeFROSTKeygenCommitments(
 	out2 []tss.Envelope,
 ) ([]tss.Envelope, []tss.Envelope) {
 	t.Helper()
-	round2From1, err := session1.Handle(testutil.DeliverEnvelope(
+	round2From1, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, out2, payloadKeygenCommitments, tss.BroadcastPartyId),
 	))
+
 	if err != nil {
 		t.Fatal(err)
 	}
-	round2From2, err := session2.Handle(testutil.DeliverEnvelope(
+	round2From2, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, out1, payloadKeygenCommitments, tss.BroadcastPartyId),
 	))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -680,7 +686,7 @@ func frostTwoPartyKeygenSessions(t *testing.T) (*KeygenSession, []tss.Envelope, 
 		SessionID: sessionID,
 	}, testFROSTGuard(2, parties, sessionID))
 	if err != nil {
-		session1.Destroy()
+		closeTestSession(t, session1)
 		t.Fatal(err)
 	}
 	return session1, out1, session2, out2

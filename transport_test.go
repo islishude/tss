@@ -157,13 +157,14 @@ func TestMaliciousTransportPlaintextConfidential(t *testing.T) {
 func TestTransportSecurityIntegration(t *testing.T) {
 	t.Parallel()
 	policies := testPolicySet()
+	newGuard := func(t *testing.T, sid SessionID) *EnvelopeGuard {
+		t.Helper()
+		return NewTestEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, policies)
+	}
 
 	t.Run("valid message passes guard", func(t *testing.T) {
 		sid := testSessionID(t)
-		guard, err := NewEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, policies, NewInMemoryReplayCache())
-		if err != nil {
-			t.Fatal(err)
-		}
+		guard := newGuard(t, sid)
 		env, _ := NewEnvelope(EnvelopeInput{
 			Protocol: "test-proto", SessionID: sid,
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
@@ -176,7 +177,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 
 	t.Run("rejects unauthenticated transport", func(t *testing.T) {
 		sid := testSessionID(t)
-		guard, _ := NewEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, policies, NewInMemoryReplayCache())
+		guard := newGuard(t, sid)
 		env, _ := NewEnvelope(EnvelopeInput{
 			Protocol: "test-proto", SessionID: sid,
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
@@ -190,7 +191,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 
 	t.Run("rejects sender spoofing", func(t *testing.T) {
 		sid := testSessionID(t)
-		guard, _ := NewEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, policies, NewInMemoryReplayCache())
+		guard := newGuard(t, sid)
 		env, _ := NewEnvelope(EnvelopeInput{
 			Protocol: "test-proto", SessionID: sid,
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
@@ -204,7 +205,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 
 	t.Run("rejects plaintext confidential", func(t *testing.T) {
 		sid := testSessionID(t)
-		guard, _ := NewEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, policies, NewInMemoryReplayCache())
+		guard := newGuard(t, sid)
 		env, _ := NewEnvelope(EnvelopeInput{
 			Protocol: "test-proto", SessionID: sid,
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.confidential",
@@ -217,7 +218,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 
 	t.Run("rejects replay", func(t *testing.T) {
 		sid := testSessionID(t)
-		guard, _ := NewEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, policies, NewInMemoryReplayCache())
+		guard := newGuard(t, sid)
 		env, _ := NewEnvelope(EnvelopeInput{
 			Protocol: "test-proto", SessionID: sid,
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
@@ -234,7 +235,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 
 	t.Run("rejects wrong recipient", func(t *testing.T) {
 		sid := testSessionID(t)
-		guard, _ := NewEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, policies, NewInMemoryReplayCache())
+		guard := newGuard(t, sid)
 		env, _ := NewEnvelope(EnvelopeInput{
 			Protocol: "test-proto", SessionID: sid,
 			Round: 1, From: 2, To: 3, PayloadType: "test.direct.plain",

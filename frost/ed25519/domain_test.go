@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	stded25519 "crypto/ed25519"
 	"encoding/hex"
 	"math/big"
@@ -42,7 +43,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = sess1B.Handle(testutil.DeliverEnvelope(commitA))
+			_, err = sess1B.Handle(context.Background(), testutil.DeliverEnvelope(commitA))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 		}},
 		{name: "cross-protocol", fn: func(t *testing.T) {
@@ -61,7 +62,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			commit2 := out2[0]
 			commit2.Protocol = "wrong-protocol"
 
-			_, err = sess1.Handle(testutil.DeliverEnvelope(commit2))
+			_, err = sess1.Handle(context.Background(), testutil.DeliverEnvelope(commit2))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 		}},
 		{name: "partial-acceptance", fn: func(t *testing.T) {
@@ -82,7 +83,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Deliver party 2's commitment to party 1 → party 1 emits its partial.
 			cb := out2[0]
-			partials1, err := sess1.Handle(testutil.DeliverEnvelope(cb))
+			partials1, err := sess1.Handle(context.Background(), testutil.DeliverEnvelope(cb))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,13 +94,13 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Deliver party 1's commitment to party 2 → party 2 emits its partial.
 			ca := out1[0]
-			_, err = sess2.Handle(testutil.DeliverEnvelope(ca))
+			_, err = sess2.Handle(context.Background(), testutil.DeliverEnvelope(ca))
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Deliver party 1's partial to party 2's session.
-			_, err = sess2.Handle(testutil.DeliverEnvelope(party1Partial))
+			_, err = sess2.Handle(context.Background(), testutil.DeliverEnvelope(party1Partial))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -139,7 +140,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Give party 1 party 2's message-A commitment → party 1 emits its partial.
 			cbA := out2A[0]
-			_, err = sess1A.Handle(testutil.DeliverEnvelope(cbA))
+			_, err = sess1A.Handle(context.Background(), testutil.DeliverEnvelope(cbA))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -148,7 +149,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			// The lifecycle plan hash rejects the cross-message intent before a
 			// partial is emitted.
 			ca := out1A[0]
-			_, err = sess2B.Handle(testutil.DeliverEnvelope(ca))
+			_, err = sess2B.Handle(context.Background(), testutil.DeliverEnvelope(ca))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		}},
 		{name: "wrong-signer-set", fn: func(t *testing.T) {
@@ -184,7 +185,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Give party 1 (2-signer) party 2's 2-signer commitment → party 1 emits partial.
 			cb2 := out2_2[0]
-			_, err = sess1_2.Handle(testutil.DeliverEnvelope(cb2))
+			_, err = sess1_2.Handle(context.Background(), testutil.DeliverEnvelope(cb2))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -192,7 +193,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			// Give party 2 (3-signer) party 1's 2-signer commitment. The plan
 			// hash rejects the cross-signer-set intent before a partial is emitted.
 			ca := out1[0]
-			_, err = sess2_3.Handle(testutil.DeliverEnvelope(ca))
+			_, err = sess2_3.Handle(context.Background(), testutil.DeliverEnvelope(ca))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		}},
 		{name: "wrong-public-key-HD", fn: func(t *testing.T) {
@@ -238,7 +239,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Give party 1 party 2's shift1 commitment → party 1 emits partial.
 			cb1 := out2_s1[0]
-			_, err = sess1.Handle(testutil.DeliverEnvelope(cb1))
+			_, err = sess1.Handle(context.Background(), testutil.DeliverEnvelope(cb1))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -246,7 +247,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			// Give party 2 (shift2) party 1's shift1 commitment. The plan hash
 			// rejects the cross-HD-path intent before a partial is emitted.
 			ca := out1[0]
-			_, err = sess2_s2.Handle(testutil.DeliverEnvelope(ca))
+			_, err = sess2_s2.Handle(context.Background(), testutil.DeliverEnvelope(ca))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		}},
 	}

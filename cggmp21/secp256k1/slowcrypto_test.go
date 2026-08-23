@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -79,7 +80,7 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers t
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[party].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,7 +185,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[party].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}

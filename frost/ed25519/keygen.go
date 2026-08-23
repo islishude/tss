@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -37,6 +38,7 @@ type KeygenSession struct {
 	state                keygenState
 	completed            bool
 	aborted              bool
+	closed               bool
 }
 
 type keygenCommitmentsPayload struct {
@@ -80,13 +82,13 @@ func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 }
 
 // Handle validates and applies one DKG envelope.
-func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *KeygenSession) Handle(ctx context.Context, env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return handleSessionEnvelope(s, env, s.completed, s.aborted, s.abort, s.buildKeygenTransition)
+	return handleSessionEnvelope(ctx, s.cfg.Ctx(), s, env, s.completed, s.aborted, s.abort, s.buildKeygenTransition)
 }
 
 // KeyShare returns the completed local key share when DKG has finished.

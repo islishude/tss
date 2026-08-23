@@ -218,18 +218,22 @@ func generatePrimePairWithSearch(ctx context.Context, bits int, search primeSear
 	qWorkers := max(totalWorkers-pWorkers, 1)
 
 	searchCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	var searchWG sync.WaitGroup
+	defer func() {
+		cancel()
+		searchWG.Wait()
+	}()
 
 	resultCh := make(chan primeSearchResult, 2)
 	launch := func(side primeSide, bits int, workers int) {
-		go func() {
+		searchWG.Go(func() {
 			prime, err := search(searchCtx, side, bits, workers)
 			select {
 			case <-searchCtx.Done():
 				return
 			case resultCh <- primeSearchResult{side: side, prime: prime, err: err}:
 			}
-		}()
+		})
 	}
 	launch(primeSideP, pBits, pWorkers)
 	launch(primeSideQ, qBits, qWorkers)
@@ -300,18 +304,22 @@ func safePrimeWithWorkers(ctx context.Context, reader io.Reader, bits, workers i
 		workers = 2
 	}
 	searchCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	var workerWG sync.WaitGroup
+	defer func() {
+		cancel()
+		workerWG.Wait()
+	}()
 
 	results := make(chan primeResult, workers)
 	for range workers {
-		go func() {
+		workerWG.Go(func() {
 			prime, err := safePrime(searchCtx, reader, bits)
 			select {
 			case <-searchCtx.Done():
 				return
 			case results <- primeResult{prime: prime, err: err}:
 			}
-		}()
+		})
 	}
 
 	var firstErr error

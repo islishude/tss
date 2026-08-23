@@ -1,9 +1,11 @@
 package ed25519
 
 import (
+	"context"
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/tssrun"
 )
 
 func TestRefreshSessionFacadeDrivesProtocol(t *testing.T) {
@@ -38,7 +40,7 @@ func TestRefreshSessionFacadeDrivesProtocol(t *testing.T) {
 	}
 	deliverReshareMessages(t, parties, queue, sessions)
 	for _, id := range parties {
-		if !sessions[id].Completed() {
+		if sessions[id].Status() != tssrun.SessionSucceeded {
 			t.Fatalf("refresh session %d did not complete", id)
 		}
 		share, ok := sessions[id].KeyShare()
@@ -46,21 +48,21 @@ func TestRefreshSessionFacadeDrivesProtocol(t *testing.T) {
 			t.Fatalf("refresh session %d did not expose a key share", id)
 		}
 		share.Destroy()
-		sessions[id].Destroy()
+		closeTestSession(t, sessions[id])
 	}
 }
 
 func TestRefreshSessionNilReceiverIsSafe(t *testing.T) {
 	t.Parallel()
 	var session *RefreshSession
-	if session.Guard() != nil || session.Completed() {
+	if session.Guard() != nil || session.Status() != tssrun.SessionClosed {
 		t.Fatal("nil refresh session exposed state")
 	}
 	if share, ok := session.KeyShare(); ok || share != nil {
 		t.Fatal("nil refresh session exposed a key share")
 	}
-	if _, err := session.Handle(tss.InboundEnvelope{}); err == nil {
+	if _, err := session.Handle(context.Background(), tss.InboundEnvelope{}); err == nil {
 		t.Fatal("nil refresh session accepted an envelope")
 	}
-	session.Destroy()
+	closeTestSession(t, session)
 }

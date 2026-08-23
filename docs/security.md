@@ -45,6 +45,8 @@ authenticated transport facts + raw bytes
   -> tss.OpenEnvelope
   -> tssrun.Dispatcher.Dispatch
   -> protocol session Handle
+  -> durable caller-owned DispatchResult
+  -> transport delivery
 ```
 
 `OpenEnvelope` performs canonical envelope decoding, requires a non-zero peer
@@ -63,6 +65,11 @@ a non-nil `BroadcastAckVerifier`; when any configured policy requires portable
 sender signatures it also requires an `EnvelopeSignatureVerifier`.
 `tss.NewTestEnvelopeGuard` uses no-op verifiers and panics outside `go test`; it
 is not a production fallback.
+
+The guard and its policy set are immutable. Every production `Start*` compares
+the guard's canonical policy digest with exactly `FROSTPolicies()` or
+`CGGMP21Policies()`. A policy with relaxed broadcast or sender-signature rules
+can exist only as an explicitly test-only policy on a test-only guard.
 
 ### Confidentiality
 
@@ -83,6 +90,11 @@ Every broadcast-mode policy in the FROST and CGGMP21 policy sets requires a
 one acknowledgment from every party in the phase-specific recipient set.
 Production validation uses `BroadcastCertificate.VerifyFull`, including the
 configured acknowledgment-signature verifier.
+
+`BroadcastConsistency` accepts acknowledgments only after `Commit` fixes the
+complete envelope identity. Both `Complete` and `Certificate` re-check every
+recipient, envelope/payload digest, and signature; ACK-before-commit and mixed
+envelope sets fail closed.
 
 The transport must fan out one identical broadcast view, collect and persist
 the acknowledgments, and attach the certificate through
@@ -131,6 +143,9 @@ The application must provide all of the following:
 - **Safe registration:** register the session before making its initial
   outbound envelopes visible. Remove terminal sessions only after delayed
   traffic will be handled by the intended unknown-session policy.
+- **Durable outbox ownership:** persist every exact ordered `DispatchResult`
+  before transport delivery, retry from that copy, and call `Destroy` only
+  after durable ownership transfers or the outbox is cleared.
 - **Unknown-session handling:** reject by default. If envelopes are durably
   buffered, reopen or otherwise preserve their authenticated receive facts and
   run the complete guard and protocol validation after the session is
@@ -147,16 +162,24 @@ The application must provide all of the following:
 - **Operations:** keep secrets out of logs, metrics, traces, paths, panic
   output, profiles, fixtures, and crash reports; monitor protocol errors, store
   failures, unknown outcomes, and blame evidence.
-- **Cleanup:** call `Destroy` on no-longer-needed secret-bearing values and
-  sessions, clear caller-owned encodings, and arrange retention/key-destruction
-  controls for persisted copies, subject to the Go memory-erasure limitations
-  below.
+- **Cleanup:** call `Destroy` on no-longer-needed secret-bearing values, call
+  context-aware `Abort`/`Close` on sessions and retry durability failures,
+  clear caller-owned encodings, and arrange retention/key-destruction controls
+  for persisted copies, subject to the Go memory-erasure limitations below.
 
 The in-memory stores, passphrase helpers, and `FileLifecycleStore` are reference
 implementations, not substitutes for a production transactional database and
 key-management design. See [`deployment.md`](deployment.md) for the complete
 deployment and recovery contract and [`tssrun.md`](tssrun.md) for the public run
 and store interfaces.
+
+The file reference derives a KEK with Argon2id once per open, unwraps a random
+DEK, and immediately clears its local passphrase copy and KEK. Root, lineage,
+and 16-bit index-bucket ciphertexts then use the DEK with fresh nonces. Explicit
+compaction replaces terminal history with fixed public digests and preserves
+non-reuse tombstones. This is demonstrative key ownership, not KMS rotation,
+hardware isolation, or production crash safety. Empty passphrases are rejected
+by every root-package passphrase entry point and by the file store.
 
 ## Secret-Material Lifecycle
 
@@ -177,10 +200,11 @@ caller-owned copies, which the package cannot later clear.
 
 Call `Destroy` on all no-longer-needed secret-bearing objects, including key
 shares, `SecretKey` and trusted-dealer contributions, CGGMP21 private presign
-values, and keygen, presign, sign, refresh, reshare, or child-derivation
-sessions as applicable. Terminal protocol paths also clear the package-owned
-secret state they no longer need. Public metadata and final public results may
-remain available where the type's documented lifecycle permits it.
+values. Sessions instead expose `Abort(context, reason)` and `Close(context)`;
+their returned durability errors must not be swallowed. Terminal protocol
+paths clear package-owned secret state they no longer need. Public metadata and
+final public results may remain available where the type's documented
+lifecycle permits it.
 
 Do not infer that an object is safe to reuse merely because a start or commit
 returned an error. One-use contribution and presign APIs distinguish definite

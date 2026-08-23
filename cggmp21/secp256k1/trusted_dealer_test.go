@@ -42,18 +42,27 @@ func TestCGGMPTrustedDealerGuardFailureDoesNotClaimAndSuccessfulStartConsumes(t 
 	if _, err := contribution.MarshalBinaryWithLimits(limits); err != nil {
 		t.Fatalf("guard rejection claimed contribution: %v", err)
 	}
-	session, out, err := StartTrustedDealerImport(plan, contribution, tss.LocalConfig{
+	canonicalGuard := tss.NewTestEnvelopeGuard(1, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, CGGMP21Policies())
+	if _, _, err := StartTrustedDealerImport(plan, contribution, tss.LocalConfig{
 		Self: 1, Rand: testutil.DeterministicReader(916),
+	}, canonicalGuard); !errors.Is(err, tss.ErrMissingEnvelopeSigner) {
+		t.Fatalf("missing envelope signer error = %v, want ErrMissingEnvelopeSigner", err)
+	}
+	if _, err := contribution.MarshalBinaryWithLimits(limits); err != nil {
+		t.Fatalf("signer rejection claimed contribution: %v", err)
+	}
+	session, out, err := StartTrustedDealerImport(plan, contribution, tss.LocalConfig{
+		Self: 1, Rand: testutil.DeterministicReader(917),
 	}, paperKeygenTestGuard(1, parties, sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	if len(out) != 1 || out[0].PayloadType != payloadFigure6Commitment {
 		t.Fatalf("trusted import start output = %v", out)
 	}
 	if _, _, err := StartTrustedDealerImport(plan, contribution, tss.LocalConfig{
-		Self: 1, Rand: testutil.DeterministicReader(917),
+		Self: 1, Rand: testutil.DeterministicReader(918),
 	}, paperKeygenTestGuard(1, parties, sessionID)); err == nil {
 		t.Fatal("consumed trusted-dealer contribution was replayed")
 	}

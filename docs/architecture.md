@@ -41,7 +41,9 @@ raw bytes + transport-verified ReceiveInfo + optional certificate
   -> tss.OpenEnvelope
   -> tssrun.Dispatcher.Dispatch
   -> ProtocolSession.Handle
-  -> caller-provided tssrun.Transport.SendAll
+  -> caller-owned DispatchResult
+  -> durable outbox write
+  -> application transport delivery
 ```
 
 `OpenEnvelope` performs canonical envelope decoding and binds the decoded
@@ -55,6 +57,13 @@ guard check.
 Secret-bearing direct payloads require authenticated confidential transport.
 Broadcast-mode protocol policies require a complete verifier-backed
 `BroadcastCertificate`.
+
+`EnvelopeGuard` is immutable after construction. Protocol starts compare its
+canonical policy digest with the exact protocol policy set, so production code
+cannot replace the replay authority, verifier, or delivery policy after
+startup. `BroadcastConsistency` commits one exact envelope before accepting
+acknowledgments and re-verifies the complete set before reporting completion or
+producing a certificate.
 
 ## State-Machine Transaction Boundary
 
@@ -73,6 +82,19 @@ Rejected input must not mutate accepted protocol state or emit envelopes.
 Prepared secret values stay under cleanup ownership until commit transfers
 them to the session or durable store. Outbound envelopes are constructed
 before the state that makes them visible is committed.
+
+Every public session operation serializes on the same session lock. `Handle`
+checks both its delivery context and the session context at decode,
+proof/party-loop, preparation, and pre-commit boundaries. One indivisible
+large-integer operation is not interruptible mid-call. Once a durable mutation
+starts, its result is authoritative or explicitly unknown and must be
+reconciled rather than inferred from cancellation.
+
+The public lifecycle states are `Starting`, `Active`, `CommitPending`,
+`Succeeded`, `Aborted`, `ClosePending`, and `Closed`. Pending durable success
+retains the exact candidate/outbox for `RetryLifecycleCommit` or `ResumeSign`;
+pending durable abort retains its lease, fence, or query for an identical
+`Abort`/`Close` retry.
 
 Identical duplicates follow the phase's explicit idempotence rule. Conflicting
 duplicates are rejected as replay, equivocation, or verification failures and
@@ -111,10 +133,11 @@ records and secret-bearing lifecycle state.
 
 Current CGGMP21 presign, sign, refresh, reshare, and child-derivation starts
 load the authoritative generation and acquire their lifecycle lease before
-returning protocol envelopes. CGGMP21 keygen exposes a confirmed share for an
-application-controlled initial-generation install. FROST keygen, refresh, and
-reshare expose caller-owned shares; their persistence and compare-and-swap
-remain application responsibilities. The generic root refresh scheduler is
+returning protocol envelopes. Both keygen packages expose a confirmed share
+and an `InstallKeyShare` helper that validates and canonically encodes it,
+derives its non-zero protocol epoch, and installs the predeclared key ID and
+generation. FROST refresh and reshare expose caller-owned shares; their
+compare-and-swap remains an application responsibility. The generic root refresh scheduler is
 only for externally committed refresh protocols such as FROST, not for
 CGGMP21's native cutover flow.
 
@@ -151,12 +174,17 @@ mutating the parent.
 `MemoryRunStore`, `MemorySessionRegistry`, `MemoryUnknownEnvelopeStore`, and
 `MemoryLifecycleStore` are in-memory test/example helpers.
 
-`FileLifecycleStore` is an encrypted reference `LifecycleStore`. It keeps one
-manifest across all lineages, acquires sorted lineage locks followed by a
-manifest lock, writes immutable encrypted blobs before the fsynced manifest
-swap, and removes unreferenced crash artifacts when state is reopened. It
-demonstrates ordering and crash semantics but does not replace a production
-database transaction or KMS/HSM design.
+`FileLifecycleStore` is an encrypted reference `LifecycleStore`. `store.meta`
+runs Argon2id once per open to unwrap a random data-encryption key; later root,
+lineage, and index operations use only that key with fresh nonces. The encrypted
+root names immutable per-lineage snapshots, 16-bit partitioned global indexes,
+and one monotonic transaction ID. A multi-lineage operation fsyncs every new
+snapshot and bucket before one root rename publishes all references atomically.
+Open/recovery removes unreferenced artifacts; ordinary reads never write.
+`CompactLifecycle` replaces old terminal history with fixed tombstones while
+preserving non-reuse. The retired `manifest.enc` shape is rejected without
+migration or fallback. This design still does not replace a production
+database transaction or KMS/HSM.
 
 ## Protocol Outputs
 

@@ -36,10 +36,7 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 		return nil, nil, err
 	}
 	for _, id := range ids {
-		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.Parties, tss.ProtocolCGGMP21Secp256k1, presignSessionID, simPolicies, tss.NewInMemoryReplayCache())
-		if err != nil {
-			return nil, nil, err
-		}
+		guard := tss.NewTestEnvelopeGuard(id, shares[id].state.Parties, tss.ProtocolCGGMP21Secp256k1, presignSessionID, simPolicies)
 		plan, err := NewPresignPlan(PresignPlanOption{
 			Key:       shares[id],
 			SessionID: presignSessionID,
@@ -73,7 +70,7 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 			if err != nil {
 				return nil, nil, err
 			}
-			out, err := presignSessions[id].Handle(inbound)
+			out, err := presignSessions[id].Handle(context.Background(), inbound)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -93,10 +90,7 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 		}
 		var session *SignSession
 		var out []tss.Envelope
-		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.Parties, tss.ProtocolCGGMP21Secp256k1, signID, simPolicies, tss.NewInMemoryReplayCache())
-		if err != nil {
-			return nil, nil, err
-		}
+		guard := tss.NewTestEnvelopeGuard(id, shares[id].state.Parties, tss.ProtocolCGGMP21Secp256k1, signID, simPolicies)
 		if rawDigest {
 			presign, loadErr := loadPersistedPresignForTest(presignSessions[id])
 			if loadErr != nil {
@@ -140,7 +134,7 @@ func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningCon
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, err := signSessions[id].Handle(inbound); err != nil {
+			if _, err := signSessions[id].Handle(context.Background(), inbound); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -175,7 +169,7 @@ func simulationCGGMP21Policies() (tss.PolicySet, error) {
 		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
 		relaxed[i].RequireSenderSignature = false
 	}
-	ps, err := tss.NewPolicySet(relaxed...)
+	ps, err := tss.NewTestPolicySet(relaxed...)
 	if err != nil {
 		return tss.PolicySet{}, fmt.Errorf("build simulation CGGMP21 policy set: %w", err)
 	}

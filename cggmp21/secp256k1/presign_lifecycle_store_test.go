@@ -5,12 +5,51 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/tssrun"
 )
+
+type failOnceAvailableCommitStore struct {
+	tssrun.LifecycleStore
+	failed atomic.Bool
+}
+
+func (s *failOnceAvailableCommitStore) CommitAvailablePresignFromLease(ctx context.Context, lease tssrun.RunLease, presignID string, blob, metadata []byte) error {
+	if s.failed.CompareAndSwap(false, true) {
+		return errors.New("injected available-presign commit failure")
+	}
+	return s.LifecycleStore.CommitAvailablePresignFromLease(ctx, lease, presignID, blob, metadata)
+}
+
+func TestPresignSessionRetryLifecycleCommitRetainsExactCandidate(t *testing.T) {
+	presign := minimalCGGMP21Presign(t)
+	base, _, lease := newPresignPersistenceFixture(t, presign, 77)
+	store := &failOnceAvailableCommitStore{LifecycleStore: base}
+	session := &PresignSession{
+		config: tss.ThresholdConfig{Self: presign.state.Party, SessionID: lease.SessionID},
+		limits: testLimits(), lifecycleStore: store, lifecycleLease: lease,
+		lifecycleCandidate: presign,
+	}
+	if err := session.RetryLifecycleCommit(context.Background()); err == nil {
+		t.Fatal("first lifecycle commit unexpectedly succeeded")
+	}
+	if session.Status() != tssrun.SessionCommitPending || session.lifecycleCandidate == nil {
+		t.Fatal("failed lifecycle commit did not retain the exact candidate")
+	}
+	if err := session.RetryLifecycleCommit(context.Background()); err != nil {
+		t.Fatalf("RetryLifecycleCommit: %v", err)
+	}
+	if session.Status() != tssrun.SessionSucceeded || session.lifecycleCandidate != nil {
+		t.Fatal("successful retry did not transfer candidate ownership to the store")
+	}
+	if descriptor, ok := session.Presign(); !ok || descriptor.SlotID() == "" {
+		t.Fatal("successful retry did not expose the public descriptor")
+	}
+}
 
 func TestFast_PresignSlotIDIsCanonicalAndStrict(t *testing.T) {
 	t.Parallel()

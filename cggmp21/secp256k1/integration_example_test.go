@@ -140,7 +140,7 @@ func ExampleStartRefresh() {
 	if err := security.route(queue, partySet, func(tss.Envelope) tss.PartySet {
 		return partySet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].Handle(env)
+		return sessions[id].Handle(context.Background(), env)
 	}); err != nil {
 		panic(err)
 	}
@@ -271,7 +271,7 @@ func ExampleStartReshareDealer() {
 		}
 		return newPartySet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].Handle(env)
+		return sessions[id].Handle(context.Background(), env)
 	}); err != nil {
 		panic(err)
 	}

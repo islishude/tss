@@ -4,24 +4,21 @@ import (
 	"context"
 	"errors"
 	"io"
-	"time"
 
 	"github.com/islishude/tss"
 )
 
 // RefreshRunnerOptions configures the FROST refresh protocol adapter.
 type RefreshRunnerOptions struct {
-	Rand         io.Reader
-	RoundTimeout time.Duration
-	Log          tss.Logger
-	Limits       *Limits
+	Rand   io.Reader
+	Log    tss.Logger
+	Limits *Limits
 }
 
 type refreshRunner struct {
-	rand         io.Reader
-	roundTimeout time.Duration
-	log          tss.Logger
-	limits       *Limits
+	rand   io.Reader
+	log    tss.Logger
+	limits *Limits
 }
 
 var _ tss.RefreshRunner[*KeyShare] = (*refreshRunner)(nil)
@@ -29,9 +26,8 @@ var _ tss.RefreshRunner[*KeyShare] = (*refreshRunner)(nil)
 // NewRefreshRunner constructs a FROST adapter for [tss.RefreshScheduler].
 func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare] {
 	runner := &refreshRunner{
-		rand:         options.Rand,
-		roundTimeout: options.RoundTimeout,
-		log:          options.Log,
+		rand: options.Rand,
+		log:  options.Log,
 	}
 	if options.Limits != nil {
 		limits := *options.Limits
@@ -72,11 +68,10 @@ func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, con
 		return nil, nil, err
 	}
 	session, out, err := StartRefresh(current, plan, tss.LocalConfig{
-		Self:         current.PartyID(),
-		Rand:         r.rand,
-		Context:      ctx,
-		RoundTimeout: r.roundTimeout,
-		Log:          r.log,
+		Self:    current.PartyID(),
+		Rand:    r.rand,
+		Context: ctx,
+		Log:     r.log,
 	}, guard)
 	if err != nil {
 		return nil, nil, err

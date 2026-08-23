@@ -1,6 +1,7 @@
 package ed25519_test
 
 import (
+	"context"
 	stded25519 "crypto/ed25519"
 	"encoding/binary"
 	"errors"
@@ -195,7 +196,7 @@ func runExampleFROSTKeygen(option frost.KeygenPlanOption) (map[tss.PartyID]*fros
 	if err := security.route(queue, partySet, func(tss.Envelope) tss.PartySet {
 		return partySet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].Handle(env)
+		return sessions[id].Handle(context.Background(), env)
 	}); err != nil {
 		return nil, err
 	}
@@ -262,7 +263,7 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.Par
 	if err := security.route(queue, signers, func(tss.Envelope) tss.PartySet {
 		return signers
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].Handle(env)
+		return sessions[id].Handle(context.Background(), env)
 	}); err != nil {
 		return nil, nil, err
 	}

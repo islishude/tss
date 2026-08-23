@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 
@@ -293,7 +294,7 @@ func (s *auxInfoState) completeSingleton() error {
 	reveals := map[tss.PartyID]*auxInfoRevealPayload{
 		s.cfg.Self: cloneAuxInfoReveal(s.local.reveal),
 	}
-	prepared, err := s.prepareLocalRound3(s.cfg.Self, s.local.reveal, reveals)
+	prepared, err := s.prepareLocalRound3(s.cfg.Ctx(), s.cfg.Self, s.local.reveal, reveals)
 	if err != nil {
 		return err
 	}
@@ -303,7 +304,7 @@ func (s *auxInfoState) completeSingleton() error {
 	}
 	clearEnvelopePayloads(prepared.out)
 	prepared.out = nil
-	result, err := s.buildResult(tss.BroadcastPartyId, nil, tss.BroadcastPartyId, nil, nil, nil)
+	result, err := s.buildResult(s.cfg.Ctx(), tss.BroadcastPartyId, nil, tss.BroadcastPartyId, nil, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -567,7 +568,10 @@ func (s *auxInfoState) hasAccepted(env tss.Envelope) bool {
 	}
 }
 
-func (s *auxInfoState) prepareInbound(env tss.Envelope) (*preparedAuxInfoInbound, error) {
+func (s *auxInfoState) prepareInbound(ctx context.Context, env tss.Envelope) (*preparedAuxInfoInbound, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s == nil || s.aborted {
 		return nil, errors.New("inactive auxinfo state")
 	}
@@ -582,33 +586,33 @@ func (s *auxInfoState) prepareInbound(env tss.Envelope) (*preparedAuxInfoInbound
 		if env.Round != s.schedule.CommitmentRound || env.To != tss.BroadcastPartyId {
 			return nil, errors.New("auxinfo commitment in wrong round or delivery mode")
 		}
-		return s.prepareCommitment(env)
+		return s.prepareCommitment(ctx, env)
 	case payloadAuxInfoReveal:
 		if env.Round != s.schedule.RevealRound || env.To != tss.BroadcastPartyId {
 			return nil, errors.New("auxinfo reveal in wrong round or delivery mode")
 		}
-		return s.prepareReveal(env)
+		return s.prepareReveal(ctx, env)
 	case payloadAuxInfoProofs:
 		if env.Round != s.schedule.ProofRound || env.To != tss.BroadcastPartyId {
 			return nil, errors.New("auxinfo proofs in wrong round or delivery mode")
 		}
-		return s.prepareProofs(env)
+		return s.prepareProofs(ctx, env)
 	case payloadAuxInfoDirect:
 		if env.Round != s.schedule.ProofRound || env.To != s.cfg.Self {
 			return nil, errors.New("auxinfo direct message in wrong round or delivery mode")
 		}
-		return s.prepareDirect(env)
+		return s.prepareDirect(ctx, env)
 	case payloadAuxInfoDecryptionError:
 		if env.Round != s.schedule.ProofRound || env.To != tss.BroadcastPartyId {
 			return nil, errors.New("auxinfo decryption-error accusation in wrong round or delivery mode")
 		}
-		return s.prepareDecryptionError(env)
+		return s.prepareDecryptionError(ctx, env)
 	default:
 		return nil, fmt.Errorf("unexpected auxinfo payload type %q", env.PayloadType)
 	}
 }
 
-func (s *auxInfoState) prepareCommitment(env tss.Envelope) (*preparedAuxInfoInbound, error) {
+func (s *auxInfoState) prepareCommitment(ctx context.Context, env tss.Envelope) (*preparedAuxInfoInbound, error) {
 	payload, err := tss.DecodeBinaryWithLimits[auxInfoCommitmentPayload](env.Payload, s.limits)
 	if err != nil {
 		return nil, err
@@ -618,6 +622,9 @@ func (s *auxInfoState) prepareCommitment(env tss.Envelope) (*preparedAuxInfoInbo
 	}
 	complete := true
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if party == env.From {
 			continue
 		}
@@ -649,7 +656,7 @@ func (s *auxInfoState) prepareCommitment(env tss.Envelope) (*preparedAuxInfoInbo
 	return prepared, nil
 }
 
-func (s *auxInfoState) prepareReveal(env tss.Envelope) (*preparedAuxInfoInbound, error) {
+func (s *auxInfoState) prepareReveal(ctx context.Context, env tss.Envelope) (*preparedAuxInfoInbound, error) {
 	slot := s.slots[env.From]
 	if slot.commitment == nil {
 		return nil, auxInfoOutOfOrder("auxinfo reveal arrived before commitment")
@@ -692,6 +699,9 @@ func (s *auxInfoState) prepareReveal(env tss.Envelope) (*preparedAuxInfoInbound,
 	reveals := make(map[tss.PartyID]*auxInfoRevealPayload, len(s.cfg.Parties))
 	complete := true
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if party == env.From {
 			reveals[party] = cloneAuxInfoReveal(payload)
 			continue
@@ -708,16 +718,20 @@ func (s *auxInfoState) prepareReveal(env tss.Envelope) (*preparedAuxInfoInbound,
 			return nil
 		}}, nil
 	}
-	return s.prepareLocalRound3(env.From, payload, reveals)
+	return s.prepareLocalRound3(ctx, env.From, payload, reveals)
 }
 
 func (s *auxInfoState) prepareLocalRound3(
+	ctx context.Context,
 	trigger tss.PartyID,
 	triggerReveal *auxInfoRevealPayload,
 	reveals map[tss.PartyID]*auxInfoRevealPayload,
 ) (*preparedAuxInfoInbound, error) {
 	ridContributions := make(map[tss.PartyID][]byte, len(reveals))
 	for party, reveal := range reveals {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if reveal == nil {
 			return nil, fmt.Errorf("missing auxinfo reveal from party %d", party)
 		}
@@ -727,7 +741,7 @@ func (s *auxInfoState) prepareLocalRound3(
 	if err != nil {
 		return nil, err
 	}
-	epoch, aggregateCommitments, err := s.deriveEpoch(reveals, rid)
+	epoch, aggregateCommitments, err := s.deriveEpoch(ctx, reveals, rid)
 	if err != nil {
 		return nil, err
 	}
@@ -737,6 +751,10 @@ func (s *auxInfoState) prepareLocalRound3(
 
 	proofRecords := make([]auxInfoSchnorrProof, len(s.local.schnorrPreps))
 	for coefficient, preparation := range s.local.schnorrPreps {
+		if err := ctx.Err(); err != nil {
+			prepared.destroy()
+			return nil, err
+		}
 		domain, err := figure7SchnorrDomain(s.stableSID, s.cfg.SessionID, rid, epoch.EpochID, s.cfg.Parties, s.cfg.Threshold, s.cfg.Self, coefficient, s.planHash)
 		if err != nil {
 			prepared.destroy()
@@ -885,15 +903,19 @@ func (s *auxInfoState) prepareLocalRound3(
 }
 
 func (s *auxInfoState) deriveEpoch(
+	ctx context.Context,
 	reveals map[tss.PartyID]*auxInfoRevealPayload,
 	rid tss.SessionID,
 ) (*EpochContext, []*secp.Point, error) {
-	aggregate, err := aggregateAuxInfoCommitments(s.cfg.Parties, s.cfg.Threshold, reveals)
+	aggregate, err := aggregateAuxInfoCommitments(ctx, s.cfg.Parties, s.cfg.Threshold, reveals)
 	if err != nil {
 		return nil, nil, err
 	}
 	if len(s.expectedContributions) != 0 {
 		for _, party := range s.cfg.Parties {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
 			reveal := reveals[party]
 			if reveal == nil || len(reveal.PolynomialCommitments) == 0 ||
 				!bytes.Equal(reveal.PolynomialCommitments[0], s.expectedContributions[party]) {
@@ -911,6 +933,9 @@ func (s *auxInfoState) deriveEpoch(
 	partyData := make(map[tss.PartyID]keySharePartyData, len(s.cfg.Parties))
 	publicShares := make([]EpochPublicShare, len(s.cfg.Parties))
 	for i, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		reveal := reveals[party]
 		partyData[party] = keySharePartyData{
 			PaillierPublicKey:  reveal.PaillierPublicKey.Clone(),
@@ -961,14 +986,21 @@ func clonePublicByteMap(in map[tss.PartyID][]byte) map[tss.PartyID][]byte {
 }
 
 func aggregateAuxInfoCommitments(
+	ctx context.Context,
 	parties tss.PartySet,
 	threshold int,
 	reveals map[tss.PartyID]*auxInfoRevealPayload,
 ) ([]*secp.Point, error) {
 	out := make([]*secp.Point, threshold)
 	for coefficient := range threshold {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		points := make([]*secp.Point, 0, len(parties))
 		for _, party := range parties {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			reveal := reveals[party]
 			if reveal == nil || len(reveal.PolynomialCommitments) != threshold {
 				return nil, fmt.Errorf("invalid auxinfo polynomial commitments for party %d", party)
@@ -984,7 +1016,7 @@ func aggregateAuxInfoCommitments(
 	return out, nil
 }
 
-func (s *auxInfoState) prepareProofs(env tss.Envelope) (*preparedAuxInfoInbound, error) {
+func (s *auxInfoState) prepareProofs(ctx context.Context, env tss.Envelope) (*preparedAuxInfoInbound, error) {
 	if s.epoch == nil || !s.proofsSent {
 		return nil, auxInfoOutOfOrder("auxinfo proofs arrived before all reveals")
 	}
@@ -1006,6 +1038,9 @@ func (s *auxInfoState) prepareProofs(env tss.Envelope) (*preparedAuxInfoInbound,
 		return nil, errors.New("auxinfo proofs have no sender reveal")
 	}
 	for coefficient, record := range payload.Proofs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		proof := record.proof()
 		if !bytes.Equal(proof.Commitment, reveal.SchnorrCommitments[coefficient]) {
 			return nil, fmt.Errorf("auxinfo Schnorr first message mismatch at coefficient %d", coefficient)
@@ -1021,7 +1056,7 @@ func (s *auxInfoState) prepareProofs(env tss.Envelope) (*preparedAuxInfoInbound,
 	prepared := &preparedAuxInfoInbound{}
 	var result *auxInfoResult
 	if s.allAuxInfoSharesExcept(tss.BroadcastPartyId) && s.allAuxInfoProofsExcept(env.From) {
-		result, err = s.buildResult(env.From, payload, tss.BroadcastPartyId, nil, nil, nil)
+		result, err = s.buildResult(ctx, env.From, payload, tss.BroadcastPartyId, nil, nil, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1038,7 +1073,7 @@ func (s *auxInfoState) prepareProofs(env tss.Envelope) (*preparedAuxInfoInbound,
 	return prepared, nil
 }
 
-func (s *auxInfoState) prepareDirect(env tss.Envelope) (*preparedAuxInfoInbound, error) {
+func (s *auxInfoState) prepareDirect(ctx context.Context, env tss.Envelope) (*preparedAuxInfoInbound, error) {
 	if s.epoch == nil || !s.proofsSent {
 		return nil, auxInfoOutOfOrder("auxinfo direct message arrived before all reveals")
 	}
@@ -1118,7 +1153,7 @@ func (s *auxInfoState) prepareDirect(env tss.Envelope) (*preparedAuxInfoInbound,
 	prepared := &preparedAuxInfoInbound{cleanup: share.Destroy}
 	var result *auxInfoResult
 	if s.allAuxInfoProofsExcept(tss.BroadcastPartyId) && s.allAuxInfoSharesExcept(env.From) {
-		result, err = s.buildResult(tss.BroadcastPartyId, nil, env.From, share, payload.ModulusProof, payload.FactorProof)
+		result, err = s.buildResult(ctx, tss.BroadcastPartyId, nil, env.From, share, payload.ModulusProof, payload.FactorProof)
 		if err != nil {
 			prepared.destroy()
 			return nil, err
@@ -1187,7 +1222,7 @@ func (s *auxInfoState) prepareDecryptionErrorBroadcast(direct tss.Envelope) (*pr
 	return s.prepareTerminalFigure7Failure(failure, []tss.Envelope{out}), nil
 }
 
-func (s *auxInfoState) prepareDecryptionError(env tss.Envelope) (*preparedAuxInfoInbound, error) {
+func (s *auxInfoState) prepareDecryptionError(ctx context.Context, env tss.Envelope) (*preparedAuxInfoInbound, error) {
 	if s.epoch == nil || !s.proofsSent {
 		return nil, auxInfoOutOfOrder("auxinfo decryption-error accusation arrived before all reveals")
 	}
@@ -1196,6 +1231,9 @@ func (s *auxInfoState) prepareDecryptionError(env tss.Envelope) (*preparedAuxInf
 		return nil, err
 	}
 	defer payload.destroy()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	directDigest, mismatch, verifyErr := s.verifyDecryptionError(env.From, payload)
 	failure := &Figure7Failure{
 		Class:                Figure7FailureFalseAccusation,
@@ -1343,6 +1381,7 @@ func (s *auxInfoState) allAuxInfoSharesExcept(except tss.PartyID) bool {
 }
 
 func (s *auxInfoState) buildResult(
+	ctx context.Context,
 	proofParty tss.PartyID,
 	proofOverride *auxInfoProofsPayload,
 	shareParty tss.PartyID,
@@ -1355,9 +1394,12 @@ func (s *auxInfoState) buildResult(
 	}
 	reveals := make(map[tss.PartyID]*auxInfoRevealPayload, len(s.cfg.Parties))
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		reveals[party] = s.slots[party].reveal
 	}
-	commitments, err := aggregateAuxInfoCommitments(s.cfg.Parties, s.cfg.Threshold, reveals)
+	commitments, err := aggregateAuxInfoCommitments(ctx, s.cfg.Parties, s.cfg.Threshold, reveals)
 	if err != nil {
 		return nil, err
 	}
@@ -1367,6 +1409,9 @@ func (s *auxInfoState) buildResult(
 	}
 	aggregateSecret := secp.ScalarZero()
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		share := s.slots[party].share
 		if party == shareParty {
 			share = shareOverride
@@ -1396,6 +1441,9 @@ func (s *auxInfoState) buildResult(
 	}
 	partyData := make(map[tss.PartyID]keySharePartyData, len(s.cfg.Parties))
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		slot := s.slots[party]
 		modProof := slot.modProof
 		factorProof := slot.factor
@@ -1423,7 +1471,7 @@ func (s *auxInfoState) buildResult(
 		data.PaillierFactorProof = nil
 		return data
 	}(partyData[s.cfg.Self])
-	transcriptHash, err := s.auxInfoTranscriptHash(commitments, proofParty, proofOverride, shareParty, modulusOverride)
+	transcriptHash, err := s.auxInfoTranscriptHash(ctx, commitments, proofParty, proofOverride, shareParty, modulusOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -1449,6 +1497,7 @@ func mustAuxInfoPoint(encoded []byte) *secp.Point {
 }
 
 func (s *auxInfoState) auxInfoTranscriptHash(
+	ctx context.Context,
 	commitments []*secp.Point,
 	proofParty tss.PartyID,
 	proofOverride *auxInfoProofsPayload,
@@ -1467,6 +1516,9 @@ func (s *auxInfoState) auxInfoTranscriptHash(
 	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytesList("aggregate_commitments", commitmentBytes)
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		slot := s.slots[party]
 		commitment, err := figure7Commitment(s.stableSID, s.cfg.SessionID, party, *slot.reveal, s.limits)
 		if err != nil {

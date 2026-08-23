@@ -12,7 +12,7 @@ func TestFROSTKeygenRound1SnapshotRequiresCompleteSlots(t *testing.T) {
 	t.Parallel()
 
 	session, remoteOut := frostKeygenTransitionSessions(t)
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	installFROSTKeygenRound1(t, session, remoteOut)
 
 	remote := session.round1.slots[2]

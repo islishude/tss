@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestFROSTKeygenMalformedCommitmentTerminallyAbortsAndClearsSecrets(t *testi
 	bad := out2[0]
 	bad.Payload = []byte("malformed keygen commitments")
 
-	out, err := kg1.Handle(testutil.DeliverEnvelope(bad))
+	out, err := kg1.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 
 	if err == nil {
 		t.Fatal("expected malformed keygen commitment to be rejected")
@@ -63,11 +64,11 @@ func TestFROSTKeygenMalformedShareTerminallyAbortsAndClearsSecrets(t *testing.T)
 	t.Parallel()
 
 	session, remoteOut := frostKeygenTransitionSessions(t)
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	bad := mustFROSTEnvelope(t, remoteOut, payloadKeygenShare, session.cfg.Self)
 	bad.Payload = []byte("malformed confidential keygen share")
 
-	out, err := session.Handle(testutil.DeliverEnvelope(bad))
+	out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if protocolErr.Round != keygenShareRound || protocolErr.Party != bad.From || protocolErr.Blame == nil {
 		t.Fatalf("malformed keygen share error = %#v", protocolErr)
@@ -108,7 +109,7 @@ func TestFROSTSignMalformedCommitmentAbortsAndClearsSecrets(t *testing.T) {
 
 	dNonce := sign1.dNonce
 	eNonce := sign1.eNonce
-	out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
+	out, err := sign1.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 	if err == nil {
 		t.Fatal("expected malformed sign commitment to be rejected")
 	}
@@ -161,7 +162,7 @@ func TestFROSTReshareRejectNoMutationInvariant(t *testing.T) {
 	bad.Payload = []byte("malformed reshare commitments")
 
 	before := snapshotFROSTReshareSession(refresh1)
-	out, err := refresh1.Handle(testutil.DeliverEnvelope(bad))
+	out, err := refresh1.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 	after := snapshotFROSTReshareSession(refresh1)
 
 	if err == nil {

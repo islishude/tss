@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 
@@ -362,7 +363,10 @@ func (s *figure6State) hasAccepted(env tss.Envelope) bool {
 	}
 }
 
-func (s *figure6State) prepareInbound(env tss.Envelope) (*preparedFigure6Inbound, error) {
+func (s *figure6State) prepareInbound(ctx context.Context, env tss.Envelope) (*preparedFigure6Inbound, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if s == nil || s.aborted || env.From == s.cfg.Self || !s.cfg.Parties.Contains(env.From) {
 		return nil, errors.New("invalid Figure 6 inbound state or sender")
 	}
@@ -371,17 +375,17 @@ func (s *figure6State) prepareInbound(env tss.Envelope) (*preparedFigure6Inbound
 	}
 	switch env.PayloadType {
 	case payloadFigure6Commitment:
-		return s.prepareCommitment(env)
+		return s.prepareCommitment(ctx, env)
 	case payloadFigure6Reveal:
-		return s.prepareReveal(env)
+		return s.prepareReveal(ctx, env)
 	case payloadFigure6Proof:
-		return s.prepareProof(env)
+		return s.prepareProof(ctx, env)
 	default:
 		return nil, fmt.Errorf("unexpected Figure 6 payload %q", env.PayloadType)
 	}
 }
 
-func (s *figure6State) prepareCommitment(env tss.Envelope) (*preparedFigure6Inbound, error) {
+func (s *figure6State) prepareCommitment(ctx context.Context, env tss.Envelope) (*preparedFigure6Inbound, error) {
 	if env.Round != keygenFigure6CommitmentRound || env.To != tss.BroadcastPartyId {
 		return nil, errors.New("figure 6 commitment in wrong round or mode")
 	}
@@ -394,6 +398,9 @@ func (s *figure6State) prepareCommitment(env tss.Envelope) (*preparedFigure6Inbo
 	}
 	complete := true
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if party != env.From && s.slots[party].commitment == nil {
 			complete = false
 		}
@@ -422,7 +429,7 @@ func (s *figure6State) prepareCommitment(env tss.Envelope) (*preparedFigure6Inbo
 	return prepared, nil
 }
 
-func (s *figure6State) prepareReveal(env tss.Envelope) (*preparedFigure6Inbound, error) {
+func (s *figure6State) prepareReveal(ctx context.Context, env tss.Envelope) (*preparedFigure6Inbound, error) {
 	if env.Round != keygenFigure6RevealRound || env.To != tss.BroadcastPartyId || s.slots[env.From].commitment == nil {
 		return nil, errors.New("figure 6 reveal in wrong phase")
 	}
@@ -440,6 +447,9 @@ func (s *figure6State) prepareReveal(env tss.Envelope) (*preparedFigure6Inbound,
 	contributions := make(map[tss.PartyID][]byte, len(s.cfg.Parties))
 	complete := true
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if party == env.From {
 			contributions[party] = payload.Rho
 		} else if s.slots[party].reveal != nil {
@@ -495,7 +505,7 @@ func (s *figure6State) prepareReveal(env tss.Envelope) (*preparedFigure6Inbound,
 	}, nil
 }
 
-func (s *figure6State) prepareProof(env tss.Envelope) (*preparedFigure6Inbound, error) {
+func (s *figure6State) prepareProof(ctx context.Context, env tss.Envelope) (*preparedFigure6Inbound, error) {
 	if env.Round != keygenFigure6ProofRound || env.To != tss.BroadcastPartyId || !s.proofSent {
 		return nil, errors.New("figure 6 proof in wrong phase")
 	}
@@ -522,6 +532,9 @@ func (s *figure6State) prepareProof(env tss.Envelope) (*preparedFigure6Inbound, 
 	}
 	complete := true
 	for _, party := range s.cfg.Parties {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if party != env.From && s.slots[party].proof == nil {
 			complete = false
 		}
@@ -531,6 +544,9 @@ func (s *figure6State) prepareProof(env tss.Envelope) (*preparedFigure6Inbound, 
 	if complete {
 		points := make([]*secp.Point, 0, len(s.cfg.Parties))
 		for _, party := range s.cfg.Parties {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			reveal := s.slots[party].reveal
 			point, err := secp.PointFromBytes(reveal.PublicShare)
 			if err != nil {

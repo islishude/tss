@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -320,7 +321,7 @@ func TestFROSTKeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	}
 	beforeShares := countNonNilShares(s1.round1)
 	beforeCommits := countNonNilCommits(s1.round1)
-	out, err := s1.Handle(testutil.DeliverEnvelope(env))
+	out, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(env))
 	if len(out) != 0 {
 		t.Fatalf("plan mismatch emitted %d envelopes", len(out))
 	}

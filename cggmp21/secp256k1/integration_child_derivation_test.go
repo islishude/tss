@@ -5,13 +5,46 @@ package secp256k1
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/tssrun"
 )
+
+type failOnceChildCommitStore struct {
+	tssrun.LifecycleStore
+	calls          int
+	lease          tssrun.RunLease
+	binding        tssrun.GenerationBinding
+	blobDigest     [sha256.Size]byte
+	metadataDigest [sha256.Size]byte
+}
+
+func (s *failOnceChildCommitStore) CommitInitialGenerationFromLease(
+	ctx context.Context,
+	lease tssrun.RunLease,
+	binding tssrun.GenerationBinding,
+	blob, metadata []byte,
+) (tssrun.GenerationRecord, error) {
+	s.calls++
+	blobDigest := sha256.Sum256(blob)
+	metadataDigest := sha256.Sum256(metadata)
+	if s.calls == 1 {
+		s.lease = lease.Clone()
+		s.binding = binding
+		s.blobDigest = blobDigest
+		s.metadataDigest = metadataDigest
+		return tssrun.GenerationRecord{}, errors.New("injected child generation commit failure")
+	}
+	if s.lease != lease || s.binding != binding || s.blobDigest != blobDigest || s.metadataDigest != metadataDigest {
+		return tssrun.GenerationRecord{}, fmt.Errorf("child lifecycle retry changed its exact candidate")
+	}
+	return s.LifecycleStore.CommitInitialGenerationFromLease(ctx, lease, binding, blob, metadata)
+}
 
 func TestThresholdECDSAChildDerivationRunsFreshFigure7AndPresigns(t *testing.T) {
 	shares, err := runSecpKeygen(2, 2)
@@ -30,7 +63,7 @@ func TestThresholdECDSAChildDerivationRunsFreshFigure7AndPresigns(t *testing.T) 
 	defer snapshot.Derivation.Destroy()
 
 	sessions, queue := startChildIntegrationSessions(t, shares, stores, plan)
-	defer destroyChildTestSessions(sessions)
+	defer destroyChildTestSessions(t, sessions)
 	deliverChildIntegrationMessages(t, sessions, parties, queue)
 
 	planHash, err := plan.Digest()
@@ -44,7 +77,7 @@ func TestThresholdECDSAChildDerivationRunsFreshFigure7AndPresigns(t *testing.T) 
 	for _, party := range parties {
 		session := sessions[party]
 		binding, installed := session.InstalledBinding()
-		if !installed || !session.Completed() {
+		if !installed || session.Status() != tssrun.SessionSucceeded {
 			t.Fatalf("party %d did not durably install the child generation: meta=%+v aux=%t pending=%t confirmations=%d accepted=%d", party, session.ResultMetadata(), session.auxInfo != nil, session.pending != nil, len(session.confirmations), len(session.accepted))
 		}
 		if binding.KeyID != snapshot.TargetKeyID || binding.KeyGeneration != snapshot.TargetKeyGeneration ||
@@ -111,6 +144,72 @@ func TestThresholdECDSAChildDerivationRunsFreshFigure7AndPresigns(t *testing.T) 
 	runChildPresignIntegration(t, children, stores, childBindings, parties, snapshot.TargetKeyID)
 }
 
+func TestThresholdECDSAChildDerivationRetriesExactLifecycleCommit(t *testing.T) {
+	shares, err := runSecpKeygen(2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer destroyChildTestShares(shares)
+	parties := tss.NewPartySet(1, 2)
+	parentBinding, baseStores := installChildTestParents(t, shares, "child-retry-parent", "parent-generation-1")
+	plan := newChildIntegrationPlan(t, shares[1], parentBinding, "child-retry-target", "child-generation-1", tss.DerivationPath{9})
+	failing := &failOnceChildCommitStore{LifecycleStore: baseStores[1]}
+	stores := map[tss.PartyID]tssrun.LifecycleStore{1: failing, 2: baseStores[2]}
+	sessions := make(map[tss.PartyID]*ChildDerivationSession, len(parties))
+	defer destroyChildTestSessions(t, sessions)
+	var queue []tss.Envelope
+	for _, party := range parties {
+		session, out, err := StartChildDerivation(plan, ChildDerivationRun{
+			Local: tss.LocalConfig{Self: party, Rand: testutil.DeterministicReader(int64(8500 + party))},
+			Guard: testCGGMP21Guard(party, parties, plan.SessionID()), LifecycleStore: stores[party],
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[party] = session
+		queue = append(queue, out...)
+	}
+	retried := false
+	for len(queue) != 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, party := range parties {
+			if party == env.From || (env.To != tss.BroadcastPartyId && env.To != party) {
+				continue
+			}
+			out, handleErr := sessions[party].Handle(context.Background(), testutil.DeliverEnvelope(env))
+			if handleErr == nil {
+				queue = append(queue, out...)
+				continue
+			}
+			status := sessions[party].Status()
+			if party != 1 || retried || status != tssrun.SessionCommitPending {
+				t.Fatalf("unexpected child delivery failure for party %d status=%v: %v", party, status, handleErr)
+			}
+			if closeErr := sessions[party].Close(context.Background()); !errors.Is(closeErr, tssrun.ErrLifecycleCommitPending) {
+				t.Fatalf("close during child commit pending = %v", closeErr)
+			}
+			retryOut, retryErr := sessions[party].RetryLifecycleCommit(context.Background())
+			if retryErr != nil {
+				t.Fatalf("retry child lifecycle commit: %v", retryErr)
+			}
+			if sessions[party].Status() != tssrun.SessionSucceeded {
+				t.Fatalf("child status after retry = %v", sessions[party].Status())
+			}
+			queue = append(queue, retryOut...)
+			retried = true
+		}
+	}
+	if !retried || failing.calls != 2 {
+		t.Fatalf("child exact retry observed=%t calls=%d", retried, failing.calls)
+	}
+	for _, party := range parties {
+		if _, installed := sessions[party].InstalledBinding(); !installed {
+			t.Fatalf("party %d did not install the child generation", party)
+		}
+	}
+}
+
 func TestThresholdECDSAChildDerivationRejectsCrossEpochCommitment(t *testing.T) {
 	firstShares, err := runSecpKeygen(2, 2)
 	if err != nil {
@@ -142,7 +241,7 @@ func TestThresholdECDSAChildDerivationRejectsCrossEpochCommitment(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer sender.Destroy()
+	defer closeTestSession(t, sender)
 	receiver, _, err := StartChildDerivation(secondPlan, ChildDerivationRun{
 		Local: tss.LocalConfig{Self: 2, Rand: testutil.DeterministicReader(8202)},
 		Guard: testCGGMP21Guard(2, tss.NewPartySet(1, 2), sessionID), LifecycleStore: secondStores[2],
@@ -150,15 +249,15 @@ func TestThresholdECDSAChildDerivationRejectsCrossEpochCommitment(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer receiver.Destroy()
+	defer closeTestSession(t, receiver)
 	if len(out) == 0 || out[0].PayloadType != payloadAuxInfoCommitment {
 		t.Fatal("cross-epoch sender omitted its Figure 7 commitment")
 	}
-	produced, err := receiver.Handle(testutil.DeliverEnvelope(out[0]))
+	produced, err := receiver.Handle(context.Background(), testutil.DeliverEnvelope(out[0]))
 	if err == nil || !errors.Is(err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("cross-epoch child commitment error = %v, want plan mismatch", err)
 	}
-	if len(produced) != 0 || receiver.pending != nil || receiver.Completed() {
+	if len(produced) != 0 || receiver.pending != nil || receiver.Status() == tssrun.SessionSucceeded {
 		t.Fatal("cross-epoch commitment emitted effects or installed a child")
 	}
 	if _, err := secondStores[2].LoadCurrentGeneration(context.Background(), "cross-epoch-child"); !errors.Is(err, tssrun.ErrGenerationNotCurrent) {
@@ -176,7 +275,7 @@ func TestThresholdECDSAChildDerivationRejectsWrongFigure7RID(t *testing.T) {
 	parentBinding, stores := installChildTestParents(t, shares, "wrong-rid-parent", "generation-1")
 	plan := newChildIntegrationPlan(t, shares[1], parentBinding, "wrong-rid-child", "generation-1", tss.DerivationPath{5})
 	sessions, queue := startChildIntegrationSessions(t, shares, stores, plan)
-	defer destroyChildTestSessions(sessions)
+	defer destroyChildTestSessions(t, sessions)
 
 	for len(queue) > 0 {
 		env := queue[0]
@@ -196,8 +295,8 @@ func TestThresholdECDSAChildDerivationRejectsWrongFigure7RID(t *testing.T) {
 				if decodeErr != nil {
 					t.Fatal(decodeErr)
 				}
-				out, handleErr := sessions[receiver].Handle(testutil.DeliverEnvelope(mutated))
-				if handleErr == nil || len(out) != 0 || sessions[receiver].pending != nil || sessions[receiver].Completed() {
+				out, handleErr := sessions[receiver].Handle(context.Background(), testutil.DeliverEnvelope(mutated))
+				if handleErr == nil || len(out) != 0 || sessions[receiver].pending != nil || sessions[receiver].Status() == tssrun.SessionSucceeded {
 					t.Fatalf("wrong-RID child Figure 7 result out=%d err=%v", len(out), handleErr)
 				}
 				if _, loadErr := stores[receiver].LoadCurrentGeneration(context.Background(), "wrong-rid-child"); !errors.Is(loadErr, tssrun.ErrGenerationNotCurrent) {
@@ -205,7 +304,7 @@ func TestThresholdECDSAChildDerivationRejectsWrongFigure7RID(t *testing.T) {
 				}
 				return
 			}
-			out, handleErr := sessions[receiver].Handle(testutil.DeliverEnvelope(env))
+			out, handleErr := sessions[receiver].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if handleErr != nil {
 				t.Fatalf("deliver %s from %d to %d before wrong-RID mutation: %v", env.PayloadType, env.From, receiver, handleErr)
 			}
@@ -299,7 +398,7 @@ func startChildIntegrationSessions(
 			Guard: testCGGMP21Guard(party, parties, plan.SessionID()), LifecycleStore: stores[party],
 		})
 		if err != nil {
-			destroyChildTestSessions(sessions)
+			destroyChildTestSessions(t, sessions)
 			t.Fatalf("start child derivation party %d: %v", party, err)
 		}
 		sessions[party] = session
@@ -322,7 +421,7 @@ func deliverChildIntegrationMessages(
 			if party == env.From || (env.To != tss.BroadcastPartyId && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[party].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver child %s from %d to %d: %v", env.PayloadType, env.From, party, err)
 			}
@@ -349,7 +448,7 @@ func runChildPresignIntegration(
 	sessions := make(map[tss.PartyID]*PresignSession, len(parties))
 	defer func() {
 		for _, session := range sessions {
-			session.Destroy()
+			closeTestSession(t, session)
 		}
 	}()
 	var queue []tss.Envelope
@@ -378,7 +477,7 @@ func runChildPresignIntegration(
 			if party == env.From || (env.To != tss.BroadcastPartyId && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[party].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver child presign %s from %d to %d: %v", env.PayloadType, env.From, party, err)
 			}
@@ -401,10 +500,11 @@ func destroyChildTestShares(shares map[tss.PartyID]*KeyShare) {
 	}
 }
 
-func destroyChildTestSessions(sessions map[tss.PartyID]*ChildDerivationSession) {
+func destroyChildTestSessions(t testing.TB, sessions map[tss.PartyID]*ChildDerivationSession) {
+	t.Helper()
 	for party, session := range sessions {
 		if session != nil {
-			session.Destroy()
+			closeTestSession(t, session)
 		}
 		delete(sessions, party)
 	}

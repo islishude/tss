@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -234,7 +235,7 @@ func StartTrustedDealerImport(plan *TrustedDealerImportPlan, contribution *Trust
 	if err := config.ValidateWithLimits(plan.limits.ThresholdLimits()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self, CGGMP21Policies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
@@ -295,7 +296,7 @@ func GenerateTrustedDealerKeyShares(secretKey *SecretKey, option TrustedDealerIm
 	sessions := make(map[tss.PartyID]*KeygenSession, len(plan.state.Parties))
 	defer func() {
 		for _, session := range sessions {
-			session.Destroy()
+			_ = session.Close(context.Background())
 		}
 	}()
 	queue := make([]tss.Envelope, 0, len(plan.state.Parties))
@@ -316,7 +317,7 @@ func GenerateTrustedDealerKeyShares(secretKey *SecretKey, option TrustedDealerIm
 		queue = append(queue, out...)
 	}
 	if err := security.Route(queue, plan.state.Parties, CGGMP21Policies(), func(party tss.PartyID, inbound tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[party].Handle(inbound)
+		return sessions[party].Handle(context.Background(), inbound)
 	}); err != nil {
 		return nil, nil, err
 	}
@@ -501,7 +502,7 @@ func (p *TrustedDealerImportPlan) thresholdConfig(local tss.LocalConfig) (tss.Th
 	return tss.ThresholdConfig{
 		Threshold: p.state.Threshold, Parties: p.state.Parties.Clone(), Self: local.Self,
 		SessionID: p.state.SessionID, Rand: local.Rand, Context: local.Context,
-		RoundTimeout: local.RoundTimeout, Log: local.Log, EnvelopeSigner: local.EnvelopeSigner,
+		Log: local.Log, EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 

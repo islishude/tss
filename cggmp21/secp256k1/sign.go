@@ -423,15 +423,18 @@ type PresignSession struct {
 	startOpening *mta.StartOpening // Local MtA opening material; secret-bearing until round 2 completes.
 	gammaOpening *mta.StartOpening // Local encrypted gamma opening retained until Figure 8 completes.
 
-	round2Sent       bool // Whether this party already emitted round-2 MtA responses.
-	round3Sent       bool // Whether this party already emitted round-3 verification material.
-	identifying      bool // Whether a Figure 8 red alert activated Figure 9.
-	redAlertKind     presignRedAlertKind
-	redAlertDigest   []byte
-	redAlertPayloads map[tss.PartyID]presignRedAlertPayload
-	completed        bool              // Terminal success flag; persisted descriptor is available once true.
-	aborted          bool              // Terminal failure/destruction flag.
-	persistedPresign *PersistedPresign // Public-only descriptor installed after the atomic store commit.
+	round2Sent         bool // Whether this party already emitted round-2 MtA responses.
+	round3Sent         bool // Whether this party already emitted round-3 verification material.
+	identifying        bool // Whether a Figure 8 red alert activated Figure 9.
+	redAlertKind       presignRedAlertKind
+	redAlertDigest     []byte
+	redAlertPayloads   map[tss.PartyID]presignRedAlertPayload
+	completed          bool              // Terminal success flag; persisted descriptor is available once true.
+	aborted            bool              // Terminal failure/destruction flag.
+	closed             bool              // Final caller cleanup completed.
+	closePending       bool              // Durable abort requires an exact retry.
+	persistedPresign   *PersistedPresign // Public-only descriptor installed after the atomic store commit.
+	lifecycleCandidate *Presign          // Exact normalized artifact retained only while durable commit is pending.
 }
 
 type presignPartyState struct {
@@ -669,7 +672,8 @@ func (m *presignMTAState) destroy() {
 
 // SignSession tracks the online threshold ECDSA signing exchange.
 type SignSession struct {
-	mu sync.Mutex
+	mu         sync.Mutex
+	sessionCtx context.Context
 
 	key              *KeyShare                   // Session-owned exact generation decoded from LifecycleStore.
 	ownsKey          bool                        // Whether terminal cleanup must destroy key.
@@ -685,6 +689,8 @@ type SignSession struct {
 	partialEnvelopes map[tss.PartyID]tss.Envelope
 	completed        bool                     // Terminal success flag; signature is available once true.
 	aborted          bool                     // Terminal failure/destruction flag.
+	closed           bool                     // Final caller cleanup completed.
+	closePending     bool                     // Durable attempt abort requires an exact retry.
 	signature        *Signature               // Final aggregated signature, cleared by Destroy.
 	attempt          tssrun.SignAttemptRecord // Durable one-use attempt/outbox record.
 	outbox           signAttemptOutbox        // Immutable recovery identity and exact local broadcast.
@@ -823,13 +829,19 @@ func (s *PresignSession) validateInbound(env tss.InboundEnvelope) error {
 // Handle validates and applies one presign envelope.
 // It dispatches to per-round transitions that decode, validate, verify,
 // prepare, commit, and only then return effects.
-func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *PresignSession) Handle(ctx context.Context, env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil presign session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := tss.CheckHandlerContext(ctx, s.config.Ctx()); err != nil {
+		return nil, err
+	}
+	if s.lifecycleCandidate != nil {
+		return nil, tssrun.ErrLifecycleCommitPending
+	}
 	if s.completed {
 		return nil, completedSessionError(base.Round, base.From)
 	}
@@ -848,6 +860,9 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 	// exact replay slot is committed only immediately before the infallible state
 	// commit below.
 	if err := tss.ValidateInboundWithoutReplay(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.signers, s.key.state.Party); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.config.Ctx()); err != nil {
 		return nil, err
 	}
 	if !tss.ContainsParty(s.signers, base.From) {
@@ -870,7 +885,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, env, tx)
+		return applyPresignTransition(ctx, s, env, tx)
 
 	case payloadPresignRound1Proof:
 		if base.Round != presignStartRound {
@@ -886,7 +901,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, env, tx)
+		return applyPresignTransition(ctx, s, env, tx)
 
 	case payloadPresignRound2:
 		if base.Round != presignRound2 {
@@ -902,7 +917,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, env, tx)
+		return applyPresignTransition(ctx, s, env, tx)
 
 	case payloadPresignRound3:
 		if base.Round != presignRound3 {
@@ -918,7 +933,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, env, tx)
+		return applyPresignTransition(ctx, s, env, tx)
 
 	case payloadPresignRedAlert:
 		if base.Round != presignRedAlertRound {
@@ -934,7 +949,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		return applyPresignTransition(s, env, tx)
+		return applyPresignTransition(ctx, s, env, tx)
 
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
@@ -952,12 +967,15 @@ func (s *PresignSession) rejectAcceptedPresignDuplicate(env tss.InboundEnvelope,
 	return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, cause)
 }
 
-func applyPresignTransition(s *PresignSession, env tss.InboundEnvelope, tx sessionTransition[PresignSession]) ([]tss.Envelope, error) {
+func applyPresignTransition(ctx context.Context, s *PresignSession, env tss.InboundEnvelope, tx sessionTransition[PresignSession]) ([]tss.Envelope, error) {
 	defer tx.cleanupOnReject()
 	if err := s.validateInbound(env); err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.config.Ctx()); err != nil {
 		return nil, err
 	}
 	effects, err := tx.apply(s)

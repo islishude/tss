@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"context"
 	"errors"
 
 	"github.com/islishude/tss"
@@ -28,11 +29,11 @@ func (s *RefreshSession) Guard() *tss.EnvelopeGuard {
 }
 
 // Handle validates and applies one refresh envelope.
-func (s *RefreshSession) Handle(in tss.InboundEnvelope) ([]tss.Envelope, error) {
+func (s *RefreshSession) Handle(ctx context.Context, in tss.InboundEnvelope) ([]tss.Envelope, error) {
 	if s == nil || s.reshare == nil {
 		return nil, errors.New("nil refresh session")
 	}
-	return s.reshare.Handle(in)
+	return s.reshare.Handle(ctx, in)
 }
 
 // KeyShare returns an independently owned refreshed key share after every
@@ -44,18 +45,34 @@ func (s *RefreshSession) KeyShare() (*KeyShare, bool) {
 	return s.reshare.KeyShare()
 }
 
-// Completed reports whether the refresh session is terminally complete.
-func (s *RefreshSession) Completed() bool {
+// Descriptor returns the wrapped refresh run binding.
+func (s *RefreshSession) Descriptor() tssrun.SessionDescriptor {
 	if s == nil || s.reshare == nil {
-		return false
+		return tssrun.SessionDescriptor{}
 	}
-	return s.reshare.Completed()
+	return s.reshare.Descriptor()
 }
 
-// Destroy clears local material retained by the refresh session.
-func (s *RefreshSession) Destroy() {
+// Status returns the wrapped refresh lifecycle state.
+func (s *RefreshSession) Status() tssrun.SessionState {
 	if s == nil || s.reshare == nil {
-		return
+		return tssrun.SessionClosed
 	}
-	s.reshare.Destroy()
+	return s.reshare.Status()
+}
+
+// Abort terminally aborts the wrapped refresh run.
+func (s *RefreshSession) Abort(ctx context.Context, reason string) error {
+	if s == nil || s.reshare == nil {
+		return nil
+	}
+	return s.reshare.Abort(ctx, reason)
+}
+
+// Close clears the wrapped refresh session.
+func (s *RefreshSession) Close(ctx context.Context) error {
+	if s == nil || s.reshare == nil {
+		return nil
+	}
+	return s.reshare.Close(ctx)
 }

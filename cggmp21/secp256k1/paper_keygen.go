@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -118,7 +119,7 @@ func clearEnvelopePayloads(envelopes []tss.Envelope) {
 	}
 }
 
-func (s *KeygenSession) handlePaperKeygenLocked(env tss.InboundEnvelope) ([]tss.Envelope, error) {
+func (s *KeygenSession) handlePaperKeygenLocked(ctx context.Context, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 	base := env.Envelope()
 	key := newPaperKeygenMessageKey(base)
 	if _, ok := s.paperAccepted[key]; ok {
@@ -130,17 +131,17 @@ func (s *KeygenSession) handlePaperKeygenLocked(env tss.InboundEnvelope) ([]tss.
 
 	switch base.PayloadType {
 	case payloadFigure6Commitment, payloadFigure6Reveal, payloadFigure6Proof:
-		return s.handlePaperFigure6Locked(env, key)
+		return s.handlePaperFigure6Locked(ctx, env, key)
 	case payloadAuxInfoCommitment, payloadAuxInfoReveal, payloadAuxInfoProofs, payloadAuxInfoDirect, payloadAuxInfoDecryptionError:
-		return s.handlePaperAuxInfoLocked(env, key)
+		return s.handlePaperAuxInfoLocked(ctx, env, key)
 	case payloadKeygenConfirmation:
-		return s.handlePaperKeygenConfirmationLocked(env, key)
+		return s.handlePaperKeygenConfirmationLocked(ctx, env, key)
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected paper keygen payload type %q", base.PayloadType))
 	}
 }
 
-func (s *KeygenSession) handlePaperFigure6Locked(env tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
+func (s *KeygenSession) handlePaperFigure6Locked(ctx context.Context, env tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
 	base := env.Envelope()
 	if s.figure6 == nil || s.auxInfo != nil || s.pending != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("figure 6 message arrived outside figure 6"))
@@ -151,7 +152,7 @@ func (s *KeygenSession) handlePaperFigure6Locked(env tss.InboundEnvelope, key pa
 	if err := s.verifyTrustedDealerFigure6Envelope(base); err != nil {
 		return nil, paperFigure6PreparationError(base, s.cfg.Parties, err)
 	}
-	prepared, err := s.figure6.prepareInbound(base)
+	prepared, err := s.figure6.prepareInbound(ctx, base)
 	if err != nil {
 		return nil, paperFigure6PreparationError(base, s.cfg.Parties, err)
 	}
@@ -179,6 +180,9 @@ func (s *KeygenSession) handlePaperFigure6Locked(env tss.InboundEnvelope, key pa
 	if err := s.validateInbound(env); err != nil {
 		return nil, err
 	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
 	if err := prepared.apply(); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, base.Round, s.cfg.Self, fmt.Errorf("commit Figure 6 transition: %w", err))
 	}
@@ -200,7 +204,7 @@ func (s *KeygenSession) startPaperAuxInfo(result *figure6Result) (*auxInfoState,
 		StableSID:         s.cfg.SessionID,
 		Limits:            s.limits,
 		SecurityParams:    s.securityParams,
-		EnvelopeVerifier:  s.guard.EnvelopeVerifier,
+		EnvelopeVerifier:  s.guard.EnvelopeVerifier(),
 		PaillierBits:      s.paperPaillierBits(),
 		PlanHash:          s.planHash,
 		ExpectedPublicKey: result.publicKey,
@@ -303,12 +307,12 @@ func (s *KeygenSession) verifyTrustedDealerFigure6Envelope(env tss.Envelope) err
 	return nil
 }
 
-func (s *KeygenSession) handlePaperAuxInfoLocked(env tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
+func (s *KeygenSession) handlePaperAuxInfoLocked(ctx context.Context, env tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
 	base := env.Envelope()
 	if s.auxInfo == nil || s.pending != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("AuxInfo message arrived outside Figure 7"))
 	}
-	prepared, err := s.auxInfo.prepareInbound(base)
+	prepared, err := s.auxInfo.prepareInbound(ctx, base)
 	if err != nil {
 		return nil, paperKeygenPreparationError(base, err)
 	}
@@ -323,6 +327,9 @@ func (s *KeygenSession) handlePaperAuxInfoLocked(env tss.InboundEnvelope, key pa
 		defer pending.destroy()
 	}
 	if err := s.validateInbound(env); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	if err := prepared.apply(); err != nil {
@@ -535,7 +542,7 @@ func (s *KeygenSession) parseKeygenConfirmation(env tss.Envelope) (*receivedKeyg
 	return &receivedKeygenConfirmation{env: env, msg: confirmation, canonical: canonical}, nil
 }
 
-func (s *KeygenSession) handlePaperKeygenConfirmationLocked(env tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
+func (s *KeygenSession) handlePaperKeygenConfirmationLocked(ctx context.Context, env tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
 	base := env.Envelope()
 	if base.Round != keygenPaperConfirmationRound || base.To != tss.BroadcastPartyId {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("paper keygen confirmation in wrong round or delivery mode"))
@@ -594,6 +601,9 @@ func (s *KeygenSession) handlePaperKeygenConfirmationLocked(env tss.InboundEnvel
 		defer final.destroy()
 	}
 	if err := s.validateInbound(env); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	s.paperConfirmations[base.From] = received.msg

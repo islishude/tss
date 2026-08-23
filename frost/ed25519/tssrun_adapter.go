@@ -1,6 +1,9 @@
 package ed25519
 
-import "github.com/islishude/tss/tssrun"
+import (
+	"github.com/islishude/tss"
+	"github.com/islishude/tss/tssrun"
+)
 
 var (
 	_ tssrun.ProtocolSession = (*KeygenSession)(nil)
@@ -8,32 +11,83 @@ var (
 	_ tssrun.ProtocolSession = (*ReshareSession)(nil)
 )
 
-// Completed reports whether the keygen session is terminally complete.
-func (s *KeygenSession) Completed() bool {
+// Descriptor returns the keygen run binding.
+func (s *KeygenSession) Descriptor() tssrun.SessionDescriptor {
 	if s == nil {
-		return false
+		return tssrun.SessionDescriptor{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.completed
+	return tssrun.SessionDescriptor{Protocol: tss.ProtocolFROSTEd25519, Kind: tssrun.RunKeygen, SessionID: s.cfg.SessionID, Party: s.cfg.Self, PlanDigest: s.planHash}.Clone()
 }
 
-// Completed reports whether the signing session is terminally complete.
-func (s *SignSession) Completed() bool {
+// Status returns the keygen lifecycle state.
+func (s *KeygenSession) Status() tssrun.SessionState {
 	if s == nil {
-		return false
+		return tssrun.SessionClosed
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.completed
+	return frostSessionState(s.completed, s.aborted, s.closed)
 }
 
-// Completed reports whether the refresh or reshare session is terminally complete.
-func (s *ReshareSession) Completed() bool {
+// Descriptor returns the signing run binding.
+func (s *SignSession) Descriptor() tssrun.SessionDescriptor {
 	if s == nil {
-		return false
+		return tssrun.SessionDescriptor{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.completed
+	party := tss.BroadcastPartyId
+	if s.guard != nil {
+		party = s.guard.Self()
+	}
+	return tssrun.SessionDescriptor{Protocol: tss.ProtocolFROSTEd25519, Kind: tssrun.RunSign, SessionID: s.sessionID, Party: party, PlanDigest: s.planHash}.Clone()
+}
+
+// Status returns the signing lifecycle state.
+func (s *SignSession) Status() tssrun.SessionState {
+	if s == nil {
+		return tssrun.SessionClosed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return frostSessionState(s.completed, s.aborted, s.closed)
+}
+
+// Descriptor returns the refresh or reshare run binding.
+func (s *ReshareSession) Descriptor() tssrun.SessionDescriptor {
+	if s == nil {
+		return tssrun.SessionDescriptor{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kind := tssrun.RunReshare
+	if s.mode == frostReshareModeRefresh {
+		kind = tssrun.RunRefresh
+	}
+	return tssrun.SessionDescriptor{Protocol: tss.ProtocolFROSTEd25519, Kind: kind, SessionID: s.cfg.SessionID, Party: s.selfID, PlanDigest: s.planHash}.Clone()
+}
+
+// Status returns the refresh or reshare lifecycle state.
+func (s *ReshareSession) Status() tssrun.SessionState {
+	if s == nil {
+		return tssrun.SessionClosed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return frostSessionState(s.completed, s.aborted, s.closed)
+}
+
+func frostSessionState(completed, aborted, closed bool) tssrun.SessionState {
+	switch {
+	case closed:
+		return tssrun.SessionClosed
+	case aborted:
+		return tssrun.SessionAborted
+	case completed:
+		return tssrun.SessionSucceeded
+	default:
+		return tssrun.SessionActive
+	}
 }

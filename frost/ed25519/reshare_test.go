@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	stded25519 "crypto/ed25519"
 	"strings"
 	"testing"
@@ -299,7 +300,7 @@ func TestStartReshareRoleEntryPointsRejectMismatchedRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new-only receiver start failed: %v", err)
 	}
-	defer receiver.Destroy()
+	defer closeTestSession(t, receiver)
 	if len(out) != 0 {
 		t.Fatalf("receiver start emitted %d envelopes, want none", len(out))
 	}
@@ -324,8 +325,8 @@ func TestReshareNewReceiverBindsGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	guard := receiver.Guard()
-	if guard.Self != 4 {
-		t.Fatalf("guard self = %d, want 4", guard.Self)
+	if guard.Self() != 4 {
+		t.Fatalf("guard self = %d, want 4", guard.Self())
 	}
 }
 
@@ -355,7 +356,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 
@@ -382,7 +383,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	bad := out2[1]
 	bad.Payload = badPayload
 
-	_, err = session.Handle(testutil.DeliverEnvelope(bad))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if !session.aborted {
 		t.Fatal("verification error did not abort reshare session")
@@ -391,7 +392,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 		t.Fatal("aborted reshare session retained share references")
 	}
 
-	_, err = session.Handle(testutil.DeliverEnvelope(out2[1]))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelope(out2[1]))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 }
 

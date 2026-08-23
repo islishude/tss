@@ -85,7 +85,17 @@ wrong-epoch input is rejected without advancing accepted state or releasing an
 envelope. Prepared secret state is registered for cleanup until commit transfers
 ownership to the session or durable store.
 
+All public session methods serialize on one lock. `Handle` checks its delivery
+context together with the session context before decode, within proof/party
+loops, after preparation, and before commit. A single large-integer primitive
+is only cancelable at its boundaries. `Status` distinguishes `Active`,
+`CommitPending`, `Succeeded`, `Aborted`, `ClosePending`, and `Closed`;
+durability errors from `Abort` or `Close` are retryable and are never swallowed.
+
 All protocol starts require an `EnvelopeGuard` and a local `EnvelopeSigner`.
+The guard must carry the exact canonical digest of `CGGMP21Policies()`; a
+production security superset, downgrade, or runtime policy/verifier/cache
+replacement is rejected.
 Every direct CGGMP21 record requires a canonical sender signature; the Figure 7
 decryption-error accusation broadcast does as well. Broadcast-mode messages
 require the configured full broadcast certificate. Records whose policy is
@@ -349,10 +359,11 @@ applied only to the final ECDSA signature.
 ## Durable Lifecycle
 
 Figure 6/7 keygen and interactive trusted-dealer import return a confirmed
-in-memory `KeyShare`; they do not install it into a store. Before presign,
-refresh, reshare, child derivation, or signing, the application serializes that
-share and bootstraps its first `GenerationBinding` with
-`LifecycleStore.InstallInitialGeneration`. From that point onward,
+in-memory `KeyShare`; they do not install it into a store.
+`GenerationBindingForKeyShare` uses the protocol authorization epoch, and
+`InstallKeyShare` fully validates and canonically encodes the share before
+installing the predeclared key ID and generation. Keygen `RunIntent` therefore
+has no source binding or caller-selected epoch. From that point onward,
 `tssrun.LifecycleStore` is the authoritative transactional boundary for key
 generations, run leases, available presigns, online attempts, and generation
 cutover.
@@ -375,11 +386,11 @@ On successful Figure 8 completion,
 
 Only then does `PresignSession.Presign()` expose a repeatable,
 public-only `PersistedPresign` descriptor. The session never returns the secret
-tuple. If the store call returns an error, the session withholds the descriptor,
-destroys its local candidate, and attempts to abort the lease. An error does not
-prove that a durable commit failed: a backend may have crossed its atomic commit
-point before reporting an unknown outcome. The store remains authoritative, and
-recovery must follow its exact lease/artifact idempotency and reconciliation
+tuple. If the store call returns an error, the session enters `CommitPending`,
+withholds the descriptor, and retains that exact candidate for
+`RetryLifecycleCommit`; ordinary `Handle`, `Abort`, and `Close` cannot discard
+it. An error does not prove that a durable commit failed: the store remains
+authoritative and recovery follows its exact lease/artifact idempotency
 contract.
 
 An available presign encoding is side-effect free. Its availability is decided
@@ -431,7 +442,7 @@ the same class of error after the session has staged its candidate. In either
 case the caller retains that exact session, releases no withheld confirmation,
 and calls `RetryLifecycleCommit` until the store gives an authoritative
 terminal result. The caller must not install the candidate through a second
-callback or destroy the session while reconciliation is pending. A later
+callback or close the session while reconciliation is pending. A later
 refresh run reloads the current `GenerationBinding`, constructs a fresh plan
 and runtime, and names a distinct target generation.
 
@@ -472,6 +483,11 @@ is created with `ChildDerivationPlan` and `StartChildDerivation`:
    child SID; and
 6. atomically install the first generation of the child lineage with
    `CommitInitialGenerationFromLease`.
+
+A transient final install error leaves the same final share and its exact
+withheld confirmation outbox in `CommitPending`. `RetryLifecycleCommit`
+repeats only that install and releases the outbox once; `Abort` and `Close`
+cannot erase the candidate first.
 
 The parent remains current and usable. The child receives a new SID, RID,
 `EpochID`, dynamic identifiers, Paillier keys, and a separate auxiliary setup.

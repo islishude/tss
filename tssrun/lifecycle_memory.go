@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"sync"
 
@@ -85,6 +87,14 @@ type storedCutover struct {
 	reason               string
 }
 
+type storedLifecycleTombstone struct {
+	Namespace      string
+	IdentifierHash string
+	KeyID          string
+	Digest         []byte
+	State          string
+}
+
 // MemoryLifecycleStore is a mutex-protected reference LifecycleStore. It
 // models transaction boundaries but is neither durable nor encrypted.
 type MemoryLifecycleStore struct {
@@ -103,6 +113,7 @@ type MemoryLifecycleStore struct {
 
 	cutoversByToken map[uint64]*storedCutover
 	cutoverByKey    map[string]uint64
+	tombstones      map[string]storedLifecycleTombstone
 
 	nextLeaseToken   uint64
 	nextCutoverToken uint64
@@ -124,6 +135,7 @@ func NewMemoryLifecycleStore() *MemoryLifecycleStore {
 		presigns:         make(map[string]*storedPresign),
 		cutoversByToken:  make(map[uint64]*storedCutover),
 		cutoverByKey:     make(map[string]uint64),
+		tombstones:       make(map[string]storedLifecycleTombstone),
 	}
 }
 
@@ -145,6 +157,10 @@ func (s *MemoryLifecycleStore) InstallInitialGeneration(ctx context.Context, bin
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.tombstonedLocked("generation", generationTombstoneIdentifier(binding)) ||
+		s.tombstonedLocked("generation-name", []byte(binding.KeyID+"\x00"+string(binding.KeyGeneration))) {
+		return GenerationRecord{}, ErrGenerationConflict
+	}
 	if current, ok := s.current[binding.KeyID]; ok {
 		stored := s.generations[current]
 		if current == binding && stored != nil && stored.record.Status == GenerationCurrent &&
@@ -208,6 +224,9 @@ func (s *MemoryLifecycleStore) AcquireRunLease(ctx context.Context, binding Gene
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.tombstonedLocked("session", sessionID[:]) {
+		return RunLease{}, ErrSessionAlreadyUsed
+	}
 	if kind == RunRefresh {
 		if _, disabled := s.refreshDisabled[binding.KeyID]; disabled {
 			return RunLease{}, ErrRefreshDisabled
@@ -270,6 +289,9 @@ func (s *MemoryLifecycleStore) AcquireReshareReceiverLease(ctx context.Context, 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.tombstonedLocked("session", anchor.SessionID[:]) {
+		return RunLease{}, ErrSessionAlreadyUsed
+	}
 	if token, ok := s.leaseBySession[anchor.SessionID]; ok {
 		record := s.leasesByToken[token]
 		storedAnchor, receiverJoin := s.reshareReceivers[token]
@@ -310,6 +332,33 @@ func (s *MemoryLifecycleStore) AcquireReshareReceiverLease(ctx context.Context, 
 	return lease.Clone(), nil
 }
 
+// QueryRunLease returns the exact durable lease for a binding, run kind, and session.
+func (s *MemoryLifecycleStore) QueryRunLease(ctx context.Context, binding GenerationBinding, kind RunKind, sessionID tss.SessionID) (RunLease, error) {
+	if err := ctx.Err(); err != nil {
+		return RunLease{}, err
+	}
+	if err := binding.Validate(); err != nil || !validLeaseRunKind(kind) || !sessionID.Valid() {
+		return RunLease{}, ErrInvalidLifecycleRecord
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tombstonedLocked("session", sessionID[:]) {
+		return RunLease{}, ErrLifecycleHistoryCompacted
+	}
+	token, ok := s.leaseBySession[sessionID]
+	if !ok {
+		return RunLease{}, ErrRunLeaseNotFound
+	}
+	stored := s.leasesByToken[token]
+	if stored == nil {
+		return RunLease{}, ErrLifecycleCorrupt
+	}
+	if stored.lease.Binding != binding || stored.lease.Kind != kind || stored.lease.SessionID != sessionID {
+		return RunLease{}, ErrRunLeaseConflict
+	}
+	return stored.lease.Clone(), nil
+}
+
 // FinishRunLease records an exact active lease as completed or aborted.
 func (s *MemoryLifecycleStore) FinishRunLease(ctx context.Context, lease RunLease, outcome RunLeaseOutcome) error {
 	if err := ctx.Err(); err != nil {
@@ -325,6 +374,9 @@ func (s *MemoryLifecycleStore) FinishRunLease(ctx context.Context, lease RunLeas
 	defer s.mu.Unlock()
 	record, ok := s.leasesByToken[lease.Token]
 	if !ok {
+		if s.tombstonedLocked("session", lease.SessionID[:]) {
+			return ErrLifecycleHistoryCompacted
+		}
 		return ErrRunLeaseNotFound
 	}
 	stored := record.lease
@@ -405,6 +457,9 @@ func (s *MemoryLifecycleStore) CommitAvailablePresignFromLease(ctx context.Conte
 	artifactDigest := sha256.Sum256(metadata)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.tombstonedLocked("presign", []byte(presignID)) || s.tombstonedLocked("presign-artifact", artifactDigest[:]) {
+		return ErrPresignUnavailable
+	}
 	if effect := s.leaseEffects[lease.Token]; effect != nil {
 		if effect.Kind == storedLeaseEffectPresign && effect.PresignID == presignID && bytes.Equal(effect.Digest, digest) {
 			presign := s.presigns[presignID]
@@ -469,6 +524,9 @@ func (s *MemoryLifecycleStore) PreparePresignCandidate(ctx context.Context, bind
 		return PresignCandidate{}, ErrRunLeaseConflict
 	}
 	record, ok := s.presigns[presignID]
+	if !ok && s.tombstonedLocked("presign", []byte(presignID)) {
+		return PresignCandidate{}, ErrLifecycleHistoryCompacted
+	}
 	if !ok || record.binding != binding {
 		return PresignCandidate{}, ErrPresignUnavailable
 	}
@@ -509,6 +567,12 @@ func (s *MemoryLifecycleStore) CommitSignAttempt(ctx context.Context, binding Ge
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.tombstonedLocked("attempt", []byte(intent.AttemptID)) {
+		return AttemptCommit{}, ErrAttemptConflict
+	}
+	if s.tombstonedLocked("presign", []byte(presignID)) {
+		return AttemptCommit{}, ErrPresignBurned
+	}
 	if existing, ok := s.attempts[intent.AttemptID]; ok {
 		if !sameBaseAttempt(existing.record, binding, presignID, intent, outboxDigest[:]) {
 			if existing.record.PresignID == presignID && bytes.Equal(existing.record.Intent.IntentDigest, intent.IntentDigest) {
@@ -558,8 +622,8 @@ func (s *MemoryLifecycleStore) CommitSignAttempt(ctx context.Context, binding Ge
 	s.attempts[intent.AttemptID] = &storedAttempt{record: record}
 	presign.state = storedPresignClaimed
 	presign.attemptID = intent.AttemptID
-	clearBytes(presign.blob)
-	clearBytes(presign.metadata)
+	clear(presign.blob)
+	clear(presign.metadata)
 	presign.blob = nil
 	presign.metadata = nil
 	return AttemptCommit{Status: AttemptCreated, Record: record.Clone()}, nil
@@ -575,6 +639,9 @@ func (s *MemoryLifecycleStore) QueryAttemptOutcome(ctx context.Context, query At
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.tombstonedLocked("attempt", []byte(query.AttemptID)) {
+		return SignAttemptRecord{}, ErrLifecycleHistoryCompacted
+	}
 	return s.queryAttemptLocked(query)
 }
 
@@ -676,7 +743,7 @@ func (s *MemoryLifecycleStore) AbortAttempt(ctx context.Context, query AttemptQu
 	}
 	record.Aborted = true
 	record.AbortReason = reason
-	clearBytes(record.ExactOutbox)
+	clear(record.ExactOutbox)
 	record.ExactOutbox = nil
 	presign := s.presigns[record.PresignID]
 	if presign == nil || presign.state != storedPresignClaimed || presign.attemptID != record.Intent.AttemptID {
@@ -705,13 +772,16 @@ func (s *MemoryLifecycleStore) BurnPresign(ctx context.Context, binding Generati
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	presign, ok := s.presigns[presignID]
+	if !ok && s.tombstonedLocked("presign", []byte(presignID)) {
+		return ErrPresignBurned
+	}
 	if !ok || presign.binding != binding {
 		return ErrPresignUnavailable
 	}
 	switch presign.state {
 	case storedPresignAvailable:
-		clearBytes(presign.blob)
-		clearBytes(presign.metadata)
+		clear(presign.blob)
+		clear(presign.metadata)
 		presign.blob = nil
 		presign.metadata = nil
 		presign.state = storedPresignBurned
@@ -753,7 +823,7 @@ func (s *MemoryLifecycleStore) BeginCutover(ctx context.Context, source, target 
 	if !s.isCurrentLocked(source) {
 		return CutoverFence{}, ErrGenerationNotCurrent
 	}
-	if _, exists := s.generations[target]; exists {
+	if s.hasKeyGenerationLocked(target.KeyID, target.KeyGeneration) {
 		return CutoverFence{}, ErrGenerationConflict
 	}
 	if s.hasActiveLeaseLocked(source) || s.hasNonTerminalAttemptLocked(source) {
@@ -801,7 +871,7 @@ func (s *MemoryLifecycleStore) BeginCutoverFromLease(ctx context.Context, lease 
 	if !s.isCurrentLocked(lease.Binding) {
 		return CutoverFence{}, ErrGenerationNotCurrent
 	}
-	if _, exists := s.generations[target]; exists {
+	if s.hasKeyGenerationLocked(target.KeyID, target.KeyGeneration) {
 		return CutoverFence{}, ErrGenerationConflict
 	}
 	if s.hasOtherActiveLeaseLocked(lease.Binding, lease.Token) || s.hasNonTerminalAttemptLocked(lease.Binding) {
@@ -864,7 +934,7 @@ func (s *MemoryLifecycleStore) CommitRetirementFromLease(ctx context.Context, le
 	if s.hasOtherActiveLeaseLocked(lease.Binding, lease.Token) || s.hasNonTerminalAttemptLocked(lease.Binding) {
 		return ErrRunLeaseConflict
 	}
-	if _, exists := s.generations[target]; exists {
+	if s.hasKeyGenerationLocked(target.KeyID, target.KeyGeneration) {
 		return ErrGenerationConflict
 	}
 	source := s.generations[lease.Binding]
@@ -872,8 +942,8 @@ func (s *MemoryLifecycleStore) CommitRetirementFromLease(ctx context.Context, le
 		return ErrLifecycleCorrupt
 	}
 	source.record.Status = GenerationRetired
-	clearBytes(source.record.Blob)
-	clearBytes(source.record.Metadata)
+	clear(source.record.Blob)
+	clear(source.record.Metadata)
 	source.record.Blob = nil
 	source.record.Metadata = nil
 	delete(s.current, lease.Binding.KeyID)
@@ -907,7 +977,13 @@ func (s *MemoryLifecycleStore) CommitCutover(ctx context.Context, fence CutoverF
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cutover, ok := s.cutoversByToken[fence.Token]
-	if !ok || cutover.fence != fence {
+	if !ok {
+		if s.tombstonedLocked("cutover", cutoverTombstoneIdentifier(fence.Token)) {
+			return GenerationRecord{}, ErrLifecycleHistoryCompacted
+		}
+		return GenerationRecord{}, ErrCutoverConflict
+	}
+	if cutover.fence != fence {
 		return GenerationRecord{}, ErrCutoverConflict
 	}
 	if cutover.state == storedCutoverCommitted {
@@ -950,8 +1026,8 @@ func (s *MemoryLifecycleStore) CommitCutover(ctx context.Context, fence CutoverF
 	s.generations[fence.Target] = &storedGeneration{record: target}
 	s.current[fence.Source.KeyID] = fence.Target
 	source.record.Status = GenerationRetired
-	clearBytes(source.record.Blob)
-	clearBytes(source.record.Metadata)
+	clear(source.record.Blob)
+	clear(source.record.Metadata)
 	source.record.Blob = nil
 	source.record.Metadata = nil
 	s.burnEpochPresignsLocked(fence.Source.KeyID, fence.Source.EpochID)
@@ -977,7 +1053,13 @@ func (s *MemoryLifecycleStore) AbortCutover(ctx context.Context, fence CutoverFe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cutover, ok := s.cutoversByToken[fence.Token]
-	if !ok || cutover.fence != fence {
+	if !ok {
+		if s.tombstonedLocked("cutover", cutoverTombstoneIdentifier(fence.Token)) {
+			return ErrLifecycleHistoryCompacted
+		}
+		return ErrCutoverConflict
+	}
+	if cutover.fence != fence {
 		return ErrCutoverConflict
 	}
 	if cutover.state == storedCutoverAborted {
@@ -1041,7 +1123,8 @@ func (s *MemoryLifecycleStore) CommitInitialGenerationFromLease(ctx context.Cont
 	if _, fenced := s.cutoverByKey[lease.Binding.KeyID]; fenced {
 		return GenerationRecord{}, ErrRunLeaseConflict
 	}
-	if _, current := s.current[child.KeyID]; current || s.hasGenerationForKeyLocked(child.KeyID) || s.hasActiveLeaseForKeyLocked(child.KeyID) {
+	if _, current := s.current[child.KeyID]; current || s.hasGenerationForKeyLocked(child.KeyID) ||
+		s.hasKeyGenerationLocked(child.KeyID, child.KeyGeneration) || s.hasActiveLeaseForKeyLocked(child.KeyID) {
 		return GenerationRecord{}, ErrGenerationConflict
 	}
 	record := GenerationRecord{Binding: child, Blob: bytes.Clone(childBlob), Metadata: bytes.Clone(childMetadata), Status: GenerationCurrent}
@@ -1150,6 +1233,9 @@ func (s *MemoryLifecycleStore) hasGenerationForKeyLocked(keyID string) bool {
 }
 
 func (s *MemoryLifecycleStore) hasKeyGenerationLocked(keyID string, generation KeyGeneration) bool {
+	if s.tombstonedLocked("generation-name", []byte(keyID+"\x00"+string(generation))) {
+		return true
+	}
 	for binding := range s.generations {
 		if binding.KeyID == keyID && binding.KeyGeneration == generation {
 			return true
@@ -1206,6 +1292,9 @@ func (s *MemoryLifecycleStore) hasOtherActiveLeaseLocked(binding GenerationBindi
 func (s *MemoryLifecycleStore) exactActiveLeaseLocked(lease RunLease) (*storedRunLease, error) {
 	stored := s.leasesByToken[lease.Token]
 	if stored == nil {
+		if s.tombstonedLocked("session", lease.SessionID[:]) {
+			return nil, ErrLifecycleHistoryCompacted
+		}
 		return nil, ErrRunLeaseNotFound
 	}
 	if stored.lease.Binding != lease.Binding || stored.lease.Kind != lease.Kind || stored.lease.SessionID != lease.SessionID {
@@ -1284,7 +1373,7 @@ func (s *MemoryLifecycleStore) clearAttemptSecretsIfTerminalLocked(record *SignA
 	if record == nil || !record.Terminal() {
 		return
 	}
-	clearBytes(record.ExactOutbox)
+	clear(record.ExactOutbox)
 	record.ExactOutbox = nil
 }
 
@@ -1295,8 +1384,8 @@ func (s *MemoryLifecycleStore) burnEpochPresignsLocked(keyID string, epochID Epo
 		}
 		switch presign.state {
 		case storedPresignAvailable:
-			clearBytes(presign.blob)
-			clearBytes(presign.metadata)
+			clear(presign.blob)
+			clear(presign.metadata)
 			presign.blob = nil
 			presign.metadata = nil
 			presign.state = storedPresignBurned
@@ -1418,8 +1507,27 @@ func sameBaseAttempt(record SignAttemptRecord, binding GenerationBinding, presig
 		bytes.Equal(record.OutboxDigest, outboxDigest)
 }
 
-func clearBytes(value []byte) {
-	for i := range value {
-		value[i] = 0
-	}
+func lifecycleTombstoneHash(namespace string, identifier []byte) string {
+	digest := sha256.Sum256(append(append([]byte(namespace), 0), identifier...))
+	return hex.EncodeToString(digest[:])
+}
+
+func lifecycleTombstoneMapKey(namespace, identifierHash string) string {
+	return namespace + ":" + identifierHash
+}
+
+func (s *MemoryLifecycleStore) tombstonedLocked(namespace string, identifier []byte) bool {
+	hash := lifecycleTombstoneHash(namespace, identifier)
+	_, ok := s.tombstones[lifecycleTombstoneMapKey(namespace, hash)]
+	return ok
+}
+
+func generationTombstoneIdentifier(binding GenerationBinding) []byte {
+	return fmt.Appendf(nil, "%s\x00%s\x00%x", binding.KeyID, binding.KeyGeneration, binding.EpochID[:])
+}
+
+func cutoverTombstoneIdentifier(token uint64) []byte {
+	raw := make([]byte, 8)
+	binary.BigEndian.PutUint64(raw, token)
+	return raw
 }

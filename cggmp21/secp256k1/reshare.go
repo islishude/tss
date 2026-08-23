@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -77,6 +78,8 @@ type ReshareSession struct {
 	newPartyData   map[tss.PartyID]*reshareNewPartyData    // Per-new-party state keyed by receiver party.
 	completed      bool                                    // Terminal success flag after newShare is confirmed.
 	aborted        bool                                    // Terminal failure/destruction flag.
+	closed         bool                                    // Final caller cleanup completed.
+	closePending   bool                                    // Durable abort requires an exact retry.
 	newShare       *KeyShare                               // New key share produced for receiver participants.
 
 	newPaillier      *pai.PrivateKey    // Fresh local Paillier private key for receiver auxiliary material.
@@ -280,7 +283,7 @@ func startLifecycleReshare(plan *ResharePlan, runtime ReshareRuntime, dealer, re
 	if err := targetProbe.Validate(); err != nil || runtime.TargetKeyGeneration == runtime.Binding.KeyGeneration {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid reshare target key generation"))
 	}
-	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.SessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.SessionID, local.Self, CGGMP21Policies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
@@ -379,7 +382,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 	if plan == nil || plan.state == nil {
 		return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("nil reshare plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.SessionID, localParty); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.SessionID, localParty, CGGMP21Policies()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
 	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
@@ -432,7 +435,6 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		SessionID:      plan.state.SessionID,
 		Rand:           local.Rand,
 		Context:        local.Context,
-		RoundTimeout:   local.RoundTimeout,
 		Log:            local.Log,
 		EnvelopeSigner: local.EnvelopeSigner,
 	}
@@ -510,13 +512,16 @@ func (s *ReshareSession) receiverConfig() tss.ThresholdConfig {
 }
 
 // Handle validates and applies one reshare envelope.
-func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *ReshareSession) Handle(ctx context.Context, in tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	env := in.Envelope()
 	if s == nil {
 		return nil, errors.New("nil reshare session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
 	if !s.lifecycleFinished && (s.lifecycleFinal != nil || s.lifecycleRetirement != nil) {
 		return nil, errors.New("reshare lifecycle commit is pending; call RetryLifecycleCommit")
 	}
@@ -552,6 +557,9 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	if err := tss.ValidateInboundWithoutReplay(s.guard, in, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, allowedParties, s.selfID); err != nil {
 		return nil, err
 	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
 	key := newPaperKeygenMessageKey(env)
 	if _, ok := s.accepted[key]; ok {
 		if err := s.validateInbound(in, allowedParties); err != nil {
@@ -567,7 +575,7 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		return s.commitReshareLifecycleEffects(s.cfg.Ctx(), out)
 	}
 	if isAuxInfoPayload(env.PayloadType) {
-		out, err := s.handleReshareAuxInfoInbound(in, key)
+		out, err := s.handleReshareAuxInfoInbound(ctx, in, key)
 		if err != nil {
 			return nil, err
 		}
@@ -591,6 +599,9 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("reshare message slot is already accepted"))
 	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
 	staged := s.cloneForInboundTransition()
 	liveConfigLog := staged.cfg.Log
 	liveLog := staged.log
@@ -612,6 +623,9 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	staged.cfg.Log = liveConfigLog
@@ -879,20 +893,74 @@ func sameByteSlices(a, b [][]byte) bool {
 	return true
 }
 
-// Destroy clears local secret material retained by the reshare session.
-func (s *ReshareSession) Destroy() {
+// Abort terminally aborts an active reshare and durably resolves its lease.
+func (s *ReshareSession) Abort(ctx context.Context, reason string) error {
+	if err := validateSessionDisposition(ctx, reason); err != nil {
+		return err
+	}
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
-	if !s.lifecycleFinished && s.lifecycleFinal == nil && s.lifecycleRetirement == nil &&
-		s.lifecycleStore != nil && s.lifecycleLease.Token != 0 {
-		storeCtx, cancel := durableStoreContext(s.cfg.Ctx(), s.lifecycleTimeout)
-		_ = s.lifecycleStore.FinishRunLease(storeCtx, s.lifecycleLease, tssrun.LeaseAborted)
+	defer s.mu.Unlock()
+	return s.abortDispositionLocked(ctx, reason)
+}
+
+func (s *ReshareSession) abortDispositionLocked(ctx context.Context, _ string) error {
+	if s.closed {
+		return nil
+	}
+	if !s.lifecycleFinished && (s.lifecycleFinal != nil || s.lifecycleRetirement != nil) {
+		return tssrun.ErrLifecycleCommitPending
+	}
+	if s.completed && !s.aborted {
+		return tssrun.ErrRunCompleted
+	}
+	if !s.lifecycleFinished && s.lifecycleStore != nil && s.lifecycleLease.Token != 0 {
+		storeCtx, cancel := durableStoreContext(ctx, s.lifecycleTimeout)
+		err := s.lifecycleStore.FinishRunLease(storeCtx, s.lifecycleLease, tssrun.LeaseAborted)
 		cancel()
+		if err != nil {
+			s.abort()
+			s.closePending = true
+			return fmt.Errorf("abort reshare lifecycle lease: %w", err)
+		}
+		s.lifecycleFinished = true
 	}
 	s.abort()
-	s.mu.Unlock()
+	s.closePending = false
+	return nil
+}
+
+// Close clears reshare state after its durable disposition is authoritative.
+func (s *ReshareSession) Close(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("nil session close context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if !s.lifecycleFinished && (s.lifecycleFinal != nil || s.lifecycleRetirement != nil) {
+		return tssrun.ErrLifecycleCommitPending
+	}
+	needsAbort := s.closePending || (!s.completed && !s.aborted)
+	if needsAbort {
+		if err := s.abortDispositionLocked(ctx, "reshare session closed by caller"); err != nil {
+			return err
+		}
+	}
+	s.abort()
+	s.closed = true
+	s.closePending = false
+	return nil
 }
 
 func (s *ReshareSession) abort() {

@@ -43,6 +43,11 @@ Before releasing the first envelope:
 5. Build the production guard, start the local role, and call
    `RegisterStartedSession` before sending its initial outbox.
 
+Keygen has no source binding. Its intent predeclares only target key ID and
+generation; after confirmation, `InstallKeyShare` derives and installs the
+non-zero protocol epoch. Other lifecycle-bound runs name an exact
+`SourceBinding`.
+
 Use complete `GenerationBinding` values wherever the flow is lifecycle-bound:
 
 ```text
@@ -68,6 +73,7 @@ raw bytes + authenticated peer + channel protection + certificate
   -> tss.OpenEnvelope
   -> tssrun.Dispatcher.Dispatch
   -> ProtocolSession.Handle
+  -> durable DispatchResult write
   -> authenticated outbox delivery
 ```
 
@@ -79,6 +85,8 @@ raw bytes + authenticated peer + channel protection + certificate
   persist it with the delivery decision when recovery depends on it.
 - Preserve each exact canonical outbox for at-least-once retry. Never rebuild a
   CGGMP21 online-sign outbox from a new intent.
+- `Dispatcher` never sends. Persist its caller-owned ordered result before
+  delivery, and clear it with `Destroy` after durable ownership transfers.
 - Remove terminal registry entries so delayed traffic reaches the
   unknown-session policy.
 
@@ -107,6 +115,7 @@ transitions. The critical atomic effects are:
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `InstallInitialGeneration`                 | Install one exact first generation only if the lineage is absent.                                                   |
 | `AcquireRunLease`                          | Bind one session and run kind to the exact generation; enforce compatible/exclusive work.                           |
+| `QueryRunLease`                            | Recover the exact lease and its authoritative active/completed/aborted state.                                       |
 | `CommitAvailablePresignFromLease`          | Store one available presign and complete its lease together.                                                        |
 | `CommitSignAttempt`                        | Revalidate the generation, claim/remove the available secret presign, and store immutable intent plus exact outbox. |
 | `MarkAttemptDelivered` / `CompleteAttempt` | Advance the same immutable attempt; delivery and completion are independent facts.                                  |
@@ -126,15 +135,21 @@ stores should run `conformance.RunConformance` and backend-specific tests for
 transactions, concurrent claims, crash points, locking, corruption,
 encryption, and unknown outcomes.
 
+The file reference runs Argon2id once per open to unwrap a random DEK. Its
+encrypted root publishes immutable per-lineage snapshots and 16-bit global
+index buckets through one atomic rename. Ordinary reads do not clean the disk;
+open/recovery and explicit `CompactLifecycle` reclaim orphaned or superseded
+ciphertexts. Compaction is an optional interface and preserves fixed non-reuse
+tombstones. The old `manifest.enc` format is rejected without migration.
+
 ## Key Ceremonies
 
 ### Keygen and initial install
 
 Do not expose a generated key until every required protocol confirmation has
-completed and the local share is durably installed. FROST returns a
-caller-owned share for application-managed encrypted persistence. CGGMP21
-keygen returns a confirmed share whose canonical bytes and exact produced
-epoch must be installed with `InstallInitialGeneration`.
+completed and the local share is durably installed. Use the protocol package's
+`InstallKeyShare` helper so full validation, canonical encoding, epoch
+derivation, and the initial generation transaction remain one checked path.
 
 Use default production-policy limits and CGGMP21 security parameters. Reduced
 profiles are test controls and must not enter a production run or store.
@@ -187,6 +202,13 @@ record is durable.
 
 A timeout, cancellation, crash, or I/O error from a durable mutation may leave
 its outcome unknown. Do not infer rollback from an error return.
+
+Live sessions report `CommitPending` when an exact success candidate/outbox is
+withheld for `RetryLifecycleCommit` or `ResumeSign`. A failed durable abort is
+`ClosePending`; the session retains its public lease/fence/query descriptor and
+the caller must retry the same `Abort` or `Close`. Cooperative cancellation is
+checked between cryptographic operations; once a durable mutation begins, its
+authoritative outcome must be queried or retried exactly.
 
 | Durable state or uncertainty                 | Recovery action                                                                                         |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------- |

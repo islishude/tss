@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"strings"
@@ -34,7 +35,7 @@ func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties tss.Part
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +81,7 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, env := range out {
-		if _, err := session.Handle(testutil.DeliverEnvelope(env)); err != nil {
+		if _, err := session.Handle(context.Background(), testutil.DeliverEnvelope(env)); err != nil {
 			if !strings.Contains(err.Error(), "already completed") {
 				t.Fatal(err)
 			}
@@ -132,10 +133,10 @@ func TestThresholdECDSARefreshInvalidFigure7RevealCarriesEvidence(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	revealsFrom2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	revealsFrom2, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +150,7 @@ func TestThresholdECDSARefreshInvalidFigure7RevealCarriesEvidence(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.Handle(testutil.DeliverEnvelope(revealEnv))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelope(revealEnv))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
@@ -164,18 +165,18 @@ func TestThresholdECDSARefreshEarlyFigure7RevealRejectsWithoutReplayAndRetries(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session1.Destroy()
+	defer closeTestSession(t, session1)
 	session2, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session2.Destroy()
-	revealsFrom2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	defer closeTestSession(t, session2)
+	revealsFrom2, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	reveal := mustRefreshEnvelope(t, revealsFrom2, payloadAuxInfoReveal)
-	out, err := session1.Handle(testutil.DeliverEnvelope(reveal))
+	out, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(reveal))
 	var protocolErr *tss.ProtocolError
 	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeRound {
 		t.Fatalf("early Figure 7 reveal error = %v, want round error", err)
@@ -184,10 +185,10 @@ func TestThresholdECDSARefreshEarlyFigure7RevealRejectsWithoutReplayAndRetries(t
 		session1.auxInfo.slots[2].reveal != nil || session1.auxInfo.revealSent || session1.completed || session1.aborted {
 		t.Fatal("early Figure 7 reveal mutated session state, aborted, or emitted output")
 	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(reveal)); err != nil {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(reveal)); err != nil {
 		t.Fatalf("Figure 7 reveal retry after commitment: %v", err)
 	}
 }
@@ -203,16 +204,15 @@ func TestThresholdECDSARefreshOutboundFailureLeavesStateAndReplayUncommitted(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session1.Destroy()
+	defer closeTestSession(t, session1)
 	session2, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session2.Destroy()
-
+	defer closeTestSession(t, session2)
 	originalSigner := session1.auxInfo.cfg.EnvelopeSigner
 	session1.auxInfo.cfg.EnvelopeSigner = failingPresignEnvelopeSigner{}
-	if out, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil || len(out) != 0 {
+	if out, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err == nil || len(out) != 0 {
 		t.Fatalf("Figure 7 reveal construction failure = out:%d err:%v", len(out), err)
 	}
 	if session1.auxInfo == nil || session1.auxInfo.slots[2].commitment != nil || session1.auxInfo.revealSent ||
@@ -221,10 +221,10 @@ func TestThresholdECDSARefreshOutboundFailureLeavesStateAndReplayUncommitted(t *
 	}
 
 	session1.auxInfo.cfg.EnvelopeSigner = originalSigner
-	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatalf("retry after Figure 7 outbound construction failure: %v", err)
 	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); !errors.Is(err, tss.ErrDuplicateMessage) {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("accepted refresh duplicate = %v, want ErrDuplicateMessage", err)
 	}
 }
@@ -239,18 +239,17 @@ func TestThresholdECDSARefreshReplayCommitFailureDoesNotLogStagedSuccess(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session1.Destroy()
+	defer closeTestSession(t, session1)
 	session2, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session2.Destroy()
-
-	revealsFrom2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	defer closeTestSession(t, session2)
+	revealsFrom2, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	reveal := mustRefreshEnvelope(t, revealsFrom2, payloadAuxInfoReveal)
@@ -264,9 +263,17 @@ func TestThresholdECDSARefreshReplayCommitFailureDoesNotLogStagedSuccess(t *test
 	}, [32]byte{1}); err != nil {
 		t.Fatal(err)
 	}
-	session1.guard.ReplayCache = cache
+	guard := tss.NewTestEnvelopeGuardWithCache(
+		1,
+		testCGGMP21GuardParties(shares[1].state.Parties, 1),
+		tss.ProtocolCGGMP21Secp256k1,
+		sessionID,
+		testCGGMP21Policies(),
+		cache,
+	)
+	session1.guard = guard
 
-	out, err := session1.Handle(testutil.DeliverEnvelope(reveal))
+	out, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(reveal))
 	if !errors.Is(err, tss.ErrReplayCacheFull) {
 		t.Fatalf("refresh replay commit failure = %v, want ErrReplayCacheFull", err)
 	}

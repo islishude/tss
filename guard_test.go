@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 )
@@ -19,7 +21,7 @@ func testSessionID(t *testing.T) SessionID {
 }
 
 func testPolicySet() PolicySet {
-	ps, err := NewPolicySet(
+	ps, err := NewTestPolicySet(
 		DeliveryPolicy{
 			Protocol:             "test-proto",
 			Round:                1,
@@ -69,6 +71,20 @@ func testPolicySet() PolicySet {
 			BroadcastConsistency: BroadcastConsistencyRequired,
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return ps
+}
+
+func productionTestPolicySet() PolicySet {
+	entries := testPolicySet().Entries()
+	for i := range entries {
+		if entries[i].Mode == DeliveryBroadcast {
+			entries[i].BroadcastConsistency = BroadcastConsistencyRequired
+		}
+	}
+	ps, err := NewPolicySet(entries...)
 	if err != nil {
 		panic(err)
 	}
@@ -127,9 +143,9 @@ func sha256Sum(data []byte) [32]byte {
 
 func guardReplayCacheEntries(t *testing.T, guard *EnvelopeGuard) int {
 	t.Helper()
-	cache, ok := guard.ReplayCache.(*InMemoryReplayCache)
+	cache, ok := guard.ReplayCache().(*InMemoryReplayCache)
 	if !ok {
-		t.Fatalf("unexpected replay cache type %T", guard.ReplayCache)
+		t.Fatalf("unexpected replay cache type %T", guard.ReplayCache())
 	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -675,6 +691,51 @@ func TestValidateBroadcastConsistency(t *testing.T) {
 	}
 }
 
+func TestPolicySetDigestCanonicalAndComplete(t *testing.T) {
+	t.Parallel()
+	base := productionTestPolicySet()
+	entries := base.Entries()
+	slices.Reverse(entries)
+	reordered, err := NewPolicySet(entries...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reordered.Digest() != base.Digest() {
+		t.Fatal("policy digest depends on registration order")
+	}
+
+	mutated := base.Entries()
+	mutated[0].Confidentiality = ConfidentialityOptional
+	changed, err := NewPolicySet(mutated...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.Digest() == base.Digest() {
+		t.Fatal("policy behavior change did not change digest")
+	}
+}
+
+func TestNewPolicySetRejectsRelaxedProductionBroadcast(t *testing.T) {
+	t.Parallel()
+	_, err := NewPolicySet(DeliveryPolicy{
+		Protocol: "p", Round: 1, PayloadType: "broadcast", Mode: DeliveryBroadcast,
+		Confidentiality: ConfidentialityOptional, BroadcastConsistency: BroadcastConsistencyNone,
+	})
+	if err == nil {
+		t.Fatal("production policy accepted a broadcast without consistency")
+	}
+}
+
+func TestEnvelopeGuardHasNoExportedMutableFields(t *testing.T) {
+	t.Parallel()
+	typ := reflect.TypeFor[EnvelopeGuard]()
+	for field := range typ.Fields() {
+		if field.IsExported() {
+			t.Fatalf("EnvelopeGuard field %s is exported", field.Name)
+		}
+	}
+}
+
 func TestTestGuardConfig(t *testing.T) {
 	t.Parallel()
 	sid := testSessionID(t)
@@ -697,13 +758,46 @@ func TestBuildGuardRejectsNilAckVerifier(t *testing.T) {
 		Parties:   PartySet{1, 2, 3},
 		Protocol:  "test-proto",
 		SessionID: testSessionID(t),
-		Policies:  testPolicySet(),
+		Policies:  productionTestPolicySet(),
 		Cache:     NewInMemoryReplayCache(),
 		// AckVerifier intentionally nil
 	}
 	_, err := cfg.BuildGuard()
 	if !errors.Is(err, ErrMissingAckVerifier) {
 		t.Fatalf("expected ErrMissingAckVerifier, got %v", err)
+	}
+}
+
+func TestBuildGuardRejectsTestOnlyPolicy(t *testing.T) {
+	t.Parallel()
+	cfg := GuardConfig{
+		Self: 1, Parties: PartySet{1, 2, 3}, Protocol: "test-proto", SessionID: testSessionID(t),
+		Policies: testPolicySet(), Cache: NewInMemoryReplayCache(), AckVerifier: &noopAckVerifier{},
+	}
+	if _, err := cfg.BuildGuard(); err == nil {
+		t.Fatal("production guard accepted a test-only policy")
+	}
+}
+
+func TestRequireEnvelopeGuardRejectsNonCanonicalProductionPolicy(t *testing.T) {
+	t.Parallel()
+	expected := productionTestPolicySet()
+	entries := expected.Entries()
+	entries[0].Confidentiality = ConfidentialityOptional
+	actual, err := NewPolicySet(entries...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := testSessionID(t)
+	guard, err := (GuardConfig{
+		Self: 1, Parties: PartySet{1, 2, 3}, Protocol: "test-proto", SessionID: sid,
+		Policies: actual, Cache: NewInMemoryReplayCache(), AckVerifier: &noopAckVerifier{},
+	}).BuildGuard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireEnvelopeGuard(guard, "test-proto", sid, 1, expected); err == nil {
+		t.Fatal("protocol start accepted a non-canonical production policy")
 	}
 }
 
@@ -714,7 +808,7 @@ func TestBuildGuardSucceedsWithValidConfig(t *testing.T) {
 		Parties:     PartySet{1, 2, 3},
 		Protocol:    "test-proto",
 		SessionID:   testSessionID(t),
-		Policies:    testPolicySet(),
+		Policies:    productionTestPolicySet(),
 		Cache:       NewInMemoryReplayCache(),
 		AckVerifier: NewInMemoryAckVerifier(nil),
 	}
@@ -725,7 +819,7 @@ func TestBuildGuardSucceedsWithValidConfig(t *testing.T) {
 	if g == nil {
 		t.Fatal("BuildGuard returned nil guard")
 	}
-	if g.AckVerifier == nil {
+	if g.AckVerifier() == nil {
 		t.Fatal("BuildGuard did not wire AckVerifier")
 	}
 }
@@ -734,47 +828,47 @@ func TestRequireEnvelopeGuard(t *testing.T) {
 	t.Parallel()
 	sid := testSessionID(t)
 	guard := NewTestEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, testPolicySet())
-	if err := RequireEnvelopeGuard(guard, "test-proto", sid, 1); err != nil {
+	if err := RequireEnvelopeGuard(guard, "test-proto", sid, 1, testPolicySet()); err != nil {
 		t.Fatalf("RequireEnvelopeGuard rejected valid guard: %v", err)
 	}
 
 	t.Run("nil", func(t *testing.T) {
-		err := RequireEnvelopeGuard(nil, "test-proto", sid, 1)
+		err := RequireEnvelopeGuard(nil, "test-proto", sid, 1, testPolicySet())
 		if !errors.Is(err, ErrMissingEnvelopeGuard) {
 			t.Fatalf("expected ErrMissingEnvelopeGuard, got %v", err)
 		}
 	})
 
 	t.Run("wrong protocol", func(t *testing.T) {
-		if err := RequireEnvelopeGuard(guard, "wrong-proto", sid, 1); err == nil {
+		if err := RequireEnvelopeGuard(guard, "wrong-proto", sid, 1, testPolicySet()); err == nil {
 			t.Fatal("expected protocol mismatch")
 		}
 	})
 
 	t.Run("wrong session", func(t *testing.T) {
-		if err := RequireEnvelopeGuard(guard, "test-proto", testSessionID(t), 1); err == nil {
+		if err := RequireEnvelopeGuard(guard, "test-proto", testSessionID(t), 1, testPolicySet()); err == nil {
 			t.Fatal("expected session mismatch")
 		}
 	})
 
 	t.Run("wrong self", func(t *testing.T) {
-		if err := RequireEnvelopeGuard(guard, "test-proto", sid, 2); err == nil {
+		if err := RequireEnvelopeGuard(guard, "test-proto", sid, 2, testPolicySet()); err == nil {
 			t.Fatal("expected self mismatch")
 		}
 	})
 
 	t.Run("empty policies", func(t *testing.T) {
 		bad := *guard
-		bad.Policies = PolicySet{}
-		if err := RequireEnvelopeGuard(&bad, "test-proto", sid, 1); err == nil {
+		bad.policies = PolicySet{}
+		if err := RequireEnvelopeGuard(&bad, "test-proto", sid, 1, testPolicySet()); err == nil {
 			t.Fatal("expected empty policy set rejection")
 		}
 	})
 
 	t.Run("nil replay cache", func(t *testing.T) {
 		bad := *guard
-		bad.ReplayCache = nil
-		err := RequireEnvelopeGuard(&bad, "test-proto", sid, 1)
+		bad.replayCache = nil
+		err := RequireEnvelopeGuard(&bad, "test-proto", sid, 1, testPolicySet())
 		if !errors.Is(err, ErrMissingReplayCache) {
 			t.Fatalf("expected ErrMissingReplayCache, got %v", err)
 		}

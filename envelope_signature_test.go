@@ -84,7 +84,7 @@ func TestEnvelopeGuardRequiresPortableSignatureBeforeReplayMutation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard.EnvelopeVerifier = ed25519EnvelopeVerifier{keys: map[PartyID]ed25519.PublicKey{2: public}}
+	guard.envelopeVerifier = ed25519EnvelopeVerifier{keys: map[PartyID]ed25519.PublicKey{2: public}}
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol: "test-proto", SessionID: session, Round: 1, From: 2, To: 1,
 		PayloadType: "test.direct.signed", Payload: []byte("payload"),

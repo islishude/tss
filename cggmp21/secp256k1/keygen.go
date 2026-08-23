@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -30,6 +31,7 @@ type KeygenSession struct {
 	importPlan         *TrustedDealerImportPlan
 	completed          bool
 	aborted            bool
+	closed             bool
 	state              keygenState
 	pending            *KeyShare
 	keyShare           *KeyShare
@@ -46,13 +48,16 @@ func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 }
 
 // Handle validates and applies one Figure 6, Figure 7, or confirmation envelope.
-func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *KeygenSession) Handle(ctx context.Context, env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
 	base := env.Envelope()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
 	if s.completed {
 		return nil, completedSessionError(base.Round, base.From)
 	}
@@ -68,7 +73,10 @@ func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err
 	if err := tss.ValidateInboundWithoutReplay(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self); err != nil {
 		return nil, err
 	}
-	return s.handlePaperKeygenLocked(env)
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
+	return s.handlePaperKeygenLocked(ctx, env)
 }
 
 // KeyShare returns a defensive copy of the confirmed local key share.

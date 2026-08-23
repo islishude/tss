@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -122,7 +123,7 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 			if env.To != 0 && env.To != id {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -243,7 +244,7 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := presignSessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := presignSessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -431,7 +432,7 @@ func deliverCGGMP21ReshareMessages(t testing.TB, queue []tss.Envelope, sessions 
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := session.Handle(testutil.DeliverEnvelope(env))
+			out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}

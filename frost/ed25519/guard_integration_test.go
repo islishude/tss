@@ -4,6 +4,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -48,7 +49,7 @@ func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("DKG delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
 			}
@@ -98,7 +99,7 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = session.Handle(testutil.DeliverEnvelope(commitEnv))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrMissingBroadcastCertificate) {
 		t.Fatalf("expected ErrMissingBroadcastCertificate, got %v", err)
 	}
@@ -139,7 +140,7 @@ func TestFROSTReshareDealerOnlyAcceptsTargetScopedConfirmationCertificate(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	planHash, err := plan.Digest()
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +194,7 @@ func TestFROSTReshareDealerOnlyAcceptsTargetScopedConfirmationCertificate(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Handle(inbound); err != nil {
+	if _, err := session.Handle(context.Background(), inbound); err != nil {
 		t.Fatalf("dealer-only session rejected target-scoped confirmation broadcast: %v", err)
 	}
 	if session.pendingConfirmations[2] == nil {
@@ -234,7 +235,7 @@ func TestFROSTKeygenRejectsPlaintextShare(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = session.Handle(testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
 	if !errors.Is(err, tss.ErrMissingConfidentiality) {
 		t.Fatalf("expected ErrMissingConfidentiality or rejection, got %v", err)
 	}
@@ -314,10 +315,10 @@ func TestFROSTKeygenRejectsReplay(t *testing.T) {
 	}
 
 	// First pass — may fail with non-replay error.
-	_, _ = session.Handle(testutil.DeliverEnvelope(confirmEnv))
+	_, _ = session.Handle(context.Background(), testutil.DeliverEnvelope(confirmEnv))
 
 	// Second pass — must fail with ErrDuplicateMessage.
-	_, err = session.Handle(testutil.DeliverEnvelope(confirmEnv))
+	_, err = session.Handle(context.Background(), testutil.DeliverEnvelope(confirmEnv))
 	if !errors.Is(err, tss.ErrDuplicateMessage) {
 		if err == nil {
 			t.Error("expected ErrDuplicateMessage or other error on second delivery, got nil")
@@ -370,7 +371,7 @@ func TestFROSTReshareRejectsPlaintextShare(t *testing.T) {
 	}
 	// Confidential is deliberately left false.
 
-	_, err = reshareSession.Handle(testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
+	_, err = reshareSession.Handle(context.Background(), testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
 	if !errors.Is(err, tss.ErrMissingConfidentiality) {
 		t.Fatalf("expected ErrMissingConfidentiality or rejection, got %v", err)
 	}

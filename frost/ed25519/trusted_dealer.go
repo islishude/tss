@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -226,7 +227,7 @@ func StartTrustedDealerImport(plan *TrustedDealerImportPlan, contribution *Trust
 	if err := cfg.ValidateWithLimits(plan.limits.ThresholdLimits()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, cfg.SessionID, cfg.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, cfg.SessionID, cfg.Self, FROSTPolicies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	planHash, err := plan.Digest()
@@ -288,7 +289,7 @@ func GenerateTrustedDealerKeyShares(secretKey *SecretKey, option TrustedDealerIm
 	sessions := make(map[tss.PartyID]*KeygenSession, len(plan.state.Parties))
 	defer func() {
 		for _, session := range sessions {
-			session.Destroy()
+			_ = session.Close(context.Background())
 		}
 	}()
 	queue := make([]tss.Envelope, 0, len(plan.state.Parties))
@@ -309,7 +310,7 @@ func GenerateTrustedDealerKeyShares(secretKey *SecretKey, option TrustedDealerIm
 		queue = append(queue, out...)
 	}
 	if err := security.Route(queue, plan.state.Parties, FROSTPolicies(), func(party tss.PartyID, inbound tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[party].Handle(inbound)
+		return sessions[party].Handle(context.Background(), inbound)
 	}); err != nil {
 		return nil, nil, err
 	}
@@ -480,14 +481,14 @@ func (p *TrustedDealerImportPlan) thresholdConfig(local tss.LocalConfig) (tss.Th
 		return tss.ThresholdConfig{}, errors.New("local party is not in trusted-dealer import plan")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.state.Threshold,
-		Parties:      p.state.Parties.Clone(),
-		Self:         local.Self,
-		SessionID:    p.state.SessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      p.state.Threshold,
+		Parties:        p.state.Parties.Clone(),
+		Self:           local.Self,
+		SessionID:      p.state.SessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 

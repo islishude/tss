@@ -24,7 +24,7 @@ type RunIntent struct {
     Signers   tss.PartySet
     Threshold int
 
-    Binding     GenerationBinding
+    SourceBinding GenerationBinding
     ParentKeyID string
     PresignID   string
 
@@ -36,12 +36,13 @@ type RunIntent struct {
 }
 ```
 
-The current validator requires `Binding` for every run kind. For `RunKeygen`,
-it is the declared exact output binding. For presign, sign, refresh, reshare,
-and child derivation, it is the exact source/parent binding. Refresh and
-reshare declare another generation of the same key ID; child derivation
-declares a distinct key ID and target generation. The target epoch is absent
-because the protocol derives it during the run.
+`RunKeygen` forbids `SourceBinding` and predeclares only
+`TargetKeyID + TargetKeyGeneration`; its non-zero `EpochID` is derived from the
+confirmed protocol output. Presign, sign, refresh, reshare, and child
+derivation require the exact `SourceBinding`. Refresh and reshare declare
+another generation of the same key ID; child derivation declares a distinct
+key ID and target generation. No target epoch is accepted from the control
+plane.
 
 `Parties` and `Signers` must already be sorted, unique, and non-zero.
 Presign is CGGMP21-only. Presign, sign, and child derivation require a 32-byte
@@ -59,8 +60,12 @@ if err := tssrun.AcceptPlanDigest(ctx, runStore, run, self, digest); err != nil 
 }
 ```
 
-`RunStore` provides `CreateRun`, local plan acceptance, lookup by
-protocol/session, started state, local completion, and local abort. Its key
+`RunStore` provides `CreateRun`, local plan acceptance, lookup by run ID or
+protocol/session, started state, local completion, and local abort.
+`MarkStarted` atomically compares the canonical acceptance digest and complete
+`SessionDescriptor`; `RegisterStartedSession` accepts only `runID + session`,
+loads the canonical intent itself, and rejects any protocol/session/party/plan
+substitution. Its key
 invariants are:
 
 - `RunID` and `(Protocol, SessionID)` are unique and remain non-reusable;
@@ -81,11 +86,22 @@ Every interactive protocol session implements:
 
 ```go
 type ProtocolSession interface {
-    Handle(tss.InboundEnvelope) ([]tss.Envelope, error)
-    Completed() bool
-    Destroy()
+    Descriptor() SessionDescriptor
+    Handle(context.Context, tss.InboundEnvelope) ([]tss.Envelope, error)
+    Status() SessionState
+    Abort(context.Context, string) error
+    Close(context.Context) error
 }
 ```
+
+`SessionDescriptor` binds protocol, run kind, session ID, local party, and plan
+digest. `SessionState` is one of `Starting`, `Active`, `CommitPending`,
+`Succeeded`, `Aborted`, `ClosePending`, or `Closed`. `CommitPending` forbids
+ordinary handling and close; use the flow's exact retry/resume method.
+`ClosePending` means durable abort or retirement failed and `Abort`/`Close`
+must be retried with the retained public recovery descriptor. Session methods
+serialize on one lock, and `Handle` is cooperatively cancelable at protocol
+boundaries.
 
 `SessionRegistry` indexes active local sessions by
 `Protocol + SessionID + Party`. `RegisterStartedSession` first places a gated
@@ -95,16 +111,23 @@ failure returns the storage error and retires the registry entry. Callers may
 release initial outbound envelopes only after registration succeeds.
 
 `Dispatcher.Dispatch` accepts an already opened `InboundEnvelope`, looks up
-the local session, calls `Handle`, and forwards any returned envelopes through
-the configured `tssrun.Transport`:
+the local session, calls `Handle`, and returns a caller-owned `DispatchResult`.
+It does not contain or call a transport:
 
 ```text
 raw bytes + transport facts
   -> tss.OpenEnvelope or tssrun.DispatchInbound
   -> Dispatcher.Dispatch
   -> ProtocolSession.Handle
-  -> Transport.SendAll
+  -> durable DispatchResult outbox write
+  -> application transport delivery
+  -> DispatchResult.Destroy after ownership transfer
 ```
+
+`DispatchResult.Clone` is a deep copy. `Destroy` clears its descriptor and
+envelope payload/signature bytes. Persist the exact ordered outbox before
+delivery, retry from that durable copy, and never infer delivery from a
+successful `Dispatch` return.
 
 `DispatchInbound` combines the first two steps through a caller-provided
 `Receiver` (or the default `EnvelopeReceiver`). It does not create trusted
@@ -117,9 +140,11 @@ session registration, then look up and re-dispatch the envelope so the
 protocol guard revalidates it. Memory registries and buffers are reference
 implementations.
 
-`Dispatcher` does not automatically retire completed sessions or destroy
-them. The application must remove terminal entries and release session-owned
-state.
+`Dispatcher` maps terminal and pending session states to distinct completion,
+abort, lifecycle-commit-pending, close-pending, and closed errors. It does not
+automatically retire or close sessions. The application retires the registry
+entry after authoritative disposition and calls `Close`, retrying any returned
+durability error.
 
 ## Generation Binding
 
@@ -130,6 +155,12 @@ GenerationBinding = KeyID + KeyGeneration + EpochID
 `KeyGeneration` is a store/application compare-and-swap token. `EpochID` is a
 non-zero 32-byte cryptographic authorization epoch. Matching only a key ID,
 public key, or generation string is insufficient.
+
+After confirmed keygen, use `ed25519.InstallKeyShare` or
+`secp256k1.InstallKeyShare` (or their explicit-limits variants). Each helper
+fully validates and canonically encodes the share, derives the protocol's
+canonical non-zero epoch, and installs exactly the predeclared target key ID
+and generation.
 
 `GenerationRecord.Blob` and `PresignCandidate.Blob` may contain secrets.
 Production stores must encrypt them and authenticate their public metadata.
@@ -144,7 +175,7 @@ presigns, attempts, and cutover. The interface groups operations as follows:
 | Boundary                   | Operations and required effect                                                                                                                                                  |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Initial generation         | `InstallInitialGeneration` installs one exact first generation if no lineage exists; `LoadCurrentGeneration` is authoritative.                                                  |
-| Leases                     | `AcquireRunLease` binds work to one exact current generation and session; `FinishRunLease` records its terminal outcome.                                                        |
+| Leases                     | `AcquireRunLease` binds work to one exact current generation and session; `QueryRunLease` recovers that exact lease; `FinishRunLease` records its terminal outcome.             |
 | New-only reshare receiver  | `AcquireReshareReceiverLease` anchors the authenticated public source without creating a local current source generation.                                                       |
 | Refresh failure            | `MarkProtocolRefreshFailed` completes the exact lease and durably disables later refresh for the key ID; other work remains policy-dependent.                                   |
 | Available presign          | `CommitAvailablePresignFromLease` stores the candidate and completes its lease atomically; `PreparePresignCandidate` returns a read-only snapshot; `BurnPresign` tombstones it. |
@@ -175,13 +206,23 @@ is terminal only when both are recorded.
 `MemoryLifecycleStore` is a mutex-protected semantic reference, not durable
 state.
 
-`FileLifecycleStore` is an encrypted reference implementation with one
-manifest across all key lineages. It takes sorted per-lineage OS advisory locks
-followed by a manifest lock, writes and fsyncs immutable encrypted blobs before
-the manifest swap, and reconciles unreferenced crash artifacts on reopen.
-`Close` clears its in-memory passphrase copy but does not delete durable state.
-It is not a substitute for a transactional production database and KMS/HSM
-policy.
+`FileLifecycleStore` is an encrypted reference implementation. `store.meta`
+uses one Argon2id derivation per open to unwrap a random DEK, then clears its
+local passphrase and KEK. An encrypted root stores only a monotonic transaction
+ID plus references to immutable per-lineage snapshots and 16-bit partitioned
+session/presign/attempt/tombstone index buckets. Every affected snapshot and
+bucket is written and fsynced before one atomic root rename publishes a
+multi-lineage transaction. Ordinary reads load only affected state and never
+clean the disk. Orphans are removed during open/recovery and explicit
+compaction. `Close` clears the DEK.
+
+`LifecycleCompactor` is optional and is not part of `LifecycleStore`.
+`CompactLifecycle` requires
+`KeyID + ExpectedCurrent + RetainRecentTerminal`, replaces old terminal records
+with fixed tombstones, preserves session/generation/presign/attempt non-reuse,
+and returns count-only results. The old `manifest.enc` shape is rejected with
+no migration or fallback decoder. This remains unsuitable as a production
+database or KMS/HSM policy.
 
 External implementations should run:
 

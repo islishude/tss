@@ -164,7 +164,6 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 		SessionID:      p.sessionID,
 		Rand:           local.Rand,
 		Context:        local.Context,
-		RoundTimeout:   local.RoundTimeout,
 		Log:            local.Log,
 		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
@@ -383,7 +382,6 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 		SessionID:      p.state.sessionID,
 		Rand:           local.Rand,
 		Context:        local.Context,
-		RoundTimeout:   local.RoundTimeout,
 		Log:            local.Log,
 		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil

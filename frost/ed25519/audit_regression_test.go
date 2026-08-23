@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -93,17 +94,16 @@ func TestFROSTRefreshPlanRejectsMixedSourceGenerations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer newGenerationSession.Destroy()
+	defer closeTestSession(t, newGenerationSession)
 	oldGenerationSession, oldOut, err := startFROSTRefresh(original[2], tss.ThresholdConfig{
 		Threshold: 2, Parties: parties, Self: 2, SessionID: mixedRefreshID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer oldGenerationSession.Destroy()
-
+	defer closeTestSession(t, oldGenerationSession)
 	oldCommitment := mustFROSTEnvelope(t, oldOut, payloadReshareCommitments, tss.BroadcastPartyId)
-	if _, err := newGenerationSession.Handle(testutil.DeliverEnvelope(oldCommitment)); err == nil || !errors.Is(err, tss.ErrPlanHashMismatch) {
+	if _, err := newGenerationSession.Handle(context.Background(), testutil.DeliverEnvelope(oldCommitment)); err == nil || !errors.Is(err, tss.ErrPlanHashMismatch) {
 		t.Fatalf("expected mixed source generation plan mismatch, got %v", err)
 	}
 	if _, ok := newGenerationSession.commits[2]; ok {
@@ -128,7 +128,7 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer keygen1.Destroy()
+	defer closeTestSession(t, keygen1)
 	keygen2, keygenOut2, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   tss.NewPartySet(1, 2),
@@ -138,10 +138,11 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer keygen2.Destroy()
-	keygenRound2, err := keygen1.Handle(testutil.DeliverEnvelope(
+	defer closeTestSession(t, keygen2)
+	keygenRound2, err := keygen1.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, keygenOut2, payloadKeygenCommitments, tss.BroadcastPartyId),
 	))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	partialOut, err := sign1.Handle(testutil.DeliverEnvelope(signOut2[0]))
+	partialOut, err := sign1.Handle(context.Background(), testutil.DeliverEnvelope(signOut2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}

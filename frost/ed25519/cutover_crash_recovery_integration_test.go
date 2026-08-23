@@ -295,7 +295,7 @@ type crashRecoveryRefreshSession struct {
 	candidate *KeyShare
 }
 
-func (*crashRecoveryRefreshSession) Handle(tss.InboundEnvelope) ([]tss.Envelope, error) {
+func (*crashRecoveryRefreshSession) Handle(context.Context, tss.InboundEnvelope) ([]tss.Envelope, error) {
 	return nil, errors.New("completed crash-recovery refresh session received an envelope")
 }
 
@@ -306,12 +306,13 @@ func (s *crashRecoveryRefreshSession) KeyShare() (*KeyShare, bool) {
 	return s.candidate.Clone(), true
 }
 
-func (s *crashRecoveryRefreshSession) Destroy() {
+func (s *crashRecoveryRefreshSession) Close(context.Context) error {
 	if s == nil || s.candidate == nil {
-		return
+		return nil
 	}
 	s.candidate.Destroy()
 	s.candidate = nil
+	return nil
 }
 
 type crashRecoveryRefreshTransport struct{}
@@ -348,7 +349,7 @@ func runCrashRecoveryRefresh(
 		sessions[party] = session
 		messages = append(messages, out...)
 	}
-	defer destroyCrashRecoverySessions(sessions)
+	defer destroyCrashRecoverySessions(t, sessions)
 	deliverReshareMessages(t, parties, messages, sessions)
 	return collectReshareShares(t, parties, sessions), sessionID
 }
@@ -393,7 +394,7 @@ func runCrashRecoveryReshare(
 		}
 		sessions[party] = receiver
 	}
-	defer destroyCrashRecoverySessions(sessions)
+	defer destroyCrashRecoverySessions(t, sessions)
 	deliverReshareMessages(t, allParties, messages, sessions)
 	return collectReshareShares(t, newParties, sessions), sessionID
 }
@@ -438,10 +439,11 @@ func assertCrashRecoverySignature(t *testing.T, wantPublicKey, message []byte, s
 	}
 }
 
-func destroyCrashRecoverySessions(sessions map[tss.PartyID]*ReshareSession) {
+func destroyCrashRecoverySessions(t testing.TB, sessions map[tss.PartyID]*ReshareSession) {
+	t.Helper()
 	for party, session := range sessions {
 		if session != nil {
-			session.Destroy()
+			closeTestSession(t, session)
 		}
 		delete(sessions, party)
 	}

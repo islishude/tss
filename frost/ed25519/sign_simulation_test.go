@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"context"
 	"errors"
 
 	"github.com/islishude/tss"
@@ -11,7 +12,7 @@ func signFROSTSimulation(message []byte, signers []*KeyShare, ctx tss.SigningCon
 	return signFROSTSimulationWithOptions(message, signers, testSignOptions{Context: ctx})
 }
 
-func signFROSTSimulationWithOptions(message []byte, signers []*KeyShare, opts testSignOptions) ([]byte, []byte, error) {
+func signFROSTSimulationWithOptions(message []byte, signers []*KeyShare, opts testSignOptions) (_ []byte, _ []byte, resultErr error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
@@ -36,7 +37,7 @@ func signFROSTSimulationWithOptions(message []byte, signers []*KeyShare, opts te
 	sessions := make(map[tss.PartyID]*SignSession, len(signers))
 	defer func() {
 		for _, session := range sessions {
-			session.Destroy()
+			resultErr = errors.Join(resultErr, session.Close(context.Background()))
 		}
 	}()
 	round1 := make([]tss.Envelope, 0, len(signers))
@@ -60,7 +61,7 @@ func signFROSTSimulationWithOptions(message []byte, signers []*KeyShare, opts te
 			if id == env.From {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				return nil, nil, err
 			}
@@ -72,7 +73,7 @@ func signFROSTSimulationWithOptions(message []byte, signers []*KeyShare, opts te
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].Handle(testutil.DeliverEnvelope(env)); err != nil {
+			if _, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env)); err != nil {
 				return nil, nil, err
 			}
 		}

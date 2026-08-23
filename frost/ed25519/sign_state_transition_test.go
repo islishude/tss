@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -73,7 +74,7 @@ func TestFROSTSignGroupCommitmentIdentityAbortsWithoutBlameAndClearsState(t *tes
 	if _, ok := sign1.Signature(); ok {
 		t.Fatal("identity group commitment exposed a signature")
 	}
-	if _, err := sign1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := sign1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("aborted signing session accepted another commitment")
 	} else {
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
@@ -110,7 +111,7 @@ func TestFROSTSignCommitmentPlanHashRejectDoesNotMutate(t *testing.T) {
 	}
 
 	before := snapshotFROSTSignSession(sign1)
-	out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
+	out, err := sign1.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 	after := snapshotFROSTSignSession(sign1)
 
 	if err == nil {
@@ -197,7 +198,7 @@ func TestFROSTSignInvalidNonceCommitmentAbortsAndBlamesSender(t *testing.T) {
 			dNonce := sign1.dNonce
 			eNonce := sign1.eNonce
 
-			out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
+			out, err := sign1.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 			protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 			if len(out) != 0 {
 				t.Fatalf("invalid commitment produced %d outbound envelopes", len(out))
@@ -222,7 +223,7 @@ func TestFROSTSignInvalidNonceCommitmentAbortsAndBlamesSender(t *testing.T) {
 			if sign1.derivation != nil || sign1.message != nil {
 				t.Fatal("invalid commitment retained signing intent state")
 			}
-			_, err = sign1.Handle(testutil.DeliverEnvelope(out2[0]))
+			_, err = sign1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0]))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 		})
 	}
@@ -308,7 +309,7 @@ func TestFROSTSignMalformedPartialAbortsAndClearsSecrets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			round2, err := sign2.Handle(testutil.DeliverEnvelope(out1[0]))
+			round2, err := sign2.Handle(context.Background(), testutil.DeliverEnvelope(out1[0]))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -340,7 +341,7 @@ func TestFROSTSignMalformedPartialAbortsAndClearsSecrets(t *testing.T) {
 				t.Fatal("unexpected precondition before early round-2 delivery")
 			}
 
-			out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
+			out, err := sign1.Handle(context.Background(), testutil.DeliverEnvelope(bad))
 			protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 			if len(out) != 0 {
 				t.Fatalf("invalid partial produced %d outbound envelopes", len(out))
@@ -374,7 +375,7 @@ func TestFROSTSignMalformedPartialAbortsAndClearsSecrets(t *testing.T) {
 			if _, ok := sign1.Signature(); ok {
 				t.Fatal("aborted session exposed a signature")
 			}
-			_, err = sign1.Handle(testutil.DeliverEnvelope(out2[0]))
+			_, err = sign1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0]))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 		})
 	}
@@ -507,7 +508,7 @@ func TestFROSTSignAggregateInvariantFailureDoesNotBlameSigners(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -525,7 +526,7 @@ func TestFROSTSignAggregateInvariantFailureDoesNotBlameSigners(t *testing.T) {
 		t.Fatal("missing partial from party 2")
 	}
 
-	out, err := sessions[1].Handle(testutil.DeliverEnvelope(partialFrom2))
+	out, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(partialFrom2))
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeInvariant)
 	if len(out) != 0 {
 		t.Fatalf("aggregate invariant failure produced %d outbound envelopes", len(out))

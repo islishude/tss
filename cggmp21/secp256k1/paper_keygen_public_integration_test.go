@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -29,7 +30,7 @@ func routePaperKeygen(t *testing.T, sessions map[tss.PartyID]*KeygenSession, par
 			if receiver == env.From || env.To != tss.BroadcastPartyId && env.To != receiver {
 				continue
 			}
-			out, err := sessions[receiver].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[receiver].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s round %d from %d to %d: %v", env.PayloadType, env.Round, env.From, receiver, err)
 			}
@@ -205,14 +206,14 @@ func TestFigure6RevealEquivocationDoesNotCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	s2, _, err := StartKeygen(plan, tss.LocalConfig{Self: 2, Rand: testutil.DeterministicReader(9302)}, paperKeygenTestGuard(2, parties, sid))
 	if err != nil {
 		t.Fatal(err)
 	}
-	reveal2, err := s2.Handle(testutil.DeliverEnvelope(out1[0]))
+	reveal2, err := s2.Handle(context.Background(), testutil.DeliverEnvelope(out1[0]))
 	if err != nil || len(reveal2) != 1 || reveal2[0].PayloadType != payloadFigure6Reveal {
 		t.Fatalf("produce party 2 reveal: out=%v err=%v", reveal2, err)
 	}
@@ -226,7 +227,7 @@ func TestFigure6RevealEquivocationDoesNotCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	reveal2[0].Payload = mutated
-	out, err := s1.Handle(testutil.DeliverEnvelope(reveal2[0]))
+	out, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(reveal2[0]))
 	if err == nil || len(out) != 0 {
 		t.Fatalf("equivocated Figure 6 reveal accepted: out=%v err=%v", out, err)
 	}

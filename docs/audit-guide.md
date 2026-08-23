@@ -68,8 +68,8 @@ to the FROST package and is outside this CGGMP21 audit scope.
   authenticated decryption-error accusation. Figure 9 publishes public MtA
   transcript views and proofs, never witnesses or factors. Figure 10 attributes
   a bad authenticated partial directly and has no later proof phase.
-- **One-use durability.** Keygen/import output must be installed with
-  `LifecycleStore.InstallInitialGeneration` before store-backed work. Verify
+- **One-use durability.** Keygen/import output must be installed with the
+  protocol's validating `InstallKeyShare` helper before store-backed work. Verify
   atomic available-presign commit, sign-attempt claim/outbox commit, unknown
   outcome recovery, refresh/reshare fencing, source-presign burning, and child
   lineage installation.

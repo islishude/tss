@@ -137,14 +137,14 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 		return tss.ThresholdConfig{}, errors.New("local party is not in keygen plan")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.threshold,
-		Parties:      slices.Clone(p.parties),
-		Self:         local.Self,
-		SessionID:    p.sessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      p.threshold,
+		Parties:        slices.Clone(p.parties),
+		Self:           local.Self,
+		SessionID:      p.sessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 
@@ -290,14 +290,14 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 		return tss.ThresholdConfig{}, errors.New("local party is not in refresh plan")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.state.threshold,
-		Parties:      slices.Clone(p.state.parties),
-		Self:         local.Self,
-		SessionID:    p.state.sessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      p.state.threshold,
+		Parties:        slices.Clone(p.state.parties),
+		Self:           local.Self,
+		SessionID:      p.state.sessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 
@@ -531,14 +531,14 @@ func (p *ResharePlan) dealerConfig(local tss.LocalConfig) (tss.ThresholdConfig, 
 		return tss.ThresholdConfig{}, errors.New("local party is not in old dealer set")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    len(p.state.oldParties),
-		Parties:      slices.Clone(p.state.oldParties),
-		Self:         local.Self,
-		SessionID:    p.state.sessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      len(p.state.oldParties),
+		Parties:        slices.Clone(p.state.oldParties),
+		Self:           local.Self,
+		SessionID:      p.state.sessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 
@@ -550,14 +550,14 @@ func (p *ResharePlan) receiverConfig(local tss.LocalConfig) (tss.ThresholdConfig
 		return tss.ThresholdConfig{}, errors.New("local party is not in new receiver set")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.state.newThreshold,
-		Parties:      slices.Clone(p.state.newParties),
-		Self:         local.Self,
-		SessionID:    p.state.sessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      p.state.newThreshold,
+		Parties:        slices.Clone(p.state.newParties),
+		Self:           local.Self,
+		SessionID:      p.state.sessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 

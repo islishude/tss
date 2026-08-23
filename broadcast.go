@@ -177,6 +177,18 @@ type BroadcastConsistency struct {
 // The verifier is used to check each ack signature as it arrives. It must not
 // be nil — a nil verifier causes a panic in AddAck.
 func NewBroadcastConsistency(protocol ProtocolID, sessionID SessionID, round uint8, from PartyID, payloadType PayloadType, recipients PartySet, verifier BroadcastAckVerifier) (*BroadcastConsistency, error) {
+	if protocol == "" || !sessionID.Valid() || from == BroadcastPartyId || payloadType == "" {
+		return nil, errors.New("invalid broadcast consistency identity")
+	}
+	canonicalRecipients := SortParties(recipients)
+	if len(canonicalRecipients) == 0 {
+		return nil, errors.New("empty broadcast consistency recipients")
+	}
+	for i, party := range canonicalRecipients {
+		if party == BroadcastPartyId || (i > 0 && party == canonicalRecipients[i-1]) {
+			return nil, errors.New("broadcast consistency recipients must be unique and non-zero")
+		}
+	}
 	if verifier == nil {
 		return nil, errors.New("nil BroadcastAckVerifier")
 	}
@@ -186,8 +198,8 @@ func NewBroadcastConsistency(protocol ProtocolID, sessionID SessionID, round uin
 		round:       round,
 		from:        from,
 		payloadType: payloadType,
-		recipients:  recipients.Clone(),
-		acks:        make(map[PartyID]BroadcastAck, len(recipients)),
+		recipients:  canonicalRecipients,
+		acks:        make(map[PartyID]BroadcastAck, len(canonicalRecipients)),
 		verifier:    verifier,
 	}, nil
 }
@@ -199,8 +211,14 @@ func NewBroadcastConsistency(protocol ProtocolID, sessionID SessionID, round uin
 // digest return (false, nil). A call with a different digest returns
 // (false, ErrBroadcastEquivocation).
 func (bc *BroadcastConsistency) Commit(env Envelope) (bool, error) {
+	if bc == nil {
+		return false, errors.New("nil broadcast consistency")
+	}
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
+	if !bc.matchesEnvelope(env) {
+		return false, errors.New("broadcast envelope does not match consistency identity")
+	}
 
 	ph := PayloadHashFromEnvelope(env)
 	digest := env.Digest()
@@ -226,8 +244,17 @@ func (bc *BroadcastConsistency) Commit(env Envelope) (bool, error) {
 //   - duplicate ack
 //   - unknown party
 func (bc *BroadcastConsistency) AddAck(env Envelope, ack BroadcastAck) error {
+	if bc == nil {
+		return errors.New("nil broadcast consistency")
+	}
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
+	if !bc.committed {
+		return errors.New("broadcast consistency must be committed before acknowledgements")
+	}
+	if !bc.matchesEnvelope(env) {
+		return errors.New("broadcast acknowledgement envelope does not match consistency identity")
+	}
 
 	if !bc.recipients.Contains(ack.Party) {
 		return fmt.Errorf("ack party %d is not a recipient", ack.Party)
@@ -240,11 +267,9 @@ func (bc *BroadcastConsistency) AddAck(env Envelope, ack BroadcastAck) error {
 	ph := PayloadHashFromEnvelope(env)
 	digest := env.Digest()
 
-	if bc.committed {
-		if ph != bc.payloadHash || digest != bc.envelopeDigest {
-			return fmt.Errorf("%w: party %d submitted ack for different digest",
-				ErrBroadcastEquivocation, ack.Party)
-		}
+	if ph != bc.payloadHash || digest != bc.envelopeDigest {
+		return fmt.Errorf("%w: party %d submitted ack for different digest",
+			ErrBroadcastEquivocation, ack.Party)
 	}
 
 	if err := VerifyBroadcastAck(env, ack, bc.verifier); err != nil {
@@ -257,19 +282,24 @@ func (bc *BroadcastConsistency) AddAck(env Envelope, ack BroadcastAck) error {
 
 // Complete returns true when every recipient has submitted a valid ack.
 func (bc *BroadcastConsistency) Complete() bool {
+	if bc == nil {
+		return false
+	}
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
-	return len(bc.acks) == len(bc.recipients)
+	return bc.verifyCompleteLocked() == nil
 }
 
 // Certificate builds the BroadcastCertificate from collected acks.
 // It returns an error if not all acks have been collected.
 func (bc *BroadcastConsistency) Certificate() (*BroadcastCertificate, error) {
+	if bc == nil {
+		return nil, errors.New("nil broadcast consistency")
+	}
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
-
-	if len(bc.acks) != len(bc.recipients) {
-		return nil, fmt.Errorf("incomplete acks: have %d, want %d", len(bc.acks), len(bc.recipients))
+	if err := bc.verifyCompleteLocked(); err != nil {
+		return nil, err
 	}
 
 	acks := make([]BroadcastAck, 0, len(bc.recipients))
@@ -281,17 +311,53 @@ func (bc *BroadcastConsistency) Certificate() (*BroadcastCertificate, error) {
 		acks = append(acks, ack.Clone())
 	}
 
-	return &BroadcastCertificate{
-		Protocol:       bc.protocol,
-		SessionID:      bc.sessionID,
-		Round:          bc.round,
-		From:           bc.from,
-		PayloadType:    bc.payloadType,
-		PayloadHash:    bc.payloadHash,
-		EnvelopeDigest: bc.envelopeDigest,
-		Recipients:     bc.recipients.Clone(),
-		Acks:           acks,
-	}, nil
+	// The original payload is not retained by the collector, so construct the
+	// certificate directly from the committed identity and revalidate every ack
+	// against its committed hashes below.
+	cert := &BroadcastCertificate{
+		Protocol: bc.protocol, SessionID: bc.sessionID, Round: bc.round, From: bc.from,
+		PayloadType: bc.payloadType, PayloadHash: bc.payloadHash, EnvelopeDigest: bc.envelopeDigest,
+		Recipients: bc.recipients.Clone(), Acks: acks,
+	}
+	if err := cert.Validate(); err != nil {
+		return nil, err
+	}
+	return cert, nil
+}
+
+func (bc *BroadcastConsistency) verifyCompleteLocked() error {
+	if !bc.committed {
+		return errors.New("broadcast consistency is not committed")
+	}
+	if len(bc.acks) != len(bc.recipients) {
+		return fmt.Errorf("incomplete acks: have %d, want %d", len(bc.acks), len(bc.recipients))
+	}
+	if bc.verifier == nil {
+		return errors.New("nil BroadcastAckVerifier")
+	}
+	digest := AckDigest(bc.protocol, bc.sessionID, bc.round, bc.from, bc.payloadType, bc.payloadHash, bc.envelopeDigest)
+	for _, party := range bc.recipients {
+		ack, ok := bc.acks[party]
+		if !ok {
+			return fmt.Errorf("missing ack for party %d", party)
+		}
+		if ack.Party != party || ack.PayloadHash != bc.payloadHash || ack.EnvelopeDigest != bc.envelopeDigest {
+			return fmt.Errorf("ack from party %d does not match the committed broadcast identity", party)
+		}
+		if err := bc.verifier.VerifyAck(party, digest, ack.Signature); err != nil {
+			return fmt.Errorf("invalid ack from party %d: %w", party, err)
+		}
+	}
+	return nil
+}
+
+func (bc *BroadcastConsistency) matchesEnvelope(env Envelope) bool {
+	return env.Protocol == bc.protocol &&
+		env.SessionID == bc.sessionID &&
+		env.Round == bc.round &&
+		env.From == bc.from &&
+		env.To == BroadcastPartyId &&
+		env.PayloadType == bc.payloadType
 }
 
 // AckCount returns the number of verified acks collected so far.

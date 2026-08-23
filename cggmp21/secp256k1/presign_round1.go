@@ -35,7 +35,7 @@ func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession,
 	if local.Self == tss.BroadcastPartyId {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("PresignRuntime.Local.Self is required"))
 	}
-	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self, CGGMP21Policies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
@@ -72,6 +72,7 @@ func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession,
 		return nil, nil, err
 	}
 	leaseOwned := true
+	var recoverableSession *PresignSession
 	defer func() {
 		if err == nil || !leaseOwned {
 			return
@@ -80,16 +81,22 @@ func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession,
 			clearEnvelope(&out[i])
 		}
 		out = nil
-		if s != nil {
-			s.abort()
-			s = nil
+		if recoverableSession != nil {
+			recoverableSession.abort()
 		}
 		storeCtx, finishCancel := durableStoreContext(local.Ctx(), timeout)
 		finishErr := runtime.LifecycleStore.FinishRunLease(storeCtx, lease, tssrun.LeaseAborted)
 		finishCancel()
 		if finishErr != nil {
+			if recoverableSession != nil {
+				recoverableSession.closePending = true
+				s = recoverableSession
+				leaseOwned = false
+			}
 			err = errors.Join(err, fmt.Errorf("abort uncommitted presign run lease: %w", finishErr))
+			return
 		}
+		s = nil
 	}()
 	signers := slices.Clone(plan.state.signers)
 	// Snapshot the normalized context and derivation once. The resulting
@@ -120,7 +127,6 @@ func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession,
 		SessionID:      sessionID,
 		Rand:           local.Rand,
 		Context:        local.Context,
-		RoundTimeout:   local.RoundTimeout,
 		Log:            local.Log,
 		EnvelopeSigner: local.EnvelopeSigner,
 	}
@@ -332,6 +338,7 @@ func StartPresign(plan *PresignPlan, runtime PresignRuntime) (s *PresignSession,
 		lifecycleLease:   lease,
 		lifecycleTimeout: timeout,
 	}
+	recoverableSession = s
 	keyOwned = false
 	derivationOwned = true
 	paillierOwned = true

@@ -413,6 +413,7 @@ type LifecycleStore interface {
 
 	AcquireRunLease(ctx context.Context, binding GenerationBinding, kind RunKind, sessionID tss.SessionID) (RunLease, error)
 	AcquireReshareReceiverLease(ctx context.Context, anchor ReshareReceiverAnchor) (RunLease, error)
+	QueryRunLease(ctx context.Context, binding GenerationBinding, kind RunKind, sessionID tss.SessionID) (RunLease, error)
 	FinishRunLease(ctx context.Context, lease RunLease, outcome RunLeaseOutcome) error
 	MarkProtocolRefreshFailed(ctx context.Context, lease RunLease, reason string) (RefreshDisabledRecord, error)
 
@@ -432,6 +433,30 @@ type LifecycleStore interface {
 	AbortCutover(ctx context.Context, fence CutoverFence, reason string) error
 	CommitInitialGenerationFromLease(ctx context.Context, lease RunLease, child GenerationBinding, childBlob, childMetadata []byte) (GenerationRecord, error)
 	CommitInitialGenerationFromReshareLease(ctx context.Context, lease RunLease, target GenerationBinding, targetBlob, targetMetadata []byte) (GenerationRecord, error)
+}
+
+// LifecycleCompactionRequest authorizes explicit terminal-history compaction
+// for one exact current key lineage.
+type LifecycleCompactionRequest struct {
+	KeyID                string
+	ExpectedCurrent      GenerationBinding
+	RetainRecentTerminal uint32
+}
+
+// LifecycleCompactionReport contains public-only compaction counts.
+type LifecycleCompactionReport struct {
+	Leases      uint64
+	Presigns    uint64
+	Attempts    uint64
+	Generations uint64
+	Cutovers    uint64
+}
+
+// LifecycleCompactor is the optional explicit compaction surface implemented
+// by reference stores. Production LifecycleStore implementations may provide
+// backend-native retention instead.
+type LifecycleCompactor interface {
+	CompactLifecycle(context.Context, LifecycleCompactionRequest) (LifecycleCompactionReport, error)
 }
 
 func validateLifecycleIdentifier(value string) error {

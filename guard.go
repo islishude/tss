@@ -9,26 +9,42 @@ import (
 // EnvelopeGuard validates incoming envelopes against protocol, transport, and session policies.
 // Every protocol handler must run Validate before processing the envelope.
 type EnvelopeGuard struct {
-	Self      PartyID
-	Parties   PartySet
-	Protocol  ProtocolID
-	SessionID SessionID
+	self      PartyID
+	parties   PartySet
+	protocol  ProtocolID
+	sessionID SessionID
 
-	Policies    PolicySet
-	ReplayCache ReplayCache
+	policies     PolicySet
+	policyDigest [32]byte
+	replayCache  ReplayCache
 
 	// AckVerifier verifies individual broadcast ack signatures during broadcast
 	// certificate validation. Production guards must set a non-nil verifier;
 	// [NewTestEnvelopeGuard] provides a no-op verifier for tests that do not
 	// exercise broadcast consistency.
-	AckVerifier BroadcastAckVerifier
+	ackVerifier BroadcastAckVerifier
 	// EnvelopeVerifier verifies portable sender signatures required by policy.
-	EnvelopeVerifier EnvelopeSignatureVerifier
+	envelopeVerifier EnvelopeSignatureVerifier
+	testOnly         bool
 }
 
 // NewEnvelopeGuard constructs a guard with the required security configuration.
 // It returns an error if parties is empty, Self is not in Parties, or if the SessionID is invalid.
 func NewEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessionID SessionID, policies PolicySet, cache ReplayCache) (*EnvelopeGuard, error) {
+	return newEnvelopeGuard(self, parties, protocol, sessionID, policies, cache, nil, nil, false)
+}
+
+func newEnvelopeGuard(
+	self PartyID,
+	parties PartySet,
+	protocol ProtocolID,
+	sessionID SessionID,
+	policies PolicySet,
+	cache ReplayCache,
+	ackVerifier BroadcastAckVerifier,
+	envelopeVerifier EnvelopeSignatureVerifier,
+	testOnly bool,
+) (*EnvelopeGuard, error) {
 	if len(parties) == 0 {
 		return nil, errors.New("guard parties must not be empty")
 	}
@@ -44,13 +60,28 @@ func NewEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessi
 	if cache == nil {
 		return nil, ErrMissingReplayCache
 	}
+	if !policies.valid() {
+		return nil, errors.New("guard policy set must not be empty")
+	}
+	if policies.testOnly && !testOnly {
+		return nil, errors.New("test-only policy set requires a test-only guard")
+	}
+	if !testOnly {
+		if err := policies.ValidateBroadcastConsistency(); err != nil {
+			return nil, err
+		}
+	}
 	return &EnvelopeGuard{
-		Self:        self,
-		Parties:     parties.Clone(),
-		Protocol:    protocol,
-		SessionID:   sessionID,
-		Policies:    policies,
-		ReplayCache: cache,
+		self:             self,
+		parties:          parties.Clone(),
+		protocol:         protocol,
+		sessionID:        sessionID,
+		policies:         policies,
+		policyDigest:     policies.Digest(),
+		replayCache:      cache,
+		ackVerifier:      ackVerifier,
+		envelopeVerifier: envelopeVerifier,
+		testOnly:         testOnly,
 	}, nil
 }
 
@@ -60,22 +91,108 @@ func NewEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessi
 //
 // It panics when not running under "go test" to prevent accidental production use.
 func NewTestEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessionID SessionID, policies PolicySet) *EnvelopeGuard {
+	return NewTestEnvelopeGuardWithCache(self, parties, protocol, sessionID, policies, NewInMemoryReplayCache())
+}
+
+// NewTestEnvelopeGuardWithCache is [NewTestEnvelopeGuard] with an explicit
+// replay cache for bounded-cache and failure-injection tests.
+func NewTestEnvelopeGuardWithCache(self PartyID, parties PartySet, protocol ProtocolID, sessionID SessionID, policies PolicySet, cache ReplayCache) *EnvelopeGuard {
 	if !testing.Testing() {
-		panic("NewTestEnvelopeGuard must only be called from tests")
+		panic("NewTestEnvelopeGuardWithCache must only be called from tests")
 	}
-	g, err := NewEnvelopeGuard(self, parties, protocol, sessionID, policies, NewInMemoryReplayCache())
+	g, err := newEnvelopeGuard(
+		self,
+		parties,
+		protocol,
+		sessionID,
+		policies,
+		cache,
+		&noopAckVerifier{},
+		noopEnvelopeSignatureVerifier{},
+		true,
+	)
 	if err != nil {
-		panic(fmt.Sprintf("NewTestEnvelopeGuard: %v", err))
+		panic(fmt.Sprintf("NewTestEnvelopeGuardWithCache: %v", err))
 	}
-	g.AckVerifier = &noopAckVerifier{}
-	g.EnvelopeVerifier = noopEnvelopeSignatureVerifier{}
 	return g
+}
+
+// Self returns the local party bound to the guard.
+func (g *EnvelopeGuard) Self() PartyID {
+	if g == nil {
+		return BroadcastPartyId
+	}
+	return g.self
+}
+
+// Parties returns a caller-owned copy of the guard's construction-time party universe.
+func (g *EnvelopeGuard) Parties() PartySet {
+	if g == nil {
+		return nil
+	}
+	return g.parties.Clone()
+}
+
+// Protocol returns the protocol bound to the guard.
+func (g *EnvelopeGuard) Protocol() ProtocolID {
+	if g == nil {
+		return ""
+	}
+	return g.protocol
+}
+
+// SessionID returns the session identifier bound to the guard.
+func (g *EnvelopeGuard) SessionID() SessionID {
+	if g == nil {
+		return SessionID{}
+	}
+	return g.sessionID
+}
+
+// Policies returns the guard's immutable policy set.
+func (g *EnvelopeGuard) Policies() PolicySet {
+	if g == nil {
+		return PolicySet{}
+	}
+	return g.policies
+}
+
+// PolicyDigest returns the canonical delivery-policy digest bound at construction.
+func (g *EnvelopeGuard) PolicyDigest() [32]byte {
+	if g == nil {
+		return [32]byte{}
+	}
+	return g.policyDigest
+}
+
+// ReplayCache returns the guard's replay cache authority.
+func (g *EnvelopeGuard) ReplayCache() ReplayCache {
+	if g == nil {
+		return nil
+	}
+	return g.replayCache
+}
+
+// AckVerifier returns the guard's broadcast acknowledgement verifier.
+func (g *EnvelopeGuard) AckVerifier() BroadcastAckVerifier {
+	if g == nil {
+		return nil
+	}
+	return g.ackVerifier
+}
+
+// EnvelopeVerifier returns the guard's portable sender-signature verifier.
+func (g *EnvelopeGuard) EnvelopeVerifier() EnvelopeSignatureVerifier {
+	if g == nil {
+		return nil
+	}
+	return g.envelopeVerifier
 }
 
 // RequiresSenderSignatures reports whether any delivery policy configured on
 // the guard requires canonical sender signatures.
 func (g *EnvelopeGuard) RequiresSenderSignatures() bool {
-	return g != nil && g.Policies.requiresSenderSignature()
+	return g != nil && g.policies.requiresSenderSignature()
 }
 
 // noopAckVerifier is a BroadcastAckVerifier that accepts any signature.
@@ -99,7 +216,10 @@ func (noopEnvelopeSignatureVerifier) VerifyEnvelopeSignature(PartyID, [32]byte, 
 // against the guard's configured party set. It returns nil only when the envelope
 // passes all checks.
 func (g *EnvelopeGuard) Validate(env InboundEnvelope) error {
-	return g.ValidateWithParties(env, g.Parties)
+	if g == nil {
+		return ErrMissingEnvelopeGuard
+	}
+	return g.ValidateWithParties(env, g.parties)
 }
 
 // ValidateWithParties is like Validate but validates sender membership and
@@ -123,13 +243,13 @@ func (g *EnvelopeGuard) validateWithParties(env InboundEnvelope, parties PartySe
 	info := env.ReceiveInfo()
 
 	// 1. Protocol match.
-	if base.Protocol != g.Protocol {
+	if base.Protocol != g.protocol {
 		s := fmt.Sprintf("unexpected protocol %q", base.Protocol)
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, errors.New(s))
 	}
 
 	// 2. Session ID match.
-	if base.SessionID != g.SessionID {
+	if base.SessionID != g.sessionID {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, errors.New("session mismatch"))
 	}
 
@@ -137,7 +257,7 @@ func (g *EnvelopeGuard) validateWithParties(env InboundEnvelope, parties PartySe
 	if !parties.Contains(base.From) {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("sender %d is not a participant", base.From))
 	}
-	if base.From == g.Self {
+	if base.From == g.self {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrSelfSender)
 	}
 
@@ -160,20 +280,20 @@ func (g *EnvelopeGuard) validateWithParties(env InboundEnvelope, parties PartySe
 	}
 
 	// 7. Recipient check for direct messages.
-	if base.To != BroadcastPartyId && base.To != g.Self {
-		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, base.To))
+	if base.To != BroadcastPartyId && base.To != g.self {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.self, base.To))
 	}
 
 	// 9. Policy lookup.
-	policy, err := g.Policies.Match(base.Protocol, base.Round, base.PayloadType)
+	policy, err := g.policies.Match(base.Protocol, base.Round, base.PayloadType)
 	if err != nil {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
 	if policy.RequireSenderSignature {
-		if g.EnvelopeVerifier == nil {
+		if g.envelopeVerifier == nil {
 			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrMissingEnvelopeSignatureVerifier)
 		}
-		if err := VerifyEnvelopeSignature(base, g.EnvelopeVerifier); err != nil {
+		if err := VerifyEnvelopeSignature(base, g.envelopeVerifier); err != nil {
 			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 	}
@@ -214,7 +334,7 @@ func (g *EnvelopeGuard) validateWithParties(env InboundEnvelope, parties PartySe
 		if cert == nil {
 			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrMissingBroadcastCertificate, base.PayloadType))
 		}
-		if err := cert.VerifyFull(base, parties, g.AckVerifier); err != nil {
+		if err := cert.VerifyFull(base, parties, g.ackVerifier); err != nil {
 			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, err))
 		}
 	}
@@ -231,7 +351,7 @@ func (g *EnvelopeGuard) validateWithParties(env InboundEnvelope, parties PartySe
 	// faulty sender.
 	slot := SlotKeyFromEnvelope(base)
 	payloadHash := PayloadHashFromEnvelope(base)
-	if err := g.ReplayCache.CheckAndStore(slot, payloadHash); err != nil {
+	if err := g.replayCache.CheckAndStore(slot, payloadHash); err != nil {
 		if errors.Is(err, ErrDuplicateMessage) {
 			return ErrDuplicateMessage
 		}
@@ -253,24 +373,43 @@ func (g *EnvelopeGuard) ValidateForRound(env InboundEnvelope, allowedSenders Par
 // session and has the fixed validation dependencies required by inbound
 // handlers. It does not validate the guard's party set; protocol handlers pass
 // the per-message allowed sender set to [ValidateInbound].
-func RequireEnvelopeGuard(guard *EnvelopeGuard, expectedProtocol ProtocolID, expectedSession SessionID, self PartyID) error {
+func RequireEnvelopeGuard(guard *EnvelopeGuard, expectedProtocol ProtocolID, expectedSession SessionID, self PartyID, expectedPolicies PolicySet) error {
+	if err := requireEnvelopeGuardIdentity(guard, expectedProtocol, expectedSession, self); err != nil {
+		return err
+	}
+	if !expectedPolicies.valid() || (expectedPolicies.testOnly && (!guard.testOnly || !testing.Testing())) {
+		return errors.New("expected production policy set is invalid")
+	}
+	if guard.policyDigest != expectedPolicies.Digest() && (!guard.testOnly || !testing.Testing()) {
+		return errors.New("guard delivery policy does not match the protocol canonical policy")
+	}
+	return nil
+}
+
+func requireEnvelopeGuardIdentity(guard *EnvelopeGuard, expectedProtocol ProtocolID, expectedSession SessionID, self PartyID) error {
 	if guard == nil {
 		return ErrMissingEnvelopeGuard
 	}
-	if guard.Protocol != expectedProtocol {
-		return fmt.Errorf("guard protocol %q does not match expected %q", guard.Protocol, expectedProtocol)
+	if guard.protocol != expectedProtocol {
+		return fmt.Errorf("guard protocol %q does not match expected %q", guard.protocol, expectedProtocol)
 	}
-	if guard.SessionID != expectedSession {
-		return fmt.Errorf("guard session %x does not match expected %x", guard.SessionID[:], expectedSession[:])
+	if guard.sessionID != expectedSession {
+		return fmt.Errorf("guard session %x does not match expected %x", guard.sessionID[:], expectedSession[:])
 	}
-	if guard.Self != self {
-		return fmt.Errorf("guard self %d does not match expected %d", guard.Self, self)
+	if guard.self != self {
+		return fmt.Errorf("guard self %d does not match expected %d", guard.self, self)
 	}
-	if len(guard.Policies.entries) == 0 || guard.Policies.index == nil {
+	if !guard.policies.valid() {
 		return errors.New("guard policy set must not be empty")
 	}
-	if guard.ReplayCache == nil {
+	if guard.replayCache == nil {
 		return ErrMissingReplayCache
+	}
+	if guard.ackVerifier == nil {
+		return ErrMissingAckVerifier
+	}
+	if guard.policies.requiresSenderSignature() && guard.envelopeVerifier == nil {
+		return ErrMissingEnvelopeSignatureVerifier
 	}
 	return nil
 }
@@ -288,7 +427,7 @@ func RequireEnvelopeGuard(guard *EnvelopeGuard, expectedProtocol ProtocolID, exp
 // party subsets), this design avoids coupling guard construction to
 // per-message validation.
 func ValidateInbound(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol ProtocolID, expectedSession SessionID, allowedSenders PartySet, self PartyID) error {
-	if err := RequireEnvelopeGuard(guard, expectedProtocol, expectedSession, self); err != nil {
+	if err := requireEnvelopeGuardIdentity(guard, expectedProtocol, expectedSession, self); err != nil {
 		return err
 	}
 	if len(allowedSenders) == 0 {
@@ -301,7 +440,7 @@ func ValidateInbound(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol
 // mutating the guard's replay cache. Once the protocol becomes ready, callers
 // must pass the message through [ValidateInbound] before processing it.
 func ValidateInboundWithoutReplay(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol ProtocolID, expectedSession SessionID, allowedSenders PartySet, self PartyID) error {
-	if err := RequireEnvelopeGuard(guard, expectedProtocol, expectedSession, self); err != nil {
+	if err := requireEnvelopeGuardIdentity(guard, expectedProtocol, expectedSession, self); err != nil {
 		return err
 	}
 	if len(allowedSenders) == 0 {

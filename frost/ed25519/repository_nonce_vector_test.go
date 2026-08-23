@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"slices"
 	"testing"
 
@@ -45,18 +46,18 @@ func TestRepositoryBoundStartSignNonceVector(t *testing.T) {
 		hexMust(t, "7d144c5dbc3954ebec05ae2ec9115d200bf23cb852e16922f136fef1495126e7"),
 	)
 
-	p1Partial, err := s1.Handle(testutil.DeliverEnvelope(out3[0]))
+	p1Partial, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out3[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p3Partial, err := s3.Handle(testutil.DeliverEnvelope(out1[0]))
+	p3Partial, err := s3.Handle(context.Background(), testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertPartialEnvelope(t, p1Partial[0], hexMust(t, "363960e1e378619df72f823c2826b31e7d710a5dd63f9e3ab5e2b8685324e70d"))
 	assertPartialEnvelope(t, p3Partial[0], hexMust(t, "2604097b43163ba87fafb15f34907070d199335a24a349d599ff101fafed420c"))
 
-	if _, err := s1.Handle(testutil.DeliverEnvelope(p3Partial[0])); err != nil {
+	if _, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(p3Partial[0])); err != nil {
 		t.Fatal(err)
 	}
 	sig, ok := s1.Signature()

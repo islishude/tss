@@ -19,17 +19,22 @@ func TestGenerateKeyCustomReaderSafety(t *testing.T) {
 	t.Parallel()
 
 	reader := new(concurrencyDetectingReader)
-	sk, err := GenerateKeyForTest(context.Background(), reader, 512)
-	if err != nil {
-		t.Fatal(err)
+	for range 2 {
+		sk, err := GenerateKeyForTest(context.Background(), reader, 512)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sk.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		sk.Destroy()
 	}
 	// The lockedReader mutex ensures Read calls are serialised, so the
-	// concurrencyDetectingReader never observes overlapping calls.
+	// concurrencyDetectingReader never observes overlapping calls. Repeating
+	// generation on the same reader also proves canceled workers from the first
+	// search have stopped before its call returns.
 	if reader.concurrent.Load() {
 		t.Fatal("lockedReader should serialise Read calls, but concurrent access was detected")
-	}
-	if err := sk.Validate(); err != nil {
-		t.Fatal(err)
 	}
 }
 

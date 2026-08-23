@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"slices"
 	"sync"
@@ -44,6 +45,7 @@ type ReshareSession struct {
 
 	completed    bool               // Terminal success after every target-holder confirmation is verified.
 	aborted      bool               // Terminal failure/destruction flag.
+	closed       bool               // Final caller cleanup completed.
 	pendingShare *KeyShare          // Locally derived share awaiting confirmations from all target key holders.
 	newShare     *KeyShare          // New key share produced for receiver participants.
 	guard        *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
@@ -207,7 +209,7 @@ func startReshareDealer(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConf
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self, FROSTPolicies()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	oldParties := oldKey.state.Parties.Clone()
@@ -285,7 +287,7 @@ func StartReshareReceiver(plan *ResharePlan, local tss.LocalConfig, guard *tss.E
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self, FROSTPolicies()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	// Blame evidence for reshare share verification is scoped to old dealers.
@@ -358,7 +360,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self, FROSTPolicies()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := oldKey.state.Parties.Clone()
@@ -389,13 +391,13 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 }
 
 // Handle validates and applies one reshare envelope.
-func (s *ReshareSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *ReshareSession) Handle(ctx context.Context, env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil reshare session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return handleSessionEnvelope(s, env, s.completed, s.aborted, s.abort, s.buildReshareTransition)
+	return handleSessionEnvelope(ctx, s.cfg.Ctx(), s, env, s.completed, s.aborted, s.abort, s.buildReshareTransition)
 }
 
 func (s *ReshareSession) clearSensitive() {

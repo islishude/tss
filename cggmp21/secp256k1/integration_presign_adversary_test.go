@@ -3,6 +3,7 @@
 package secp256k1
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -26,7 +27,7 @@ func TestThresholdECDSATamperedRound1BlamesSender(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload[0] ^= 1
-	if _, err := s1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected tampered Figure 8 round1 rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], tss.NewPartySet(1, 2), nil))
@@ -68,7 +69,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 				t.Fatal(err)
 			}
 			round2[0].Payload = mutated
-			_, err = s1.Handle(testutil.DeliverEnvelope(round2[0]))
+			_, err = s1.Handle(context.Background(), testutil.DeliverEnvelope(round2[0]))
 			assertProtocolBlamesParty(t, err, 2)
 			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], tss.NewPartySet(1, 2), nil))
 		})
@@ -93,11 +94,11 @@ func TestThresholdECDSARound3RejectsWrongEpoch(t *testing.T) {
 	}
 	round2From1 := deliverPresignMessagesTo(t, s1, 1, out2)
 	round2From2 := deliverPresignMessagesTo(t, s2, 2, out1)
-	round3From2, err := s2.Handle(testutil.DeliverEnvelope(round2From1[0]))
+	round3From2, err := s2.Handle(context.Background(), testutil.DeliverEnvelope(round2From1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.Handle(testutil.DeliverEnvelope(round2From2[0])); err != nil {
+	if _, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(round2From2[0])); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := unmarshalPresignRound3Payload(round3From2[0].Payload)
@@ -110,7 +111,7 @@ func TestThresholdECDSARound3RejectsWrongEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s1.Handle(testutil.DeliverEnvelope(round3From2[0]))
+	_, err = s1.Handle(context.Background(), testutil.DeliverEnvelope(round3From2[0]))
 	assertProtocolBlamesParty(t, err, 2)
 }
 
@@ -142,7 +143,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := s1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected presign Paillier key mismatch rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], signers, nil))

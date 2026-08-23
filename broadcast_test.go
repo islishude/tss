@@ -221,6 +221,47 @@ func TestBroadcastConsistencyFullFlow(t *testing.T) {
 	}
 }
 
+func TestBroadcastConsistencyRejectsAckBeforeCommit(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	parties := PartySet{1, 2}
+	signers, verifier := setupAckKeys(t, parties)
+	bc, err := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, err := SignBroadcastAck(env, 1, signers[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bc.AddAck(env, ack); err == nil {
+		t.Fatal("ack before canonical broadcast commit was accepted")
+	}
+	if bc.Complete() {
+		t.Fatal("uncommitted collector reported complete")
+	}
+	if _, err := bc.Certificate(); err == nil {
+		t.Fatal("uncommitted collector produced a certificate")
+	}
+}
+
+func TestBroadcastConsistencyRejectsWrongEnvelopeIdentity(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	_, verifier := setupAckKeys(t, PartySet{1})
+	bc, err := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", PartySet{1}, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := env.Clone()
+	wrong.Round++
+	if _, err := bc.Commit(wrong); err == nil {
+		t.Fatal("collector committed an envelope with the wrong identity")
+	}
+}
+
 func TestBroadcastConsistencyDetectsEquivocation(t *testing.T) {
 	t.Parallel()
 	sid := testSessionID(t)

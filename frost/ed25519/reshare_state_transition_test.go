@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	fed "filippo.io/edwards25519"
@@ -10,6 +11,7 @@ import (
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/tssrun"
 )
 
 func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
@@ -32,7 +34,7 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dealerOnly.Destroy()
+	defer closeTestSession(t, dealerOnly)
 	if dealerOnly.mode != frostReshareModeReshare || dealerOnly.role != frostReshareRoleDealerOnly {
 		t.Fatalf("dealer-only mode/role = %d/%d", dealerOnly.mode, dealerOnly.role)
 	}
@@ -49,7 +51,7 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dealerReceiver.Destroy()
+	defer closeTestSession(t, dealerReceiver)
 	if dealerReceiver.role != frostReshareRoleDealerAndReceiver || !dealerReceiver.isDealer() || !dealerReceiver.isReceiver() {
 		t.Fatal("dealer-receiver role predicates are inconsistent")
 	}
@@ -69,7 +71,7 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer receiverOnly.Destroy()
+	defer closeTestSession(t, receiverOnly)
 	if receiverOnly.role != frostReshareRoleReceiverOnly || receiverOnly.isDealer() || !receiverOnly.isReceiver() {
 		t.Fatal("receiver-only role predicates are inconsistent")
 	}
@@ -87,7 +89,7 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer refresh.Destroy()
+	defer closeTestSession(t, refresh)
 	if refresh.mode != frostReshareModeRefresh || refresh.role != frostReshareRoleDealerAndReceiver || !refresh.isRefresh() {
 		t.Fatal("refresh mode/role predicates are inconsistent")
 	}
@@ -97,8 +99,8 @@ func TestFROSTReshareCommitmentBuildDoesNotMutate(t *testing.T) {
 	t.Parallel()
 
 	session1, _, session2, out2 := frostTwoPartyRefreshSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
+	defer closeTestSession(t, session1)
+	defer closeTestSession(t, session2)
 	commitment := mustFROSTEnvelope(t, out2, payloadReshareCommitments, tss.BroadcastPartyId)
 
 	before := snapshotFROSTReshareSession(session1)
@@ -115,8 +117,8 @@ func TestFROSTReshareShareBuildOwnsAndClearsDecodedSecret(t *testing.T) {
 	t.Parallel()
 
 	session1, _, session2, out2 := frostTwoPartyRefreshSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
+	defer closeTestSession(t, session1)
+	defer closeTestSession(t, session2)
 	share := mustFROSTEnvelope(t, out2, payloadReshareShare, session1.selfID)
 
 	before := snapshotFROSTReshareSession(session1)
@@ -144,10 +146,10 @@ func TestFROSTReshareShareApplyRollsBackOnCompletionError(t *testing.T) {
 	t.Parallel()
 
 	session1, _, session2, out2 := frostTwoPartyRefreshSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
+	defer closeTestSession(t, session1)
+	defer closeTestSession(t, session2)
 	commitment := mustFROSTEnvelope(t, out2, payloadReshareCommitments, tss.BroadcastPartyId)
-	if _, err := session1.Handle(testutil.DeliverEnvelope(commitment)); err != nil {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(commitment)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -182,21 +184,20 @@ func TestFROSTRefreshIdentityVerificationShareAbortsAndClearsSecrets(t *testing.
 		}
 		t.Run(name, func(t *testing.T) {
 			session, _, remote, _ := frostTwoPartyRefreshSessions(t)
-			defer session.Destroy()
-			defer remote.Destroy()
-
+			defer closeTestSession(t, session)
+			defer closeTestSession(t, remote)
 			commitment, share := maliciousFROSTRefreshIdentityVerificationShareEnvelopes(t, session, 2)
 			first, last := share, commitment
 			if commitmentFirst {
 				first, last = commitment, share
 			}
-			if out, err := session.Handle(testutil.DeliverEnvelope(first)); err != nil {
+			if out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(first)); err != nil {
 				t.Fatalf("first verification-identity input rejected early: %v", err)
 			} else if len(out) != 0 {
 				t.Fatalf("first verification-identity input produced %d outbound envelopes", len(out))
 			}
 
-			out, err := session.Handle(testutil.DeliverEnvelope(last))
+			out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(last))
 			protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 			if protocolErr.Blame != nil || protocolErr.Party != tss.BroadcastPartyId {
 				t.Fatalf("aggregate verification identity was attributed to one dealer: %#v", protocolErr)
@@ -356,12 +357,11 @@ func TestFROSTReshareBuffersConfirmationUntilRound1Completes(t *testing.T) {
 	t.Parallel()
 
 	session1, out1, session2, out2 := frostTwoPartyRefreshSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
-
+	defer closeTestSession(t, session1)
+	defer closeTestSession(t, session2)
 	var confirmation tss.Envelope
 	for _, env := range out1 {
-		out, err := session2.Handle(testutil.DeliverEnvelope(env))
+		out, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(env))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +374,7 @@ func TestFROSTReshareBuffersConfirmationUntilRound1Completes(t *testing.T) {
 	if confirmation.PayloadType == "" {
 		t.Fatal("remote refresh session did not emit a confirmation")
 	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(confirmation)); err != nil {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(confirmation)); err != nil {
 		t.Fatal(err)
 	}
 	if session1.pendingConfirmations[2] == nil {
@@ -382,7 +382,7 @@ func TestFROSTReshareBuffersConfirmationUntilRound1Completes(t *testing.T) {
 	}
 
 	for _, env := range out2 {
-		if _, err := session1.Handle(testutil.DeliverEnvelope(env)); err != nil {
+		if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(env)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -410,7 +410,7 @@ func TestFROSTReshareDealerOnlyRejectsInboundShareWithoutMutation(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dealerOnly.Destroy()
+	defer closeTestSession(t, dealerOnly)
 	_, out2, err := startFROSTReshare(oldShares[2], newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   oldParties,
@@ -424,7 +424,7 @@ func TestFROSTReshareDealerOnlyRejectsInboundShareWithoutMutation(t *testing.T) 
 	share.To = 1
 
 	before := snapshotFROSTReshareSession(dealerOnly)
-	out, err := dealerOnly.Handle(testutil.DeliverEnvelope(share))
+	out, err := dealerOnly.Handle(context.Background(), testutil.DeliverEnvelope(share))
 	after := snapshotFROSTReshareSession(dealerOnly)
 	if err == nil {
 		t.Fatal("expected dealer-only session to reject inbound share")
@@ -460,7 +460,7 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer receiver.Destroy()
+	defer closeTestSession(t, receiver)
 	dealer, dealerOut, err := startFROSTReshare(oldShares[1], newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   oldParties,
@@ -470,12 +470,12 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dealer.Destroy()
+	defer closeTestSession(t, dealer)
 	share := mustFROSTEnvelope(t, dealerOut, payloadReshareShare, 4)
 	share.From = 99
 
 	before := snapshotFROSTReshareSession(receiver)
-	out, err := receiver.Handle(testutil.DeliverEnvelope(share))
+	out, err := receiver.Handle(context.Background(), testutil.DeliverEnvelope(share))
 	after := snapshotFROSTReshareSession(receiver)
 	if err == nil {
 		t.Fatal("expected share from non-dealer to be rejected")
@@ -509,7 +509,7 @@ func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer session.Destroy()
+		defer closeTestSession(t, session)
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -522,7 +522,7 @@ func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer receiver.Destroy()
+	defer closeTestSession(t, receiver)
 	sessions[4] = receiver
 
 	dealerOnly := sessions[1]
@@ -535,7 +535,7 @@ func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 			if id == env.From || (env.To != tss.BroadcastPartyId && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver round 1 %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -557,12 +557,12 @@ func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].Handle(testutil.DeliverEnvelope(env)); err != nil {
+			if _, err := sessions[id].Handle(context.Background(), testutil.DeliverEnvelope(env)); err != nil {
 				t.Fatalf("deliver confirmation from %d to %d: %v", env.From, id, err)
 			}
 		}
 	}
-	if !dealerOnly.Completed() || dealerOnly.newShare != nil {
+	if dealerOnly.Status() != tssrun.SessionSucceeded || dealerOnly.newShare != nil {
 		t.Fatal("dealer-only session did not complete after all target confirmations")
 	}
 	if _, ok := dealerOnly.KeyShare(); ok {
@@ -589,7 +589,7 @@ func TestFROSTReshareDealerOnlyConfirmationBindingRejectsMismatches(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dealerOnly.Destroy()
+	defer closeTestSession(t, dealerOnly)
 	for _, id := range tss.NewPartySet(2, 3) {
 		remote, out, err := startFROSTReshare(oldShares[id], newParties, 2, tss.ThresholdConfig{
 			Threshold: 2,
@@ -600,9 +600,9 @@ func TestFROSTReshareDealerOnlyConfirmationBindingRejectsMismatches(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer remote.Destroy()
+		defer closeTestSession(t, remote)
 		commitment := mustFROSTEnvelope(t, out, payloadReshareCommitments, tss.BroadcastPartyId)
-		if _, err := dealerOnly.Handle(testutil.DeliverEnvelope(commitment)); err != nil {
+		if _, err := dealerOnly.Handle(context.Background(), testutil.DeliverEnvelope(commitment)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -697,8 +697,8 @@ func TestFROSTReshareCompletionPrepareDoesNotMutateAndDestroysStagedShare(t *tes
 	t.Parallel()
 
 	session1, _, session2, out2 := frostTwoPartyRefreshSessions(t)
-	defer session1.Destroy()
-	defer session2.Destroy()
+	defer closeTestSession(t, session1)
+	defer closeTestSession(t, session2)
 	installFROSTReshareRound1(t, session1, out2)
 
 	before := snapshotFROSTReshareSession(session1)
@@ -725,7 +725,7 @@ func TestFROSTPreparedReshareDealerStartDestroyClearsOwnedState(t *testing.T) {
 	t.Parallel()
 
 	session1, out1, session2, _ := frostTwoPartyRefreshSessions(t)
-	session2.Destroy()
+	closeTestSession(t, session2)
 	ownedOut := clone.Slice(out1)
 	prepared := &preparedReshareDealerStart{
 		session: session1,
@@ -770,7 +770,7 @@ func frostTwoPartyRefreshSessions(t *testing.T) (*ReshareSession, []tss.Envelope
 		SessionID: sessionID,
 	})
 	if err != nil {
-		session1.Destroy()
+		closeTestSession(t, session1)
 		t.Fatal(err)
 	}
 	return session1, out1, session2, out2

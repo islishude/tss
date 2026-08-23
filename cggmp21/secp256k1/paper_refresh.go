@@ -36,7 +36,7 @@ func startPaperRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfi
 	if err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self, CGGMP21Policies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
@@ -60,7 +60,7 @@ func startPaperRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfi
 		StableSID:         oldKey.state.Epoch.SID,
 		Limits:            plan.limits,
 		SecurityParams:    plan.securityParams,
-		EnvelopeVerifier:  guard.EnvelopeVerifier,
+		EnvelopeVerifier:  guard.EnvelopeVerifier(),
 		PaillierBits:      plan.state.paillierBits,
 		PlanHash:          planHash,
 		SourceEpochID:     oldKey.state.Epoch.EpochID,

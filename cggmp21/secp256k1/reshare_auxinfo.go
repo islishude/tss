@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -16,7 +17,7 @@ func isAuxInfoPayload(payload tss.PayloadType) bool {
 	}
 }
 
-func (s *ReshareSession) handleReshareAuxInfoInbound(in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
+func (s *ReshareSession) handleReshareAuxInfoInbound(ctx context.Context, in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
 	env := in.Envelope()
 	if !s.isReceiver {
 		// Figure 7 broadcasts are addressed to the new committee but a transport
@@ -31,7 +32,7 @@ func (s *ReshareSession) handleReshareAuxInfoInbound(in tss.InboundEnvelope, key
 	if s.auxInfo == nil || s.newShare != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("figure 7 message arrived outside the verified reshare handoff"))
 	}
-	prepared, err := s.auxInfo.prepareInbound(env)
+	prepared, err := s.auxInfo.prepareInbound(ctx, env)
 	if err != nil {
 		return nil, auxInfoPreparationError(env, s.newParties, err)
 	}
@@ -45,6 +46,9 @@ func (s *ReshareSession) handleReshareAuxInfoInbound(in tss.InboundEnvelope, key
 		defer output.destroy()
 	}
 	if err := s.validateInbound(in, s.newParties); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	if err := prepared.apply(); err != nil {

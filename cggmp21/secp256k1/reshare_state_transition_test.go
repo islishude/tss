@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"context"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -32,7 +33,7 @@ func TestCompletedReshareStillValidatesIgnoredEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Handle(testutil.DeliverEnvelope(env)); err == nil {
+	if _, err := session.Handle(context.Background(), testutil.DeliverEnvelope(env)); err == nil {
 		t.Fatal("completed reshare ignored envelope before guard validation")
 	}
 }

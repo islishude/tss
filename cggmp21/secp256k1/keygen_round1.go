@@ -32,7 +32,7 @@ func resolveKeygenStart(
 		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
 			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self, CGGMP21Policies()); err != nil {
 		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
 			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}

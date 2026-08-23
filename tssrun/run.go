@@ -61,9 +61,9 @@ type RunIntent struct {
 	Signers   tss.PartySet
 	Threshold int
 
-	Binding     GenerationBinding
-	ParentKeyID string
-	PresignID   string
+	SourceBinding GenerationBinding
+	ParentKeyID   string
+	PresignID     string
 
 	// TargetKeyID and TargetKeyGeneration are the public target descriptor for
 	// refresh, reshare, and child derivation. The target epoch is intentionally
@@ -91,7 +91,7 @@ func (r RunIntent) Clone() RunIntent {
 // control plane cannot substitute lifecycle or routing metadata while reusing
 // the same protocol plan.
 func (r RunIntent) AcceptanceDigest() []byte {
-	t := transcript.New("tssrun-run-intent-acceptance-v1")
+	t := transcript.New("tssrun-run-intent-acceptance")
 	t.AppendString("run_id", r.RunID)
 	t.AppendString("protocol", string(r.Protocol))
 	t.AppendString("kind", string(r.Kind))
@@ -99,9 +99,13 @@ func (r RunIntent) AcceptanceDigest() []byte {
 	t.AppendUint32List("parties", r.Parties)
 	t.AppendUint32List("signers", r.Signers)
 	t.AppendUint64("threshold", uint64(r.Threshold))
-	t.AppendString("source_key_id", r.Binding.KeyID)
-	t.AppendString("source_key_generation", string(r.Binding.KeyGeneration))
-	t.AppendBytes("source_epoch_id", r.Binding.EpochID[:])
+	hasSource := r.SourceBinding != (GenerationBinding{})
+	t.AppendBool("has_source_binding", hasSource)
+	if hasSource {
+		t.AppendString("source_key_id", r.SourceBinding.KeyID)
+		t.AppendString("source_key_generation", string(r.SourceBinding.KeyGeneration))
+		t.AppendBytes("source_epoch_id", r.SourceBinding.EpochID[:])
+	}
 	t.AppendString("target_key_id", r.TargetKeyID)
 	t.AppendString("target_key_generation", string(r.TargetKeyGeneration))
 	t.AppendString("parent_key_id", r.ParentKeyID)
@@ -128,10 +132,28 @@ func (r LocalRunResult) Clone() LocalRunResult {
 type RunStore interface {
 	CreateRun(ctx context.Context, run RunIntent) error
 	AcceptPlan(ctx context.Context, runID string, self tss.PartyID, digest []byte) error
+	LoadRun(ctx context.Context, runID string) (RunIntent, error)
 	LookupBySession(ctx context.Context, protocol tss.ProtocolID, sessionID tss.SessionID) (RunIntent, error)
-	MarkStarted(ctx context.Context, runID string, self tss.PartyID) error
+	MarkStarted(ctx context.Context, runID string, self tss.PartyID, acceptanceDigest []byte, descriptor SessionDescriptor) error
 	MarkCompleted(ctx context.Context, runID string, self tss.PartyID, result LocalRunResult) error
 	AbortRun(ctx context.Context, runID string, self tss.PartyID, reason string) error
+}
+
+// LoadRun returns the immutable canonical run intent by ID.
+func (s *MemoryRunStore) LoadRun(ctx context.Context, runID string) (RunIntent, error) {
+	if err := ctx.Err(); err != nil {
+		return RunIntent{}, err
+	}
+	if runID == "" {
+		return RunIntent{}, ErrRunNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.byRunID[runID]
+	if !ok {
+		return RunIntent{}, ErrRunNotFound
+	}
+	return rec.intent.Clone(), nil
 }
 
 type runRecord struct {
@@ -264,7 +286,7 @@ func (s *MemoryRunStore) LookupBySession(ctx context.Context, protocol tss.Proto
 }
 
 // MarkStarted records that a local party registered the session.
-func (s *MemoryRunStore) MarkStarted(ctx context.Context, runID string, self tss.PartyID) error {
+func (s *MemoryRunStore) MarkStarted(ctx context.Context, runID string, self tss.PartyID, acceptanceDigest []byte, descriptor SessionDescriptor) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -273,6 +295,9 @@ func (s *MemoryRunStore) MarkStarted(ctx context.Context, runID string, self tss
 	rec, ok := s.byRunID[runID]
 	if !ok {
 		return ErrRunNotFound
+	}
+	if err := validateSessionDescriptorForRun(rec.intent, self, acceptanceDigest, descriptor); err != nil {
+		return err
 	}
 	if !rec.intent.participants().Contains(self) {
 		return ErrRunPartyNotParticipant
@@ -396,21 +421,34 @@ func AcceptPlanDigest(ctx context.Context, store RunStore, run RunIntent, self t
 
 // RegisterStartedSession marks a run as started and registers the session before
 // callers release any outbound envelopes.
-func RegisterStartedSession(ctx context.Context, store RunStore, registry SessionRegistry, run RunIntent, self tss.PartyID, session ProtocolSession) error {
+func RegisterStartedSession(ctx context.Context, store RunStore, registry SessionRegistry, runID string, self tss.PartyID, session ProtocolSession) error {
 	if store == nil || registry == nil || session == nil {
 		return ErrInvalidSessionKey
 	}
-	key := SessionKey{Protocol: run.Protocol, SessionID: run.SessionID, Party: self}
+	descriptor := session.Descriptor()
+	if err := descriptor.Validate(); err != nil || descriptor.Party != self {
+		return ErrInvalidSessionKey
+	}
+	run, err := store.LoadRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if err := validateSessionDescriptorForRun(run, self, run.AcceptanceDigest(), descriptor); err != nil {
+		return err
+	}
+	key := SessionKey{Protocol: descriptor.Protocol, SessionID: descriptor.SessionID, Party: self}
 	gated := newStartGatedSession(session)
 	if err := registry.Put(ctx, key, gated); err != nil {
 		return err
 	}
-	if err := store.MarkStarted(ctx, run.RunID, self); err != nil {
+	if err := store.MarkStarted(ctx, runID, self, run.AcceptanceDigest(), descriptor); err != nil {
 		gated.fail(err)
 		if cleanupErr := registry.Retire(context.WithoutCancel(ctx), key); cleanupErr != nil {
 			return errors.Join(err, fmt.Errorf("retire unstarted session: %w", cleanupErr))
 		}
-		return err
+		abortErr := session.Abort(context.WithoutCancel(ctx), "durable session start failed")
+		closeErr := session.Close(context.WithoutCancel(ctx))
+		return errors.Join(err, abortErr, closeErr)
 	}
 	gated.activate()
 	return nil
@@ -458,8 +496,15 @@ func (s *startGatedSession) target() (ProtocolSession, bool, error) {
 
 // Handle waits for the durable-start decision so registry-visible messages are
 // neither processed early nor discarded during startup.
-func (s *startGatedSession) Handle(in tss.InboundEnvelope) ([]tss.Envelope, error) {
-	<-s.ready
+func (s *startGatedSession) Handle(ctx context.Context, in tss.InboundEnvelope) ([]tss.Envelope, error) {
+	if ctx == nil {
+		return nil, errors.New("tssrun: nil gated-session context")
+	}
+	select {
+	case <-s.ready:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	target, active, err := s.target()
 	if err != nil {
 		return nil, err
@@ -467,18 +512,35 @@ func (s *startGatedSession) Handle(in tss.InboundEnvelope) ([]tss.Envelope, erro
 	if !active {
 		return nil, ErrRunNotAccepted
 	}
-	return target.Handle(in)
+	return target.Handle(ctx, in)
 }
 
-// Completed reports completion only after the durable-start gate is active.
-func (s *startGatedSession) Completed() bool {
+// Descriptor returns the wrapped session descriptor.
+func (s *startGatedSession) Descriptor() SessionDescriptor {
+	target, _, _ := s.target()
+	if target == nil {
+		return SessionDescriptor{}
+	}
+	return target.Descriptor()
+}
+
+// Status reports the durable-start gate or wrapped protocol state.
+func (s *startGatedSession) Status() SessionState {
 	target, active, _ := s.target()
-	return active && target.Completed()
+	if !active || target == nil {
+		return SessionStarting
+	}
+	return target.Status()
 }
 
-// Destroy releases the wrapped session's secret state.
-func (s *startGatedSession) Destroy() {
-	s.session.Destroy()
+// Abort delegates authoritative abort to the wrapped session.
+func (s *startGatedSession) Abort(ctx context.Context, reason string) error {
+	return s.session.Abort(ctx, reason)
+}
+
+// Close delegates cleanup to the wrapped session.
+func (s *startGatedSession) Close(ctx context.Context) error {
+	return s.session.Close(ctx)
 }
 
 func validateRunIntent(run RunIntent) error {
@@ -500,11 +562,18 @@ func validateRunIntent(run RunIntent) error {
 	if !isCanonicalPartySet(run.Parties) {
 		return fmt.Errorf("%w: parties must be sorted, unique, and non-zero", ErrInvalidRunIntent)
 	}
-	if err := run.Binding.Validate(); err != nil {
-		return fmt.Errorf("%w: generation binding required: %w", ErrInvalidRunIntent, err)
-	}
 	switch run.Kind {
+	case RunKeygen:
+		if run.SourceBinding != (GenerationBinding{}) {
+			return fmt.Errorf("%w: keygen must not declare a source binding", ErrInvalidRunIntent)
+		}
+		if err := validateRunTargetDescriptor(run, true); err != nil {
+			return err
+		}
 	case RunPresign:
+		if err := run.SourceBinding.Validate(); err != nil {
+			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+		}
 		if run.Protocol != tss.ProtocolCGGMP21Secp256k1 {
 			return fmt.Errorf("%w: presign is only supported by %q", ErrInvalidRunIntent, tss.ProtocolCGGMP21Secp256k1)
 		}
@@ -515,6 +584,9 @@ func validateRunIntent(run RunIntent) error {
 			return err
 		}
 	case RunSign:
+		if err := run.SourceBinding.Validate(); err != nil {
+			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+		}
 		if len(run.ContextDigest) != sha256.Size {
 			return fmt.Errorf("%w: sign requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
 		}
@@ -534,6 +606,9 @@ func validateRunIntent(run RunIntent) error {
 			return err
 		}
 	case RunChildDerivation:
+		if err := run.SourceBinding.Validate(); err != nil {
+			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+		}
 		if len(run.ContextDigest) != sha256.Size {
 			return fmt.Errorf("%w: child derivation requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
 		}
@@ -541,14 +616,16 @@ func validateRunIntent(run RunIntent) error {
 			return err
 		}
 	case RunRefresh, RunReshare:
+		if err := run.SourceBinding.Validate(); err != nil {
+			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+		}
 		if err := validateRunTargetDescriptor(run, false); err != nil {
 			return err
 		}
-	case RunKeygen:
 	default:
 		return fmt.Errorf("%w: unknown run kind %q", ErrInvalidRunIntent, run.Kind)
 	}
-	if run.Kind != RunRefresh && run.Kind != RunReshare && run.Kind != RunChildDerivation &&
+	if run.Kind != RunKeygen && run.Kind != RunRefresh && run.Kind != RunReshare && run.Kind != RunChildDerivation &&
 		(run.TargetKeyID != "" || run.TargetKeyGeneration != "") {
 		return fmt.Errorf("%w: target descriptor is not valid for %s", ErrInvalidRunIntent, run.Kind)
 	}
@@ -563,15 +640,15 @@ func validateRunTargetDescriptor(run RunIntent, distinctKey bool) error {
 		return fmt.Errorf("%w: %s requires a target key id and generation", ErrInvalidRunIntent, run.Kind)
 	}
 	if distinctKey {
-		if run.TargetKeyID == run.Binding.KeyID {
+		if run.Kind == RunChildDerivation && run.TargetKeyID == run.SourceBinding.KeyID {
 			return fmt.Errorf("%w: child target key id must differ from parent", ErrInvalidRunIntent)
 		}
 		return nil
 	}
-	if run.TargetKeyID != run.Binding.KeyID {
+	if run.TargetKeyID != run.SourceBinding.KeyID {
 		return fmt.Errorf("%w: %s target key id must match the source", ErrInvalidRunIntent, run.Kind)
 	}
-	if run.TargetKeyGeneration == run.Binding.KeyGeneration {
+	if run.TargetKeyGeneration == run.SourceBinding.KeyGeneration {
 		return fmt.Errorf("%w: %s target generation must differ from the source", ErrInvalidRunIntent, run.Kind)
 	}
 	return nil
@@ -588,6 +665,25 @@ func validateRunSigners(run RunIntent) error {
 		if !run.Parties.Contains(signer) {
 			return fmt.Errorf("%w: signer %d is not a party", ErrInvalidRunIntent, signer)
 		}
+	}
+	return nil
+}
+
+func validateSessionDescriptorForRun(run RunIntent, self tss.PartyID, acceptanceDigest []byte, descriptor SessionDescriptor) error {
+	if err := descriptor.Validate(); err != nil {
+		return err
+	}
+	if !bytes.Equal(acceptanceDigest, run.AcceptanceDigest()) {
+		return ErrPlanDigestConflict
+	}
+	if descriptor.Protocol != run.Protocol || descriptor.Kind != run.Kind || descriptor.SessionID != run.SessionID || descriptor.Party != self {
+		return ErrInvalidSessionKey
+	}
+	if !bytes.Equal(descriptor.PlanDigest, run.PlanDigest) {
+		return ErrPlanDigestConflict
+	}
+	if !run.participants().Contains(self) {
+		return ErrRunPartyNotParticipant
 	}
 	return nil
 }
@@ -613,23 +709,23 @@ func validateLocalRunResult(intent RunIntent, result LocalRunResult) error {
 	}
 	switch intent.Kind {
 	case RunKeygen:
-		if result.Binding != intent.Binding {
-			return fmt.Errorf("%w: keygen output binding does not match run intent", ErrInvalidRunResult)
+		if result.Binding.KeyID != intent.TargetKeyID || result.Binding.KeyGeneration != intent.TargetKeyGeneration {
+			return fmt.Errorf("%w: keygen output binding does not match the target descriptor", ErrInvalidRunResult)
 		}
 	case RunRefresh, RunReshare:
 		if result.Binding.KeyID != intent.TargetKeyID ||
 			result.Binding.KeyGeneration != intent.TargetKeyGeneration ||
-			result.Binding.EpochID == intent.Binding.EpochID {
+			result.Binding.EpochID == intent.SourceBinding.EpochID {
 			return fmt.Errorf("%w: %s output does not match the target generation and a new epoch", ErrInvalidRunResult, intent.Kind)
 		}
 	case RunChildDerivation:
 		if result.Binding.KeyID != intent.TargetKeyID ||
 			result.Binding.KeyGeneration != intent.TargetKeyGeneration ||
-			result.Binding.EpochID == intent.Binding.EpochID {
+			result.Binding.EpochID == intent.SourceBinding.EpochID {
 			return fmt.Errorf("%w: child output does not match the distinct target generation and a new epoch", ErrInvalidRunResult)
 		}
 	case RunPresign, RunSign:
-		if result.Binding != intent.Binding {
+		if result.Binding != intent.SourceBinding {
 			return fmt.Errorf("%w: generation binding does not match run intent", ErrInvalidRunResult)
 		}
 	}

@@ -3,6 +3,7 @@
 package secp256k1
 
 import (
+	"context"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -16,7 +17,7 @@ func deliverPresignMessagesTo(t testing.TB, session *PresignSession, receiver ts
 		if env.From == receiver || (env.To != 0 && env.To != receiver) {
 			continue
 		}
-		next, err := session.Handle(testutil.DeliverEnvelope(env))
+		next, err := session.Handle(context.Background(), testutil.DeliverEnvelope(env))
 		if err != nil {
 			t.Fatal(err)
 		}

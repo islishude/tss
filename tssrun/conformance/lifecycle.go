@@ -93,6 +93,13 @@ func testGenerationAndLeaseFences(t *testing.T, newStore func(testing.TB) tssrun
 	if err != nil {
 		t.Fatalf("AcquireRunLease sign: %v", err)
 	}
+	queriedSignLease, err := store.QueryRunLease(ctx, binding, tssrun.RunSign, signSession)
+	if err != nil || queriedSignLease != signLease {
+		t.Fatalf("QueryRunLease active=%+v err=%v, want %+v", queriedSignLease, err, signLease)
+	}
+	if _, err := store.QueryRunLease(ctx, binding, tssrun.RunPresign, signSession); !errors.Is(err, tssrun.ErrRunLeaseConflict) {
+		t.Fatalf("QueryRunLease wrong kind got %v, want ErrRunLeaseConflict", err)
+	}
 	repeated, err := store.AcquireRunLease(ctx, binding, tssrun.RunSign, signSession)
 	if err != nil || repeated.Token != signLease.Token {
 		t.Fatalf("idempotent lease got token=%d err=%v, want token=%d", repeated.Token, err, signLease.Token)
@@ -109,6 +116,10 @@ func testGenerationAndLeaseFences(t *testing.T, newStore func(testing.TB) tssrun
 	}
 	if err := store.FinishRunLease(ctx, signLease, tssrun.LeaseCompleted); err != nil {
 		t.Fatalf("FinishRunLease sign: %v", err)
+	}
+	terminalSignLease, err := store.QueryRunLease(ctx, binding, tssrun.RunSign, signSession)
+	if err != nil || terminalSignLease.State != tssrun.RunLeaseCompleted || terminalSignLease.Token != signLease.Token {
+		t.Fatalf("QueryRunLease terminal=%+v err=%v", terminalSignLease, err)
 	}
 	if err := store.FinishRunLease(ctx, presignLease, tssrun.LeaseAborted); err != nil {
 		t.Fatalf("FinishRunLease presign: %v", err)

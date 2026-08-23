@@ -135,6 +135,9 @@ func DecryptSignAttemptWithPassphrase(encoded, passphrase []byte, expectedKeyID 
 // bind object kind or storage identity must compare the returned value with the
 // expected value after decoding the plaintext record.
 func DecryptSignAttemptWithPassphraseAndKeyID(encoded, passphrase []byte) ([]byte, string, error) {
+	if err := requirePassphrase(passphrase, "decrypt"); err != nil {
+		return nil, "", err
+	}
 	hdr, err := parseHeader(encoded)
 	if err != nil {
 		return nil, "", err
@@ -147,6 +150,9 @@ func DecryptSignAttemptWithPassphraseAndKeyID(encoded, passphrase []byte) ([]byt
 }
 
 func decryptExpectedKeyID(encoded, passphrase []byte, recordType uint8, expectedKeyID string) ([]byte, error) {
+	if err := requirePassphrase(passphrase, "decrypt"); err != nil {
+		return nil, err
+	}
 	hdr, err := parseHeader(encoded)
 	if err != nil {
 		return nil, err
@@ -163,6 +169,9 @@ func decryptExpectedKeyID(encoded, passphrase []byte, recordType uint8, expected
 }
 
 func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, params *PassphraseParams) ([]byte, error) {
+	if err := requirePassphrase(passphrase, "encrypt"); err != nil {
+		return nil, err
+	}
 	if params == nil {
 		params = DefaultPassphraseParams()
 	}
@@ -206,6 +215,9 @@ func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, param
 }
 
 func decrypt(encoded, passphrase []byte, expectedRecordType uint8) ([]byte, error) {
+	if err := requirePassphrase(passphrase, "decrypt"); err != nil {
+		return nil, err
+	}
 	// Loose lower bound: the minimum valid encoding (no key_id, empty plaintext)
 	// is minHeaderLen + nonceLen + AEAD tag (16 bytes). A non-empty key_id makes
 	// the actual minimum larger; the real validation happens in parseHeader.
@@ -251,6 +263,13 @@ func decrypt(encoded, passphrase []byte, expectedRecordType uint8) ([]byte, erro
 		return nil, fmt.Errorf("tss decrypt: %w", err)
 	}
 	return plaintext, nil
+}
+
+func requirePassphrase(passphrase []byte, operation string) error {
+	if len(passphrase) == 0 {
+		return fmt.Errorf("tss %s: passphrase must not be empty", operation)
+	}
+	return nil
 }
 
 // header holds the parsed storage envelope header fields.

@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"testing"
-	"time"
 )
 
 func TestThresholdConfigCtx(t *testing.T) {
@@ -256,20 +255,15 @@ func TestThresholdConfigZeroValue(t *testing.T) {
 	}
 }
 
-func TestThresholdConfigLogAndTimeoutFields(t *testing.T) {
+func TestThresholdConfigLogField(t *testing.T) {
 	t.Parallel()
-	// Log and RoundTimeout are stored as-is with no getter transformation.
+	// Log is stored as-is with no getter transformation.
 	logger := &testLogger{}
-	timeout := 5 * time.Second
 	cfg := ThresholdConfig{
-		Log:          logger,
-		RoundTimeout: timeout,
+		Log: logger,
 	}
 	if cfg.Log != logger {
 		t.Error("Log field mismatch")
-	}
-	if cfg.RoundTimeout != timeout {
-		t.Error("RoundTimeout field mismatch")
 	}
 }
 

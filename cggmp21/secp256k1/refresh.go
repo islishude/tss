@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -34,6 +35,8 @@ type RefreshSession struct {
 	partyData       map[tss.PartyID]*refreshPartyData
 	completed       bool
 	aborted         bool
+	closed          bool
+	closePending    bool
 	refreshDisabled bool
 	guard           *tss.EnvelopeGuard
 	newShare        *KeyShare
@@ -98,7 +101,7 @@ func StartRefresh(plan *RefreshPlan, runtime RefreshRuntime) (*RefreshSession, [
 	if _, err := plan.Digest(); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self, CGGMP21Policies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
@@ -201,13 +204,16 @@ func (s *RefreshSession) validateInbound(env tss.InboundEnvelope) error {
 }
 
 // Handle validates and applies one Figure 7 or confirmation envelope.
-func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *RefreshSession) Handle(ctx context.Context, in tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil refresh session")
 	}
 	env := in.Envelope()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}
@@ -227,6 +233,9 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	if err := tss.ValidateInboundWithoutReplay(s.guard, in, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self); err != nil {
 		return nil, err
 	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
 	key := newPaperKeygenMessageKey(env)
 	if _, ok := s.accepted[key]; ok {
 		if err := s.validateInbound(in); err != nil {
@@ -240,7 +249,7 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	if s.auxInfo == nil || s.newShare != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("AuxInfo message arrived outside refresh Figure 7"))
 	}
-	prepared, err := s.auxInfo.prepareInbound(env)
+	prepared, err := s.auxInfo.prepareInbound(ctx, env)
 	if err != nil {
 		return nil, auxInfoPreparationError(env, s.cfg.Parties, err)
 	}
@@ -254,6 +263,9 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		defer output.destroy()
 	}
 	if err := s.validateInbound(in); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	if err := prepared.apply(); err != nil {
@@ -316,6 +328,7 @@ func (s *RefreshSession) Figure7Failure() (Figure7Failure, bool) {
 func (s *RefreshSession) terminalFigure7Failure(failure *Figure7Failure) error {
 	s.refreshDisabled = true
 	lifecycleErr := s.markRefreshProtocolFailed(s.cfg.Ctx())
+	s.closePending = lifecycleErr != nil
 	s.abort()
 	s.figure7Failure = cloneFigure7Failure(failure)
 	// Completed is used by tssrun as a terminal-disposition signal. KeyShare and
@@ -337,23 +350,81 @@ func (s *RefreshSession) KeyShare() (*KeyShare, bool) {
 	return cloneKeyShareValue(s.newShare), true
 }
 
-// Destroy clears secret state owned by the session.
-func (s *RefreshSession) Destroy() {
+// Abort terminally aborts an active refresh and durably resolves its lease.
+func (s *RefreshSession) Abort(ctx context.Context, reason string) error {
+	if err := validateSessionDisposition(ctx, reason); err != nil {
+		return err
+	}
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
-	if !s.lifecycleFinished && s.lifecycleFinal == nil && s.lifecycleStore != nil && s.lifecycleLease.Token != 0 {
+	defer s.mu.Unlock()
+	return s.abortDispositionLocked(ctx, reason)
+}
+
+func (s *RefreshSession) abortDispositionLocked(ctx context.Context, _ string) error {
+	if s.closed {
+		return nil
+	}
+	if !s.lifecycleFinished && s.lifecycleFinal != nil {
+		return tssrun.ErrLifecycleCommitPending
+	}
+	if s.completed && !s.aborted {
+		return tssrun.ErrRunCompleted
+	}
+	if !s.lifecycleFinished && s.lifecycleStore != nil && s.lifecycleLease.Token != 0 {
+		var err error
 		if s.refreshDisabled {
-			_ = s.markRefreshProtocolFailed(s.cfg.Ctx())
+			err = s.markRefreshProtocolFailed(ctx)
 		} else {
-			storeCtx, cancel := durableStoreContext(s.cfg.Ctx(), s.lifecycleTimeout)
-			_ = s.lifecycleStore.FinishRunLease(storeCtx, s.lifecycleLease, tssrun.LeaseAborted)
+			storeCtx, cancel := durableStoreContext(ctx, s.lifecycleTimeout)
+			err = s.lifecycleStore.FinishRunLease(storeCtx, s.lifecycleLease, tssrun.LeaseAborted)
 			cancel()
+			if err == nil {
+				s.lifecycleFinished = true
+			}
+		}
+		if err != nil {
+			s.abort()
+			s.closePending = true
+			return fmt.Errorf("abort refresh lifecycle lease: %w", err)
 		}
 	}
 	s.abort()
-	s.mu.Unlock()
+	s.closePending = false
+	return nil
+}
+
+// Close clears refresh state after its durable disposition is authoritative.
+func (s *RefreshSession) Close(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("nil session close context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if !s.lifecycleFinished && s.lifecycleFinal != nil {
+		return tssrun.ErrLifecycleCommitPending
+	}
+	needsAbort := s.closePending || (!s.completed && !s.aborted)
+	if needsAbort {
+		if err := s.abortDispositionLocked(ctx, "refresh session closed by caller"); err != nil {
+			return err
+		}
+	}
+	s.abort()
+	s.closed = true
+	s.closePending = false
+	return nil
 }
 
 func (s *RefreshSession) abort() {

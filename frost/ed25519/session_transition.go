@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"context"
 	"errors"
 
 	"github.com/islishude/tss"
@@ -17,6 +18,8 @@ type sessionTransition[S any] interface {
 }
 
 func handleSessionEnvelope[S any](
+	ctx context.Context,
+	sessionCtx context.Context,
 	state *S,
 	env tss.InboundEnvelope,
 	completed bool,
@@ -24,6 +27,9 @@ func handleSessionEnvelope[S any](
 	abort func(),
 	build func(tss.InboundEnvelope) (sessionTransition[S], error),
 ) (out []tss.Envelope, err error) {
+	if err := tss.CheckHandlerContext(ctx, sessionCtx); err != nil {
+		return nil, err
+	}
 	base := env.Envelope()
 	if completed {
 		return nil, completedSessionError(base.Round, base.From)
@@ -44,6 +50,9 @@ func handleSessionEnvelope[S any](
 		return nil, err
 	}
 	defer transition.cleanupOnReject()
+	if err := tss.CheckHandlerContext(ctx, sessionCtx); err != nil {
+		return nil, err
+	}
 	effects, err := transition.apply(state)
 	if err != nil {
 		return nil, err

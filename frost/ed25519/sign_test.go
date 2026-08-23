@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	stded25519 "crypto/ed25519"
 	"crypto/sha256"
 	"testing"
@@ -93,7 +94,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	round2, err := session.Handle(testutil.DeliverEnvelope(out2[0]))
+	round2, err := session.Handle(context.Background(), testutil.DeliverEnvelope(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 			if env.From == receiver {
 				continue
 			}
-			out, err := sessions[receiver].Handle(testutil.DeliverEnvelope(env))
+			out, err := sessions[receiver].Handle(context.Background(), testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver commitment from %d to %d: %v", env.From, receiver, err)
 			}
@@ -172,11 +173,11 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("expected two remote partials, got %d", len(round2))
 	}
 
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(round1[2])); err != nil {
+	if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(round1[2])); err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range round2 {
-		if _, err := sessions[1].Handle(testutil.DeliverEnvelope(env)); err != nil {
+		if _, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(env)); err != nil {
 			t.Fatalf("early partial from %d returned fatal error: %v", env.From, err)
 		}
 	}
@@ -187,7 +188,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("early partial state: accepted=%d pending=%d, want 0 accepted and 2 pending", len(sessions[1].partials), len(sessions[1].pendingPartials))
 	}
 
-	out, err := sessions[1].Handle(testutil.DeliverEnvelope(round1[3]))
+	out, err := sessions[1].Handle(context.Background(), testutil.DeliverEnvelope(round1[3]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,10 +233,7 @@ func TestSignNonSignerDoesNotConsumeReplayCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := tss.NewPartySet(1, 2, 3)
-	guard, err := tss.NewEnvelopeGuard(1, parties, tss.ProtocolFROSTEd25519, sessionID, testFROSTPolicies(), tss.NewBoundedReplayCache(1))
-	if err != nil {
-		t.Fatal(err)
-	}
+	guard := tss.NewTestEnvelopeGuardWithCache(1, parties, tss.ProtocolFROSTEd25519, sessionID, testFROSTPolicies(), tss.NewBoundedReplayCache(1))
 	session, _, err := startFROSTSign(shares[1], sessionID, tss.NewPartySet(1, 2), []byte("signer guard"), guard)
 	if err != nil {
 		t.Fatal(err)
@@ -255,10 +253,10 @@ func TestSignNonSignerDoesNotConsumeReplayCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.Handle(testutil.DeliverEnvelope(nonSigner)); err == nil {
+	if _, err := session.Handle(context.Background(), testutil.DeliverEnvelope(nonSigner)); err == nil {
 		t.Fatal("non-signer envelope accepted")
 	}
-	if _, err := session.Handle(testutil.DeliverEnvelope(signerOut[0])); err != nil {
+	if _, err := session.Handle(context.Background(), testutil.DeliverEnvelope(signerOut[0])); err != nil {
 		t.Fatalf("valid signer rejected after non-signer input: %v", err)
 	}
 }
@@ -286,10 +284,10 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	partials2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	partials2, err := session2.Handle(context.Background(), testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +312,7 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 	badPartial := partials2[0]
 	badPartial.Payload = badPayload
 
-	_, err = session1.Handle(testutil.DeliverEnvelope(badPartial))
+	_, err = session1.Handle(context.Background(), testutil.DeliverEnvelope(badPartial))
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
 		t.Fatal("invalid partial did not carry blame evidence")

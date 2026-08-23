@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -31,16 +32,18 @@ type ChildDerivationRun struct {
 type ChildDerivationSession struct {
 	mu sync.Mutex
 
-	cfg            tss.ThresholdConfig
-	plan           ChildDerivationPlanSnapshot
-	planHash       []byte
-	limits         Limits
-	securityParams SecurityParams
-	guard          *tss.EnvelopeGuard
-	store          tssrun.LifecycleStore
-	lease          tssrun.RunLease
-	storeTimeout   time.Duration
-	leaseFinished  bool
+	cfg             tss.ThresholdConfig
+	plan            ChildDerivationPlanSnapshot
+	planHash        []byte
+	limits          Limits
+	securityParams  SecurityParams
+	guard           *tss.EnvelopeGuard
+	store           tssrun.LifecycleStore
+	lease           tssrun.RunLease
+	storeTimeout    time.Duration
+	leaseFinished   bool
+	lifecycleFinal  *KeyShare
+	lifecycleOutbox []tss.Envelope
 
 	auxInfo        *auxInfoState
 	pending        *KeyShare
@@ -50,6 +53,8 @@ type ChildDerivationSession struct {
 	figure7Failure *Figure7Failure
 	completed      bool
 	aborted        bool
+	closed         bool
+	closePending   bool
 }
 
 // ChildDerivationResultMetadata is a public-only lifecycle disposition.
@@ -89,7 +94,7 @@ func StartChildDerivation(plan *ChildDerivationPlan, run ChildDerivationRun) (se
 	if local.Self == tss.BroadcastPartyId {
 		local.Self = parent.state.Party
 	}
-	if err := tss.RequireEnvelopeGuard(run.Guard, tss.ProtocolCGGMP21Secp256k1, snapshot.SessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(run.Guard, tss.ProtocolCGGMP21Secp256k1, snapshot.SessionID, local.Self, CGGMP21Policies()); err != nil {
 		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
 	}
 	if err := requireLocalEnvelopeSigner(run.Guard, local.EnvelopeSigner); err != nil {
@@ -147,7 +152,7 @@ func StartChildDerivation(plan *ChildDerivationPlan, run ChildDerivationRun) (se
 		StableSID:             snapshot.ChildSID,
 		Limits:                plan.limits,
 		SecurityParams:        snapshot.SecurityParams,
-		EnvelopeVerifier:      run.Guard.EnvelopeVerifier,
+		EnvelopeVerifier:      run.Guard.EnvelopeVerifier(),
 		PaillierBits:          snapshot.PaillierBits,
 		PlanHash:              planHash,
 		SourceEpochID:         snapshot.ParentBinding.EpochID.Bytes(),
@@ -264,13 +269,19 @@ func (s *ChildDerivationSession) Guard() *tss.EnvelopeGuard {
 }
 
 // Handle validates and applies one Figure 7 or child-confirmation envelope.
-func (s *ChildDerivationSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *ChildDerivationSession) Handle(ctx context.Context, in tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil child derivation session")
 	}
 	env := in.Envelope()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
+	if s.lifecycleFinal != nil {
+		return nil, tssrun.ErrLifecycleCommitPending
+	}
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}
@@ -284,10 +295,15 @@ func (s *ChildDerivationSession) Handle(in tss.InboundEnvelope) (out []tss.Envel
 				clearEnvelope(&out[i])
 			}
 			out = nil
-			err = s.abortRunLocked(err)
+			if abortErr := s.abortRunLocked(ctx); abortErr != nil {
+				err = errors.Join(err, abortErr)
+			}
 		}
 	}()
 	if err := tss.ValidateInboundWithoutReplay(s.guard, in, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	key := newPaperKeygenMessageKey(env)
@@ -298,12 +314,12 @@ func (s *ChildDerivationSession) Handle(in tss.InboundEnvelope) (out []tss.Envel
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("child derivation message slot is already accepted"))
 	}
 	if env.PayloadType == payloadChildConfirmation {
-		return s.handleChildConfirmationLocked(in, key)
+		return s.handleChildConfirmationLocked(ctx, in, key)
 	}
 	if s.auxInfo == nil || s.pending != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("AuxInfo message arrived outside child Figure 7"))
 	}
-	prepared, err := s.auxInfo.prepareInbound(env)
+	prepared, err := s.auxInfo.prepareInbound(ctx, env)
 	if err != nil {
 		return nil, paperKeygenPreparationError(env, err)
 	}
@@ -317,6 +333,9 @@ func (s *ChildDerivationSession) Handle(in tss.InboundEnvelope) (out []tss.Envel
 		defer output.destroy()
 	}
 	if err := s.validateInbound(in); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	if err := prepared.apply(); err != nil {
@@ -337,29 +356,23 @@ func (s *ChildDerivationSession) Handle(in tss.InboundEnvelope) (out []tss.Envel
 	}
 	s.commitChildDerivationOutputLocked(output)
 	if output.final != nil {
-		if err := s.persistChildGenerationLocked(output.final); err != nil {
+		s.lifecycleFinal = output.final
+		output.final = nil
+		if err := s.persistChildGenerationLocked(s.lifecycleFinal); err != nil {
+			s.lifecycleOutbox = cloneLifecycleEnvelopes(append(prepared.out, output.confirmationEnvelope))
 			for i := range prepared.out {
 				clearEnvelope(&prepared.out[i])
 			}
 			clearEnvelope(&output.confirmationEnvelope)
-			return nil, s.abortRunLocked(err)
+			return nil, err
 		}
+		s.lifecycleFinal = nil
 	}
 	return append(prepared.out, output.confirmationEnvelope), nil
 }
 
 func (s *ChildDerivationSession) validateInbound(in tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, in, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
-}
-
-// Completed reports whether the child generation was durably installed.
-func (s *ChildDerivationSession) Completed() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.completed && !s.aborted
 }
 
 // ResultMetadata returns a public-only child lifecycle disposition.
@@ -400,36 +413,85 @@ func (s *ChildDerivationSession) Figure7Failure() (Figure7Failure, bool) {
 	return s.figure7Failure.Clone(), true
 }
 
-// Destroy aborts an unfinished lease and clears all session-owned secret state.
-func (s *ChildDerivationSession) Destroy() {
+// Abort terminally aborts child derivation and durably resolves its lease.
+func (s *ChildDerivationSession) Abort(ctx context.Context, reason string) error {
+	if err := validateSessionDisposition(ctx, reason); err != nil {
+		return err
+	}
 	if s == nil {
-		return
+		return nil
 	}
 	s.mu.Lock()
-	if !s.completed && !s.aborted {
-		_ = s.abortRunLocked(errors.New("child derivation session destroyed"))
-	} else {
-		s.clearSecretStateLocked()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
 	}
-	s.mu.Unlock()
+	if s.lifecycleFinal != nil {
+		return tssrun.ErrLifecycleCommitPending
+	}
+	if s.completed && !s.aborted {
+		return tssrun.ErrRunCompleted
+	}
+	err := s.abortRunLocked(ctx)
+	if err != nil {
+		s.closePending = true
+		return err
+	}
+	s.closePending = false
+	return nil
 }
 
-func (s *ChildDerivationSession) abortRunLocked(cause error) error {
+// Close clears child-derivation state after its durable disposition is authoritative.
+func (s *ChildDerivationSession) Close(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("nil session close context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s == nil {
-		return cause
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	if s.lifecycleFinal != nil {
+		return tssrun.ErrLifecycleCommitPending
+	}
+	needsAbort := !s.completed && (!s.aborted || s.closePending)
+	if needsAbort {
+		if err := s.abortRunLocked(ctx); err != nil {
+			return err
+		}
+	}
+	s.clearSecretStateLocked()
+	clearLifecycleEnvelopes(s.lifecycleOutbox)
+	s.lifecycleOutbox = nil
+	s.closed = true
+	s.closePending = false
+	return nil
+}
+
+func (s *ChildDerivationSession) abortRunLocked(ctx context.Context) error {
+	if s == nil {
+		return nil
 	}
 	s.abortLocked()
 	if s.leaseFinished || s.store == nil || s.lease.Token == 0 {
-		return cause
+		return nil
 	}
-	storeCtx, cancel := durableStoreContext(s.cfg.Ctx(), s.storeTimeout)
+	storeCtx, cancel := durableStoreContext(ctx, s.storeTimeout)
 	finishErr := s.store.FinishRunLease(storeCtx, s.lease, tssrun.LeaseAborted)
 	cancel()
 	if finishErr != nil {
-		return errors.Join(cause, fmt.Errorf("abort child derivation run lease: %w", finishErr))
+		s.closePending = true
+		return fmt.Errorf("abort child derivation run lease: %w", finishErr)
 	}
 	s.leaseFinished = true
-	return cause
+	s.closePending = false
+	return nil
 }
 
 func (s *ChildDerivationSession) abortLocked() {
@@ -459,6 +521,33 @@ func (s *ChildDerivationSession) clearSecretStateLocked() {
 	}
 }
 
+// RetryLifecycleCommit retries the exact staged child-generation installation
+// and returns its withheld outbox only after the store is authoritative.
+func (s *ChildDerivationSession) RetryLifecycleCommit(ctx context.Context) ([]tss.Envelope, error) {
+	if s == nil {
+		return nil, errors.New("nil child derivation session")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lifecycleFinal == nil {
+		if s.leaseFinished {
+			out := cloneLifecycleEnvelopes(s.lifecycleOutbox)
+			clearLifecycleEnvelopes(s.lifecycleOutbox)
+			s.lifecycleOutbox = nil
+			return out, nil
+		}
+		return nil, tssrun.ErrLifecycleCommitPending
+	}
+	if err := s.persistChildGenerationLocked(s.lifecycleFinal); err != nil {
+		return nil, err
+	}
+	s.lifecycleFinal = nil
+	out := cloneLifecycleEnvelopes(s.lifecycleOutbox)
+	clearLifecycleEnvelopes(s.lifecycleOutbox)
+	s.lifecycleOutbox = nil
+	return out, nil
+}
+
 func (s *ChildDerivationSession) terminalFigure7FailureLocked(failure *Figure7Failure) error {
 	clone := cloneFigure7Failure(failure)
 	s.abortLocked()
@@ -469,7 +558,9 @@ func (s *ChildDerivationSession) terminalFigure7FailureLocked(failure *Figure7Fa
 		cancel()
 		if err == nil {
 			s.leaseFinished = true
+			s.closePending = false
 		} else {
+			s.closePending = true
 			err = fmt.Errorf("abort failed child derivation lease: %w", err)
 		}
 	}

@@ -28,6 +28,47 @@ func TestEncryptDecryptKeyShareWithPassphrase(t *testing.T) {
 	}
 }
 
+func TestPassphraseHelpersRejectEmptyPassphrase(t *testing.T) {
+	t.Parallel()
+	params := &PassphraseParams{Time: 1, Memory: 1024, Threads: 1}
+	encryptors := []struct {
+		name string
+		call func() error
+	}{
+		{name: "key share", call: func() error {
+			_, err := EncryptKeyShareWithPassphrase([]byte("secret"), nil, "key", params)
+			return err
+		}},
+		{name: "presign", call: func() error {
+			_, err := EncryptPresignWithPassphrase([]byte("secret"), nil, "presign", params)
+			return err
+		}},
+		{name: "sign attempt", call: func() error {
+			_, err := EncryptSignAttemptWithPassphrase([]byte("secret"), nil, "attempt", params)
+			return err
+		}},
+	}
+	for _, test := range encryptors {
+		if err := test.call(); err == nil {
+			t.Fatalf("%s encryption accepted an empty passphrase", test.name)
+		}
+	}
+	decryptors := []struct {
+		name string
+		call func() error
+	}{
+		{name: "key share", call: func() error { _, err := DecryptKeyShareWithPassphrase(nil, nil, "key"); return err }},
+		{name: "presign", call: func() error { _, err := DecryptPresignWithPassphrase(nil, nil, "presign"); return err }},
+		{name: "sign attempt", call: func() error { _, err := DecryptSignAttemptWithPassphrase(nil, nil, "attempt"); return err }},
+		{name: "sign attempt with key id", call: func() error { _, _, err := DecryptSignAttemptWithPassphraseAndKeyID(nil, nil); return err }},
+	}
+	for _, test := range decryptors {
+		if err := test.call(); err == nil || err.Error() != "tss decrypt: passphrase must not be empty" {
+			t.Fatalf("%s empty-passphrase error = %v", test.name, err)
+		}
+	}
+}
+
 func TestEncryptDecryptKeyShareWithPassphraseWrongPassphrase(t *testing.T) {
 	t.Parallel()
 	plaintext := []byte("test key share data")

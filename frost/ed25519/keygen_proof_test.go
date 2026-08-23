@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"testing"
@@ -64,7 +65,7 @@ func TestFROSTKeygenRogueConstantRejectedBeforeShareEffects(t *testing.T) {
 	t.Parallel()
 
 	session, remoteOut := frostKeygenTransitionSessions(t)
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	env := mustFROSTEnvelope(t, remoteOut, payloadKeygenCommitments, tss.BroadcastPartyId)
 	payload, err := unmarshalKeygenCommitmentsPayload(env.Payload)
 	if err != nil {
@@ -84,7 +85,7 @@ func TestFROSTKeygenRogueConstantRejectedBeforeShareEffects(t *testing.T) {
 	}
 	env.Payload = mutated
 
-	out, err := session.Handle(testutil.DeliverEnvelope(env))
+	out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(env))
 	protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if protocolErr.Party != env.From || protocolErr.Blame == nil {
 		t.Fatalf("rogue constant rejection was not attributed to dealer %d: %#v", env.From, protocolErr)
@@ -115,12 +116,12 @@ func TestFROSTKeygenVerifiesAllProofsBeforeShareEffects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer session.Destroy()
+		defer closeTestSession(t, session)
 		sessions[party] = session
 		start[party] = out
 	}
 	target := sessions[1]
-	if out, err := target.Handle(testutil.DeliverEnvelope(
+	if out, err := target.Handle(context.Background(), testutil.DeliverEnvelope(
 		mustFROSTEnvelope(t, start[2], payloadKeygenCommitments, tss.BroadcastPartyId),
 	)); err != nil || len(out) != 0 {
 		t.Fatalf("first valid proof: out=%d err=%v", len(out), err)
@@ -145,7 +146,7 @@ func TestFROSTKeygenVerifiesAllProofsBeforeShareEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := target.Handle(testutil.DeliverEnvelope(last))
+	out, err := target.Handle(context.Background(), testutil.DeliverEnvelope(last))
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if len(out) != 0 {
 		t.Fatalf("invalid final proof emitted %d confidential share effects", len(out))
@@ -166,12 +167,12 @@ func TestFROSTKeygenEarlyShareIsRevalidatedAtCommitmentCutover(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			session, remoteOut := frostKeygenTransitionSessions(t)
-			defer session.Destroy()
+			defer closeTestSession(t, session)
 			share := mustFROSTEnvelope(t, remoteOut, payloadKeygenShare, session.cfg.Self)
 			if tc.tamper {
 				share = mutateCanonicalFROSTKeygenShare(t, session, share)
 			}
-			if out, err := session.Handle(testutil.DeliverEnvelope(share)); err != nil || len(out) != 0 {
+			if out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(share)); err != nil || len(out) != 0 {
 				t.Fatalf("buffer early share: out=%d err=%v", len(out), err)
 			}
 			if session.state != keygenCollectingCommitments || session.round1.slots[share.From].share == nil {
@@ -179,7 +180,7 @@ func TestFROSTKeygenEarlyShareIsRevalidatedAtCommitmentCutover(t *testing.T) {
 			}
 
 			commitment := mustFROSTEnvelope(t, remoteOut, payloadKeygenCommitments, tss.BroadcastPartyId)
-			out, err := session.Handle(testutil.DeliverEnvelope(commitment))
+			out, err := session.Handle(context.Background(), testutil.DeliverEnvelope(commitment))
 			if !tc.wantErr {
 				if err != nil {
 					t.Fatal(err)

@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"context"
 	stded25519 "crypto/ed25519"
 	"encoding/json"
 	"fmt"
@@ -128,7 +129,7 @@ func TestFROSTTrustedDealerPlanAndContributionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Destroy()
+	defer closeTestSession(t, session)
 	defer clearEnvelopePayloads(out)
 	if _, err := contributions[1].MarshalBinaryWithLimits(limits); err == nil {
 		t.Fatal("successfully claimed contribution remained serializable")
@@ -277,7 +278,7 @@ func TestFROSTTrustedDealerCommitmentBindingsRejectBeforeAcceptance(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer session1.Destroy()
+			defer closeTestSession(t, session1)
 			defer clearEnvelopePayloads(out1)
 			session2, out2, err := StartTrustedDealerImport(
 				plan,
@@ -288,7 +289,7 @@ func TestFROSTTrustedDealerCommitmentBindingsRejectBeforeAcceptance(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer session2.Destroy()
+			defer closeTestSession(t, session2)
 			defer clearEnvelopePayloads(out2)
 
 			env := mustFROSTEnvelope(t, out2, payloadKeygenCommitments, tss.BroadcastPartyId)
@@ -304,7 +305,7 @@ func TestFROSTTrustedDealerCommitmentBindingsRejectBeforeAcceptance(t *testing.T
 			defer clear(mutated)
 			env.Payload = mutated
 
-			out, err := session1.Handle(testutil.DeliverEnvelope(env))
+			out, err := session1.Handle(context.Background(), testutil.DeliverEnvelope(env))
 			protocolErr := testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 			if protocolErr.Party != env.From || protocolErr.Blame == nil {
 				t.Fatal("trusted-dealer public commitment rejection lacked sender attribution")
@@ -335,7 +336,7 @@ func TestFROSTTrustedDealerContributionReplayBoundaries(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer session.Destroy()
+		defer closeTestSession(t, session)
 		defer clearEnvelopePayloads(out)
 		assertFROSTTrustedDealerStartRejected(t, plan, contributions[1], 1, 848)
 	})
@@ -367,7 +368,7 @@ func TestFROSTTrustedDealerContributionReplayBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatalf("serialized contribution copy %d did not start independently: %v", i, err)
 			}
-			session.Destroy()
+			closeTestSession(t, session)
 			clearEnvelopePayloads(out)
 		}
 	})
@@ -617,7 +618,7 @@ func assertFROSTTrustedDealerStartRejected(t *testing.T, plan *TrustedDealerImpo
 	)
 	clearEnvelopePayloads(out)
 	if session != nil {
-		session.Destroy()
+		closeTestSession(t, session)
 		t.Fatal("rejected trusted-dealer start returned a session")
 	}
 	if len(out) != 0 {

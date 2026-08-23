@@ -87,7 +87,7 @@ type refreshTestSession struct {
 	destroyed atomic.Bool
 }
 
-func (s *refreshTestSession) Handle(in InboundEnvelope) ([]Envelope, error) {
+func (s *refreshTestSession) Handle(_ context.Context, in InboundEnvelope) ([]Envelope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.handle != nil {
@@ -103,8 +103,9 @@ func (s *refreshTestSession) KeyShare() (*refreshTestShare, bool) {
 	return s.refreshed, s.complete
 }
 
-func (s *refreshTestSession) Destroy() {
+func (s *refreshTestSession) Close(context.Context) error {
 	s.destroyed.Store(true)
+	return nil
 }
 
 type refreshTestRunner struct {

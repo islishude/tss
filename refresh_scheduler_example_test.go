@@ -42,7 +42,7 @@ type exampleRefreshSession struct {
 	refreshed *exampleRefreshShare
 }
 
-func (exampleRefreshSession) Handle(tss.InboundEnvelope) ([]tss.Envelope, error) {
+func (exampleRefreshSession) Handle(context.Context, tss.InboundEnvelope) ([]tss.Envelope, error) {
 	return nil, errors.New("example refresh is already complete")
 }
 
@@ -50,7 +50,7 @@ func (s exampleRefreshSession) KeyShare() (*exampleRefreshShare, bool) {
 	return s.refreshed, true
 }
 
-func (exampleRefreshSession) Destroy() {}
+func (exampleRefreshSession) Close(context.Context) error { return nil }
 
 type exampleRefreshTransport struct{}
 

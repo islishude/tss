@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -10,7 +11,7 @@ import (
 	"github.com/islishude/tss/internal/planvalidation"
 )
 
-func (s *ChildDerivationSession) handleChildConfirmationLocked(in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
+func (s *ChildDerivationSession) handleChildConfirmationLocked(ctx context.Context, in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
 	env := in.Envelope()
 	if env.Round != childConfirmationRound || env.To != tss.BroadcastPartyId {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("child confirmation in wrong round or delivery mode"))
@@ -59,23 +60,35 @@ func (s *ChildDerivationSession) handleChildConfirmationLocked(in tss.InboundEnv
 	candidates := s.childConfirmationCandidates(env.From, confirmation)
 	defer destroyPaperConfirmationMap(candidates)
 	var final *KeyShare
+	finalOwned := false
 	if s.pending != nil && len(candidates) == len(s.cfg.Parties) {
 		final, err = s.buildChildFinalKeyShare(s.pending, candidates)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		defer final.Destroy()
+		finalOwned = true
+		defer func() {
+			if finalOwned {
+				final.Destroy()
+			}
+		}()
 	}
 	if err := s.validateInbound(in); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
 	s.confirmations[env.From] = confirmation
 	s.accepted[key] = struct{}{}
 	owned = false
 	if final != nil {
-		if err := s.persistChildGenerationLocked(final); err != nil {
-			return nil, s.abortRunLocked(err)
+		s.lifecycleFinal = final
+		finalOwned = false
+		if err := s.persistChildGenerationLocked(s.lifecycleFinal); err != nil {
+			return nil, err
 		}
+		s.lifecycleFinal = nil
 	}
 	return nil, nil
 }

@@ -354,7 +354,7 @@ func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggm
 	if err := security.route(queue, parties, func(tss.Envelope) tss.PartySet {
 		return parties
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].Handle(env)
+		return sessions[id].Handle(context.Background(), env)
 	}); err != nil {
 		return nil, err
 	}
@@ -457,7 +457,7 @@ func runExampleCGGMPPresign(
 	if err := security.route(queue, signerSet, func(tss.Envelope) tss.PartySet {
 		return signerSet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].Handle(env)
+		return sessions[id].Handle(context.Background(), env)
 	}); err != nil {
 		return nil, err
 	}
@@ -469,7 +469,9 @@ func runExampleCGGMPPresign(
 			return nil, fmt.Errorf("presign not complete for party %d", id)
 		}
 		presigns[id] = presign
-		sessions[id].Destroy()
+		if err := sessions[id].Close(context.Background()); err != nil {
+			return nil, fmt.Errorf("close presign session for party %d: %w", id, err)
+		}
 	}
 	return presigns, nil
 }
@@ -597,7 +599,7 @@ func runExampleCGGMPSign(
 	if err := security.route(queue, signerSet, func(tss.Envelope) tss.PartySet {
 		return signerSet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].Handle(env)
+		return sessions[id].Handle(context.Background(), env)
 	}); err != nil {
 		return nil, nil, err
 	}

@@ -202,7 +202,6 @@ func (s *ChildDerivationSession) persistChildGenerationLocked(final *KeyShare) e
 	if s == nil || final == nil || final.state == nil || final.state.Epoch == nil {
 		return errors.New("invalid child generation persistence input")
 	}
-	defer final.Destroy()
 	epochID, err := tssrun.NewEpochID(final.state.Epoch.EpochID)
 	if err != nil {
 		return err
@@ -252,5 +251,6 @@ func (s *ChildDerivationSession) persistChildGenerationLocked(final *KeyShare) e
 		}
 		delete(s.confirmations, party)
 	}
+	final.Destroy()
 	return nil
 }
