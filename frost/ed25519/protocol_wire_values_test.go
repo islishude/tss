@@ -42,7 +42,7 @@ func TestCanonicalScalarBoundaries(t *testing.T) {
 				t.Fatal("non-canonical scalar accepted")
 			}
 			var decoded canonicalScalar
-			if err := decoded.UnmarshalWireValue(tc.in); err == nil {
+			if _, err := decoded.UnmarshalWireValue(tc.in); err == nil {
 				t.Fatal("wire scalar decoder accepted non-canonical input")
 			}
 		})

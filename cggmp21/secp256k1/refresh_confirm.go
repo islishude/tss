@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 
@@ -30,13 +29,6 @@ func (s *RefreshSession) handlePaperRefreshConfirmation(in tss.InboundEnvelope, 
 	if confirmation.Sender != env.From {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("refresh confirmation sender mismatch"))
 	}
-	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if !bytes.Equal(canonical, env.Payload) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical refresh confirmation"))
-	}
 	if err := planvalidation.RequireHash("refresh confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
@@ -48,8 +40,7 @@ func (s *RefreshSession) handlePaperRefreshConfirmation(in tss.InboundEnvelope, 
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	if pd.confirmation != nil {
-		existing, marshalErr := pd.confirmation.MarshalBinaryWithLimits(s.limits)
-		if marshalErr == nil && bytes.Equal(existing, canonical) {
+		if equalKeygenConfirmations(pd.confirmation, confirmation) {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, tss.ErrDuplicateMessage)
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting refresh confirmation from party %d", env.From))

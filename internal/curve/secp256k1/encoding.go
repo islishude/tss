@@ -26,16 +26,16 @@ func (p *Point) MarshalWireValue() ([]byte, error) {
 
 // UnmarshalWireValue decodes canonical compressed SEC 1 point bytes for
 // internal/wire's custom field kind.
-func (p *Point) UnmarshalWireValue(in []byte) error {
+func (p *Point) UnmarshalWireValue(in []byte) (int, error) {
 	if p == nil {
-		return errors.New("nil secp256k1 point")
+		return 0, errors.New("nil secp256k1 point")
 	}
 	q, err := PointFromBytes(in)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	*p = *q
-	return nil
+	return len(in), nil
 }
 
 // MarshalWireValue encodes the scalar as a fixed-width canonical value for
@@ -47,16 +47,16 @@ func (s Scalar) MarshalWireValue() ([]byte, error) {
 // UnmarshalWireValue decodes a fixed-width canonical scalar for
 // internal/wire's custom field kind. Zero is accepted here; callers enforce
 // context-specific non-zero requirements after unmarshaling.
-func (s *Scalar) UnmarshalWireValue(in []byte) error {
+func (s *Scalar) UnmarshalWireValue(in []byte) (int, error) {
 	if s == nil {
-		return errors.New("nil secp256k1 scalar")
+		return 0, errors.New("nil secp256k1 scalar")
 	}
 	v, err := ScalarFromBytesAllowZero(in)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	*s = v
-	return nil
+	return len(in), nil
 }
 
 // PointFromBytes parses canonical compressed SEC 1 point bytes.

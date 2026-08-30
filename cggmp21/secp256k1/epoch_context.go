@@ -52,19 +52,19 @@ func (id EpochSourceID) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes one canonical fixed-width source epoch ID.
-func (id *EpochSourceID) UnmarshalWireValue(in []byte) error {
+func (id *EpochSourceID) UnmarshalWireValue(in []byte) (int, error) {
 	if id == nil {
-		return errors.New("nil epoch source id")
+		return 0, errors.New("nil epoch source id")
 	}
 	if len(in) != sha256.Size {
-		return fmt.Errorf("epoch source id must be %d bytes", sha256.Size)
+		return 0, fmt.Errorf("epoch source id must be %d bytes", sha256.Size)
 	}
 	var zero [sha256.Size]byte
 	if bytes.Equal(in, zero[:]) {
-		return errors.New("epoch source id must be non-zero")
+		return 0, errors.New("epoch source id must be non-zero")
 	}
 	copy(id[:], in)
-	return nil
+	return len(in), nil
 }
 
 func newEpochSourceID(in []byte) (*EpochSourceID, error) {

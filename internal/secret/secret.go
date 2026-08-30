@@ -99,16 +99,16 @@ func (s *Scalar) MarshalWireValue() ([]byte, error) {
 // use by internal/wire's "custom" field kind. It implements the
 // wire.ValueUnmarshaler interface via Go structural typing.
 // The input is copied so the caller retains ownership.
-func (s *Scalar) UnmarshalWireValue(in []byte) error {
+func (s *Scalar) UnmarshalWireValue(in []byte) (int, error) {
 	if s == nil {
-		return errors.New("nil scalar")
+		return 0, errors.New("nil scalar")
 	}
 	if len(in) == 0 {
-		return errors.New("empty scalar")
+		return 0, errors.New("empty scalar")
 	}
 	s.buf = make([]byte, len(in))
 	copy(s.buf, in)
-	return nil
+	return len(in), nil
 }
 
 // Clone returns an independent copy of the scalar, or nil if s is nil.

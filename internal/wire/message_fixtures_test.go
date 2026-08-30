@@ -274,13 +274,13 @@ func (c customBytes) MarshalWireValue() ([]byte, error) {
 	return out, nil
 }
 
-func (c *customBytes) UnmarshalWireValue(in []byte) error {
+func (c *customBytes) UnmarshalWireValue(in []byte) (int, error) {
 	if len(in) == 0 {
-		return errSentinel
+		return 0, errSentinel
 	}
 	c.raw = make([]byte, len(in))
 	copy(c.raw, in)
-	return nil
+	return len(in), nil
 }
 
 // customPtrBytes is a domain type with pointer-receiver methods.
@@ -297,13 +297,13 @@ func (c *customPtrBytes) MarshalWireValue() ([]byte, error) {
 	return out, nil
 }
 
-func (c *customPtrBytes) UnmarshalWireValue(in []byte) error {
+func (c *customPtrBytes) UnmarshalWireValue(in []byte) (int, error) {
 	if c == nil {
-		return errSentinel
+		return 0, errSentinel
 	}
 	c.raw = make([]byte, len(in))
 	copy(c.raw, in)
-	return nil
+	return len(in), nil
 }
 
 // customNoUnmarshal implements MarshalWireValue but not UnmarshalWireValue.
@@ -320,10 +320,10 @@ type customNoMarshal struct {
 	raw []byte
 }
 
-func (c *customNoMarshal) UnmarshalWireValue(in []byte) error {
+func (c *customNoMarshal) UnmarshalWireValue(in []byte) (int, error) {
 	c.raw = make([]byte, len(in))
 	copy(c.raw, in)
-	return nil
+	return len(in), nil
 }
 
 // customNilReturn returns nil from MarshalWireValue.
@@ -333,8 +333,8 @@ func (c customNilReturn) MarshalWireValue() ([]byte, error) {
 	return nil, nil
 }
 
-func (c *customNilReturn) UnmarshalWireValue(in []byte) error {
-	return nil
+func (c *customNilReturn) UnmarshalWireValue(in []byte) (int, error) {
+	return len(in), nil
 }
 
 type customValueReceiverMessage struct {
@@ -380,16 +380,16 @@ func (c customCountedList) MarshalWireValue() ([]byte, error) {
 	return EncodeBytesList(c.items), nil
 }
 
-func (c *customCountedList) UnmarshalWireValue(in []byte) error {
+func (c *customCountedList) UnmarshalWireValue(in []byte) (int, error) {
 	items, err := DecodeBytesList(in)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	c.items = make([][]byte, len(items))
 	for i, item := range items {
 		c.items[i] = bytes.Clone(item)
 	}
-	return nil
+	return len(in), nil
 }
 
 type customMaxItemsMessage struct {
@@ -415,7 +415,7 @@ func (panicOnUnmarshalCustomList) MarshalWireValue() ([]byte, error) {
 	return Uint32(0), nil
 }
 
-func (*panicOnUnmarshalCustomList) UnmarshalWireValue([]byte) error {
+func (*panicOnUnmarshalCustomList) UnmarshalWireValue([]byte) (int, error) {
 	panic("custom unmarshal should not be called")
 }
 

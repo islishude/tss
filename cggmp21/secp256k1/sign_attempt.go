@@ -266,11 +266,6 @@ func unmarshalSignAttemptPublicContext(raw []byte, limits Limits) (signAttemptPu
 		context.destroy()
 		return signAttemptPublicContext{}, err
 	}
-	canonical, err := wire.Marshal(context, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
-	if err != nil || !bytes.Equal(raw, canonical) {
-		context.destroy()
-		return signAttemptPublicContext{}, fmt.Errorf("%w: non-canonical sign public context", ErrSignAttemptCorrupt)
-	}
 	return context, nil
 }
 
@@ -364,10 +359,6 @@ func unmarshalSignAttemptOutbox(raw []byte, limits Limits) (signAttemptOutbox, e
 	if err := validateSignAttemptOutbox(outbox, limits); err != nil {
 		return signAttemptOutbox{}, err
 	}
-	canonical, err := wire.Marshal(outbox, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
-	if err != nil || !bytes.Equal(raw, canonical) {
-		return signAttemptOutbox{}, fmt.Errorf("%w: non-canonical sign outbox", ErrSignAttemptCorrupt)
-	}
 	return outbox, nil
 }
 
@@ -391,10 +382,6 @@ func unmarshalSignAttemptDelivery(raw []byte, limits Limits, verifier tss.Broadc
 	}
 	if err := validateSignAttemptDelivery(delivery, verifier); err != nil {
 		return signAttemptDelivery{}, err
-	}
-	canonical, err := wire.Marshal(delivery, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
-	if err != nil || !bytes.Equal(raw, canonical) {
-		return signAttemptDelivery{}, fmt.Errorf("%w: non-canonical sign delivery", ErrSignAttemptCorrupt)
 	}
 	return delivery, nil
 }
@@ -426,10 +413,6 @@ func unmarshalSignAttemptCompletion(raw []byte, limits Limits) (signAttemptCompl
 	}
 	if err := validateSignAttemptCompletion(completion); err != nil {
 		return signAttemptCompletion{}, err
-	}
-	canonical, err := wire.Marshal(completion, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
-	if err != nil || !bytes.Equal(raw, canonical) {
-		return signAttemptCompletion{}, fmt.Errorf("%w: non-canonical sign completion", ErrSignAttemptCorrupt)
 	}
 	return completion, nil
 }
@@ -801,13 +784,6 @@ func decodeSignAttemptEnvelopeWithLimits(raw []byte, limits Limits) (tss.Envelop
 	var env tss.Envelope
 	if err := env.UnmarshalBinary(raw); err != nil {
 		return tss.Envelope{}, signPartialPayload{}, err
-	}
-	canonical, err := env.MarshalBinary()
-	if err != nil {
-		return tss.Envelope{}, signPartialPayload{}, err
-	}
-	if !bytes.Equal(raw, canonical) {
-		return tss.Envelope{}, signPartialPayload{}, errors.New("non-canonical sign envelope")
 	}
 	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
 	if err != nil {

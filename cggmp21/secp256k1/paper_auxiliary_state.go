@@ -1260,14 +1260,6 @@ func (s *auxInfoState) verifyDecryptionError(reporter tss.PartyID, payload *auxI
 	if err != nil {
 		return nil, false, errors.New("decode auxinfo decryption-error signed envelope")
 	}
-	canonical, err := direct.MarshalBinaryWithLimits(envelopeLimits)
-	if err != nil {
-		return nil, false, errors.New("marshal auxinfo decryption-error signed envelope")
-	}
-	defer clear(canonical)
-	if !bytes.Equal(canonical, payload.SignedDirectEnvelope) {
-		return nil, false, errors.New("non-canonical auxinfo decryption-error signed envelope")
-	}
 	digest := direct.Digest()
 	digestBytes := bytes.Clone(digest[:])
 	if direct.Protocol != tss.ProtocolCGGMP21Secp256k1 || direct.SessionID != s.cfg.SessionID ||

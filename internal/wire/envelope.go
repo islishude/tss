@@ -16,6 +16,14 @@ type Field struct {
 	Value []byte
 }
 
+type fieldDecodeMode uint8
+
+const (
+	fieldDecodeView fieldDecodeMode = iota
+	fieldDecodeCopy
+	fieldDecodeValidateOnly
+)
+
 // MarshalFields encodes a typed message and rejects unsorted or duplicate tags.
 func MarshalFields(version uint16, typeID string, fields []Field) ([]byte, error) {
 	if typeID == "" {
@@ -139,6 +147,35 @@ func UnmarshalFields(in []byte, expectedTypeID string) (uint16, []Field, error) 
 // It checks the total input size, field count, and per-field value size before
 // allocating memory, preventing oversized messages from causing OOM.
 func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits FrameLimits) (uint16, []Field, error) {
+	return unmarshalFieldsWithLimits(in, expectedTypeID, limits, fieldDecodeCopy)
+}
+
+// unmarshalFieldViewsWithLimits decodes a message into field views that borrow
+// their value bytes from in. Callers must finish decoding before in can be
+// released or mutated, and field decoders must copy any retained value.
+func unmarshalFieldViewsWithLimits(in []byte, expectedTypeID string, limits FrameLimits) (uint16, []Field, error) {
+	return unmarshalFieldsWithLimits(in, expectedTypeID, limits, fieldDecodeView)
+}
+
+// validateMessageFrame validates a complete message without materializing or
+// copying its fields. It is used to preflight type-level codec hooks.
+func validateMessageFrame(in []byte, msg Message, limits FrameLimits) error {
+	version, _, err := unmarshalFieldsWithLimits(in, msg.WireType(), limits, fieldDecodeValidateOnly)
+	if err != nil {
+		return err
+	}
+	if version != msg.WireVersion() {
+		return fmt.Errorf("got version %d, want %d", version, msg.WireVersion())
+	}
+	return nil
+}
+
+func unmarshalFieldsWithLimits(
+	in []byte,
+	expectedTypeID string,
+	limits FrameLimits,
+	mode fieldDecodeMode,
+) (uint16, []Field, error) {
 	limits = limits.withDefaults()
 	if err := limits.validate(); err != nil {
 		return 0, nil, err
@@ -180,7 +217,7 @@ func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits FrameLim
 		return 0, nil, err
 	}
 
-	fields, newOffset, err := unmarshalFieldBody(in, offset, limits, typeID)
+	fields, newOffset, err := decodeFieldBody(in, offset, limits, typeID, mode)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -191,11 +228,19 @@ func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits FrameLim
 	return version, fields, nil
 }
 
-// unmarshalFieldBody decodes a field body starting at offset in raw.
-// It validates field count, tag ordering, value sizes, and trailing bytes.
-// The returned fields each own their value bytes (copied from raw).
+// decodeFieldBody decodes a field body starting at offset in raw.
+// It validates field count, tag ordering, and value sizes. The enclosing
+// message or record decoder compares the returned offset with the input length.
+// Depending on mode, returned fields either borrow or own their value bytes;
+// validation-only mode returns no fields.
 // It returns the new offset after the field body.
-func unmarshalFieldBody(raw []byte, offset int, limits FrameLimits, name string) ([]Field, int, error) {
+func decodeFieldBody(
+	raw []byte,
+	offset int,
+	limits FrameLimits,
+	name string,
+	mode fieldDecodeMode,
+) ([]Field, int, error) {
 	if len(raw)-offset < 2 {
 		return nil, 0, fmt.Errorf("truncated %s field body", name)
 	}
@@ -207,7 +252,10 @@ func unmarshalFieldBody(raw []byte, offset int, limits FrameLimits, name string)
 	if int(fieldCount) > limits.MaxFields {
 		return nil, 0, fmt.Errorf("too many %s fields: %d > %d", name, fieldCount, limits.MaxFields)
 	}
-	fields := make([]Field, 0, fieldCount)
+	var fields []Field
+	if mode != fieldDecodeValidateOnly {
+		fields = make([]Field, 0, fieldCount)
+	}
 	var last uint16
 	for i := 0; i < int(fieldCount); i++ {
 		tag, next, err := ReadUint16(raw, offset)
@@ -233,9 +281,13 @@ func unmarshalFieldBody(raw []byte, offset int, limits FrameLimits, name string)
 			return nil, 0, fmt.Errorf("wire field %d too large: %d > %d", tag, length, limits.MaxFieldBytes)
 		}
 		lengthInt := int(length)
-		value := make([]byte, lengthInt)
-		copy(value, raw[offset:offset+lengthInt])
-		fields = append(fields, Field{Tag: tag, Value: value})
+		if mode != fieldDecodeValidateOnly {
+			value := raw[offset : offset+lengthInt]
+			if mode == fieldDecodeCopy {
+				value = bytes.Clone(value)
+			}
+			fields = append(fields, Field{Tag: tag, Value: value})
+		}
 		offset += lengthInt
 		last = tag
 	}

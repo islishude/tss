@@ -73,6 +73,23 @@ func TestUnmarshalRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
+func TestUnmarshalFieldsReturnsOwnedValues(t *testing.T) {
+	t.Parallel()
+
+	raw, err := MarshalFields(1, "test.type", []Field{{Tag: 1, Value: []byte("owned")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, fields, err := UnmarshalFields(raw, "test.type")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(raw)
+	if len(fields) != 1 || !bytes.Equal(fields[0].Value, []byte("owned")) {
+		t.Fatalf("field values alias input: %#v", fields)
+	}
+}
+
 func TestUnmarshalRejectsWrongTypeID(t *testing.T) {
 	t.Parallel()
 	raw, err := MarshalFields(1, "test.type", []Field{{Tag: 1, Value: []byte{1}}})

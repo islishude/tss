@@ -354,13 +354,8 @@ func (p auxInfoDecryptionErrorPayload) ValidateWithLimits(limits Limits) error {
 	if err != nil {
 		return errors.New("invalid auxinfo decryption-error signed envelope")
 	}
-	canonical, err := direct.MarshalBinaryWithLimits(envelopeLimits)
-	if err != nil {
-		return errors.New("invalid auxinfo decryption-error signed envelope")
-	}
-	defer clear(canonical)
-	if !bytes.Equal(canonical, p.SignedDirectEnvelope) || len(direct.SenderSignature) == 0 {
-		return errors.New("non-canonical or unsigned auxinfo decryption-error direct envelope")
+	if len(direct.SenderSignature) == 0 {
+		return errors.New("unsigned auxinfo decryption-error direct envelope")
 	}
 	return nil
 }

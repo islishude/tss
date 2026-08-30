@@ -36,16 +36,6 @@ func loadLifecycleKeyShare(ctx context.Context, store tssrun.LifecycleStore, bin
 		key.Destroy()
 		return nil, fmt.Errorf("%w: decode current key generation: %w", tssrun.ErrLifecycleCorrupt, err)
 	}
-	canonical, err := key.MarshalBinaryWithLimits(limits)
-	if err != nil {
-		key.Destroy()
-		return nil, fmt.Errorf("%w: revalidate current key generation: %w", tssrun.ErrLifecycleCorrupt, err)
-	}
-	defer clear(canonical)
-	if !bytes.Equal(canonical, record.Blob) {
-		key.Destroy()
-		return nil, fmt.Errorf("%w: non-canonical current key generation", tssrun.ErrLifecycleCorrupt)
-	}
 	if err := key.requireMPCMaterial(limits); err != nil {
 		key.Destroy()
 		return nil, fmt.Errorf("%w: invalid current key generation: %w", tssrun.ErrLifecycleCorrupt, err)

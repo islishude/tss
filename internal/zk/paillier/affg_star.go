@@ -597,13 +597,8 @@ func validateCanonicalPositiveBytes(name string, encoded []byte) error {
 }
 
 func validateCanonicalSignedBytes(name string, encoded []byte) error {
-	value, err := wire.DecodeBigInt(encoded)
-	if err != nil {
+	if _, err := wire.DecodeBigInt(encoded); err != nil {
 		return fmt.Errorf("AffGStarProof: invalid %s: %w", name, err)
-	}
-	reencoded, err := wire.EncodeBigInt(value)
-	if err != nil || !bytes.Equal(reencoded, encoded) {
-		return fmt.Errorf("AffGStarProof: non-canonical %s", name)
 	}
 	return nil
 }

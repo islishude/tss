@@ -531,6 +531,31 @@ func TestMessageUnmarshalerInputReceivesFramePreflight(t *testing.T) {
 	})); err == nil {
 		t.Fatal("expected partial frame limit to reject oversized hook input")
 	}
+	if err := Unmarshal(append(bytes.Clone(valid), 0xff), &decoded); err == nil {
+		t.Fatal("expected trailing hook input to be rejected before hook")
+	}
+}
+
+func BenchmarkMessageHookFramePreflight(b *testing.B) {
+	payload := bytes.Repeat([]byte{0xa5}, 64<<10)
+	raw, err := MarshalFields(1, "wire.test.rawhook", []Field{{Tag: 1, Value: payload}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	limits := WithFrameLimits(FrameLimits{
+		MaxTotalBytes: len(raw),
+		MaxFields:     1,
+		MaxFieldBytes: len(payload),
+	})
+	b.ReportAllocs()
+	b.SetBytes(int64(len(raw)))
+	b.ResetTimer()
+	for b.Loop() {
+		var decoded acceptingMessageHook
+		if err := Unmarshal(raw, &decoded, limits); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func TestAfterUnmarshalCalledAfterHook(t *testing.T) {

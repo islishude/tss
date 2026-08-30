@@ -152,15 +152,6 @@ func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*a
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("reshare confirmation sender mismatch"))
 	}
-	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		clear(confirmation.ChainCode)
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-	}
-	if !bytes.Equal(canonical, base.Payload) {
-		clear(confirmation.ChainCode)
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("non-canonical reshare confirmation"))
-	}
 	if err := planvalidation.RequireHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
@@ -173,8 +164,7 @@ func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*a
 	}
 	for _, existing := range []map[tss.PartyID]*KeygenConfirmation{s.pendingConfirmations, s.confirmations} {
 		if prior := existing[base.From]; prior != nil {
-			priorRaw, marshalErr := prior.MarshalBinaryWithLimits(s.limits)
-			if marshalErr == nil && bytes.Equal(priorRaw, canonical) {
+			if equalKeygenConfirmations(prior, confirmation) {
 				clear(confirmation.ChainCode)
 				return &acceptReshareConfirmationTx{from: base.From, duplicate: true}, nil
 			}

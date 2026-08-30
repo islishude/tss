@@ -135,14 +135,19 @@ validation.
 - `BeforeMarshaler` runs before encoding.
 - `AfterUnmarshaler` runs after field decoding and before validation.
 - `ValueMarshaler` / `ValueUnmarshaler` own one `custom` field value.
+  `ValueUnmarshaler.UnmarshalWireValue` returns the number of bytes consumed;
+  a successful decode is accepted only when that count equals the complete
+  length-delimited field value.
 - `MessageMarshaler` / `MessageUnmarshaler` own a complete TLV message while
   remaining behind `wire.Marshal` / `wire.Unmarshal`.
 
-`wire.Marshal` reparses a custom message result to enforce its type, version,
-canonical frame, and field ordering. `wire.Unmarshal` performs frame preflight
-before invoking a custom decoder and decodes into temporary state, so the
-original destination is unchanged on error. A custom decoder still owns its
-exact field schema, semantic validation, input copying, and secret cleanup.
+`wire.Marshal` scans a custom message result to enforce its type, version,
+canonical frame, field ordering, and final EOF without re-encoding it.
+`wire.Unmarshal` performs the same non-materializing frame preflight before
+invoking a custom message decoder and decodes into temporary state, so the
+original destination is unchanged on error. A custom value decoder must report
+exact input consumption; a custom message decoder still owns its exact field
+schema, semantic validation, input copying, and secret cleanup.
 
 ## Limits
 
@@ -176,6 +181,11 @@ caller policy.
 - `bigpos` requires a non-empty, minimal, strictly positive magnitude.
 - Curve scalars, points, proof integers, and proof points receive their
   domain-specific canonical and range checks after structural decoding.
+- Every length-delimited container checks final input consumption. Prefix
+  helpers such as `ReadBytes` intentionally return a next offset; their
+  enclosing message, record, list, map, or custom decoder owns the EOF check.
+- `custom` and every `customlist` item reject a successful decoder result that
+  reports unconsumed or over-consumed input.
 
 One semantic record must have one binary representation. That property is part
 of transcript binding, storage integrity, and vector compatibility.

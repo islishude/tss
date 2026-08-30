@@ -51,8 +51,8 @@ func TestKeygenCommitmentsWireCodec(t *testing.T) {
 	}
 
 	var decoded keygenCommitments
-	if err := decoded.UnmarshalWireValue(raw); err != nil {
-		t.Fatal(err)
+	if consumed, err := decoded.UnmarshalWireValue(raw); err != nil || consumed != len(raw) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !commitments.Equal(decoded) {
 		t.Fatal("keygen commitments changed across custom codec round trip")
@@ -78,8 +78,8 @@ func TestReshareCommitmentsWireCodec(t *testing.T) {
 	}
 
 	var decoded reshareCommitments
-	if err := decoded.UnmarshalWireValue(raw); err != nil {
-		t.Fatal(err)
+	if consumed, err := decoded.UnmarshalWireValue(raw); err != nil || consumed != len(raw) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !commitments.Equal(decoded) {
 		t.Fatal("reshare commitments changed across custom codec round trip")
@@ -110,7 +110,7 @@ func TestCommitmentWireCodecsRejectNilReceivers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
-		decode func([]byte) error
+		decode func([]byte) (int, error)
 	}{
 		{name: "keygen", decode: (*keygenCommitments)(nil).UnmarshalWireValue},
 		{name: "reshare", decode: (*reshareCommitments)(nil).UnmarshalWireValue},
@@ -118,7 +118,7 @@ func TestCommitmentWireCodecsRejectNilReceivers(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.decode(nil); err == nil {
+			if _, err := tc.decode(nil); err == nil {
 				t.Fatal("nil commitment receiver accepted input")
 			}
 		})
@@ -144,8 +144,8 @@ func TestGroupCommitmentsWireCodec(t *testing.T) {
 	}
 
 	var decoded groupCommitments
-	if err := decoded.UnmarshalWireValue(raw); err != nil {
-		t.Fatal(err)
+	if consumed, err := decoded.UnmarshalWireValue(raw); err != nil || consumed != len(raw) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !group.Equal(decoded) {
 		t.Fatal("group commitments changed across custom codec round trip")
@@ -187,7 +187,7 @@ func TestGroupCommitmentsWireCodecRejectsInvalidValues(t *testing.T) {
 			t.Parallel()
 
 			var decoded groupCommitments
-			if err := decoded.UnmarshalWireValue(tc.raw); err == nil {
+			if _, err := decoded.UnmarshalWireValue(tc.raw); err == nil {
 				t.Fatal("expected decode error")
 			}
 		})
@@ -235,8 +235,8 @@ func TestGroupCommitmentsCustomEncodingMatchesBytesList(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded groupCommitments
-	if err := decoded.UnmarshalWireValue(fields[1].Value); err != nil {
-		t.Fatal(err)
+	if consumed, err := decoded.UnmarshalWireValue(fields[1].Value); err != nil || consumed != len(fields[1].Value) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !group.Equal(decoded) {
 		t.Fatal("new custom field did not decode old byteslist encoding")

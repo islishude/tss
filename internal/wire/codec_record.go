@@ -215,7 +215,7 @@ func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits, f
 	}
 
 	work := reflect.New(typ).Elem()
-	fields, offset, err := unmarshalFieldBody(raw, 0, frameLimits, typ.Name())
+	fields, offset, err := decodeFieldBody(raw, 0, frameLimits, typ.Name(), fieldDecodeView)
 	if err != nil {
 		return err
 	}

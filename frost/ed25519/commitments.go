@@ -239,16 +239,16 @@ func (c keygenCommitments) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes and validates canonical keygen commitments.
-func (c *keygenCommitments) UnmarshalWireValue(in []byte) error {
+func (c *keygenCommitments) UnmarshalWireValue(in []byte) (int, error) {
 	if c == nil {
-		return errors.New("nil keygen commitments receiver")
+		return 0, errors.New("nil keygen commitments receiver")
 	}
 	var parsed commitmentVector
 	if err := parsed.unmarshalWireValue(in, "keygen", true); err != nil {
-		return err
+		return 0, err
 	}
 	*c = keygenCommitments(parsed)
-	return nil
+	return len(in), nil
 }
 
 // Validate checks keygen commitment length-independent point invariants.
@@ -299,16 +299,16 @@ func (c reshareCommitments) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes and validates canonical reshare commitments.
-func (c *reshareCommitments) UnmarshalWireValue(in []byte) error {
+func (c *reshareCommitments) UnmarshalWireValue(in []byte) (int, error) {
 	if c == nil {
-		return errors.New("nil reshare commitments receiver")
+		return 0, errors.New("nil reshare commitments receiver")
 	}
 	var parsed commitmentVector
 	if err := parsed.unmarshalWireValue(in, "reshare", false); err != nil {
-		return err
+		return 0, err
 	}
 	*c = reshareCommitments(parsed)
-	return nil
+	return len(in), nil
 }
 
 // Validate checks reshare commitment length-independent point invariants.
@@ -361,16 +361,16 @@ func (c groupCommitments) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes and validates canonical group commitments.
-func (c *groupCommitments) UnmarshalWireValue(in []byte) error {
+func (c *groupCommitments) UnmarshalWireValue(in []byte) (int, error) {
 	if c == nil {
-		return errors.New("nil group commitments receiver")
+		return 0, errors.New("nil group commitments receiver")
 	}
 	var parsed commitmentVector
 	if err := parsed.unmarshalWireValue(in, "group", true); err != nil {
-		return err
+		return 0, err
 	}
 	*c = groupCommitments(parsed)
-	return nil
+	return len(in), nil
 }
 
 // Validate checks group commitment length-independent point invariants.

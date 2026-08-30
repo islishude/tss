@@ -16,8 +16,8 @@ func TestScalarWireValueRoundTrip(t *testing.T) {
 	}
 
 	var decoded Scalar
-	if err := decoded.UnmarshalWireValue(raw); err != nil {
-		t.Fatalf("UnmarshalWireValue: %v", err)
+	if consumed, err := decoded.UnmarshalWireValue(raw); err != nil || consumed != len(raw) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !decoded.Equal(want) {
 		t.Fatal("decoded scalar mismatch")
@@ -34,8 +34,8 @@ func TestScalarWireValueAllowsZero(t *testing.T) {
 	}
 
 	var decoded Scalar
-	if err := decoded.UnmarshalWireValue(raw); err != nil {
-		t.Fatalf("UnmarshalWireValue: %v", err)
+	if consumed, err := decoded.UnmarshalWireValue(raw); err != nil || consumed != len(raw) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !decoded.IsZero() {
 		t.Fatal("decoded scalar should be zero")
@@ -44,14 +44,14 @@ func TestScalarWireValueAllowsZero(t *testing.T) {
 
 func TestScalarWireValueRejectsMalformedLength(t *testing.T) {
 	var decoded Scalar
-	if err := decoded.UnmarshalWireValue([]byte{1, 2, 3}); err == nil {
+	if _, err := decoded.UnmarshalWireValue([]byte{1, 2, 3}); err == nil {
 		t.Fatal("accepted malformed scalar length")
 	}
 }
 
 func TestScalarWireValueRejectsOutOfRange(t *testing.T) {
 	var decoded Scalar
-	if err := decoded.UnmarshalWireValue(scalarModulus[:]); err == nil {
+	if _, err := decoded.UnmarshalWireValue(scalarModulus[:]); err == nil {
 		t.Fatal("accepted scalar equal to group order")
 	}
 }
@@ -67,8 +67,8 @@ func TestPointWireValueRoundTrip(t *testing.T) {
 	}
 
 	var decoded Point
-	if err := decoded.UnmarshalWireValue(raw); err != nil {
-		t.Fatalf("UnmarshalWireValue: %v", err)
+	if consumed, err := decoded.UnmarshalWireValue(raw); err != nil || consumed != len(raw) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !Equal(&decoded, want) {
 		t.Fatal("decoded point mismatch")

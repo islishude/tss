@@ -295,11 +295,14 @@ func proofFieldLimits() wire.FieldLimits {
 
 // UnmarshalWireValue decodes the proof from a canonical custom wire field
 // value.
-func (p *Proof) UnmarshalWireValue(in []byte) error {
+func (p *Proof) UnmarshalWireValue(in []byte) (int, error) {
 	if p == nil {
-		return errors.New("nil Schnorr proof")
+		return 0, errors.New("nil Schnorr proof")
 	}
-	return p.UnmarshalBinary(in)
+	if err := p.UnmarshalBinary(in); err != nil {
+		return 0, err
+	}
+	return len(in), nil
 }
 
 // Validate checks the canonical curve point and scalar encodings in the proof.

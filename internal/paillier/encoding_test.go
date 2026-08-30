@@ -120,12 +120,12 @@ func TestPrivateKeyCustomWireValueRejectsInvalidInput(t *testing.T) {
 	if _, err := nilKey.MarshalWireValue(); err == nil {
 		t.Fatal("nil private key custom marshal succeeded")
 	}
-	if err := nilKey.UnmarshalWireValue([]byte{1}); err == nil {
+	if _, err := nilKey.UnmarshalWireValue([]byte{1}); err == nil {
 		t.Fatal("nil private key custom unmarshal succeeded")
 	}
 
 	var decoded PrivateKey
-	if err := decoded.UnmarshalWireValue([]byte(`{"private_key":true}`)); err == nil {
+	if _, err := decoded.UnmarshalWireValue([]byte(`{"private_key":true}`)); err == nil {
 		t.Fatal("custom private-key field accepted non-wire input")
 	}
 }

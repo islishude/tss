@@ -134,16 +134,16 @@ func (p PublicKeyPoint) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes a canonical non-identity public key point.
-func (p *PublicKeyPoint) UnmarshalWireValue(in []byte) error {
+func (p *PublicKeyPoint) UnmarshalWireValue(in []byte) (int, error) {
 	if p == nil {
-		return errors.New("nil public key point")
+		return 0, errors.New("nil public key point")
 	}
 	point, err := newPublicKeyPointFromBytes(in)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	*p = point
-	return nil
+	return len(in), nil
 }
 
 // MarshalJSON encodes the public key point as canonical public-key bytes.
@@ -232,16 +232,16 @@ func (p VerificationSharePoint) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes a canonical verification-share point.
-func (p *VerificationSharePoint) UnmarshalWireValue(in []byte) error {
+func (p *VerificationSharePoint) UnmarshalWireValue(in []byte) (int, error) {
 	if p == nil {
-		return errors.New("nil verification share point")
+		return 0, errors.New("nil verification share point")
 	}
 	point, err := newVerificationSharePointFromBytes(in)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	*p = point
-	return nil
+	return len(in), nil
 }
 
 // MarshalJSON encodes the verification-share point as canonical point bytes.

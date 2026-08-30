@@ -104,6 +104,9 @@ func TestFast_GoldenKeygenConfirmation(t *testing.T) {
 	if !bytes.Equal(decoded.EpochID, confirmation.EpochID) {
 		t.Fatal("keygen confirmation golden lost epoch binding")
 	}
+	if _, err := tss.DecodeBinaryWithLimits[KeygenConfirmation](append(bytes.Clone(raw), 0), testLimits()); err == nil {
+		t.Fatal("keygen confirmation accepted trailing byte")
+	}
 }
 
 func TestFast_GoldenSignPartialPayload(t *testing.T) {

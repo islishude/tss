@@ -121,8 +121,8 @@ func TestProofDeterministicProveVerifyAndEncoding(t *testing.T) {
 		t.Fatal("decoded proof did not verify")
 	}
 	var decodedValue Proof
-	if err := decodedValue.UnmarshalWireValue(raw); err != nil {
-		t.Fatal(err)
+	if consumed, err := decodedValue.UnmarshalWireValue(raw); err != nil || consumed != len(raw) {
+		t.Fatalf("UnmarshalWireValue consumed=%d: %v", consumed, err)
 	}
 	if !bytes.Equal(decodedValue.Commitment, proof.Commitment) || !bytes.Equal(decodedValue.Response, proof.Response) {
 		t.Fatal("custom wire value did not round trip")

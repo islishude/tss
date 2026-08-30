@@ -87,6 +87,23 @@ func TestMessageCodecRoundTripScenarios(t *testing.T) {
 	})
 }
 
+func TestObjectUnmarshalDoesNotRetainFieldViews(t *testing.T) {
+	t.Parallel()
+
+	raw, err := Marshal(simpleMessage{Name: "owned", Count: 7, Data: []byte{1, 2, 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded simpleMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	clear(raw)
+	if decoded.Name != "owned" || decoded.Count != 7 || !bytes.Equal(decoded.Data, []byte{1, 2, 3}) {
+		t.Fatalf("decoded message retained borrowed field data: %+v", decoded)
+	}
+}
+
 func TestMessageMarshalCanonicalRemarshal(t *testing.T) {
 	t.Parallel()
 

@@ -91,7 +91,7 @@ func UnmarshalRecordFieldsWithLimits(raw []byte, limits FrameLimits, name string
 	if limits.MaxTotalBytes > 0 && len(raw) > limits.MaxTotalBytes {
 		return nil, fmt.Errorf("record input too large: %d > %d", len(raw), limits.MaxTotalBytes)
 	}
-	fields, offset, err := unmarshalFieldBody(raw, 0, limits, name)
+	fields, offset, err := decodeFieldBody(raw, 0, limits, name, fieldDecodeCopy)
 	if err != nil {
 		return nil, err
 	}

@@ -519,27 +519,12 @@ func (s *KeygenSession) paperKeygenTranscriptHash(result *auxInfoResult) ([]byte
 	return t.Sum(), nil
 }
 
-type receivedKeygenConfirmation struct {
-	env       tss.Envelope
-	msg       *KeygenConfirmation
-	canonical []byte
-}
-
-func (s *KeygenSession) parseKeygenConfirmation(env tss.Envelope) (*receivedKeygenConfirmation, error) {
+func (s *KeygenSession) parseKeygenConfirmation(env tss.Envelope) (*KeygenConfirmation, error) {
 	confirmation := new(KeygenConfirmation)
 	if err := confirmation.UnmarshalBinaryWithLimits(env.Payload, s.limits); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		clear(confirmation.ChainCode)
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if !bytes.Equal(canonical, env.Payload) {
-		clear(confirmation.ChainCode)
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical keygen confirmation"))
-	}
-	return &receivedKeygenConfirmation{env: env, msg: confirmation, canonical: canonical}, nil
+	return confirmation, nil
 }
 
 func (s *KeygenSession) handlePaperKeygenConfirmationLocked(ctx context.Context, env tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
@@ -550,48 +535,47 @@ func (s *KeygenSession) handlePaperKeygenConfirmationLocked(ctx context.Context,
 	if s.figure6 == nil || s.figure6.result == nil || s.auxInfo == nil && s.pending == nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("paper keygen confirmation arrived before Figure 6 completed"))
 	}
-	received, err := s.parseKeygenConfirmation(base)
+	confirmation, err := s.parseKeygenConfirmation(base)
 	if err != nil {
 		return nil, err
 	}
 	owned := true
 	defer func() {
 		if owned {
-			clear(received.msg.ChainCode)
+			clear(confirmation.ChainCode)
 		}
 	}()
-	if received.msg.Sender != base.From {
+	if confirmation.Sender != base.From {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("paper keygen confirmation sender mismatch"))
 	}
-	if err := planvalidation.RequireHash("paper keygen confirmation", received.msg.PlanHash, s.planHash); err != nil {
+	if err := planvalidation.RequireHash("paper keygen confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
-	if received.msg.SessionID != s.cfg.SessionID || received.msg.Threshold != s.cfg.Threshold ||
-		!slices.Equal(received.msg.Parties, s.cfg.Parties) || !bytes.Equal(received.msg.PublicKey, s.figure6.result.publicKey) {
+	if confirmation.SessionID != s.cfg.SessionID || confirmation.Threshold != s.cfg.Threshold ||
+		!slices.Equal(confirmation.Parties, s.cfg.Parties) || !bytes.Equal(confirmation.PublicKey, s.figure6.result.publicKey) {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("paper keygen confirmation public binding mismatch"))
 	}
 	slot := s.figure6.slots[base.From]
 	if slot == nil || slot.chainCodeCommit == nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("paper keygen confirmation has no Figure 6 commitment"))
 	}
-	if err := verifyConfirmationCommitRevealChainCode(s.cfg.SessionID, base.From, received.msg.ChainCode, slot.chainCodeCommit); err != nil {
+	if err := verifyConfirmationCommitRevealChainCode(s.cfg.SessionID, base.From, confirmation.ChainCode, slot.chainCodeCommit); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if existing := s.paperConfirmations[base.From]; existing != nil {
-		existingBytes, marshalErr := existing.MarshalBinaryWithLimits(s.limits)
-		if marshalErr == nil && bytes.Equal(existingBytes, received.canonical) {
+		if equalKeygenConfirmations(existing, confirmation) {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, tss.ErrDuplicateMessage)
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting paper keygen confirmation"))
 	}
 	if s.pending != nil {
-		if err := verifyConfirmationBinding(s.pending, received.msg); err != nil {
+		if err := verifyConfirmationBinding(s.pending, confirmation); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 	}
 	candidates := clonePaperConfirmationMap(s.paperConfirmations)
 	defer destroyPaperConfirmationMap(candidates)
-	candidates[base.From] = received.msg.Clone()
+	candidates[base.From] = confirmation.Clone()
 	var final *preparedPaperFinalKeyShare
 	if s.pending != nil && len(candidates) == len(s.cfg.Parties) {
 		final, err = s.buildPaperFinalKeyShare(s.pending, candidates)
@@ -606,7 +590,7 @@ func (s *KeygenSession) handlePaperKeygenConfirmationLocked(ctx context.Context,
 	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
 		return nil, err
 	}
-	s.paperConfirmations[base.From] = received.msg
+	s.paperConfirmations[base.From] = confirmation
 	s.paperAccepted[key] = struct{}{}
 	owned = false
 	if final != nil {

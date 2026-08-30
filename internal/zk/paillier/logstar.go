@@ -391,11 +391,14 @@ func (p *LogStarProof) UnmarshalBinary(in []byte) error {
 
 // UnmarshalWireValue decodes the LogStarProof from a canonical custom wire
 // field value.
-func (p *LogStarProof) UnmarshalWireValue(in []byte) error {
+func (p *LogStarProof) UnmarshalWireValue(in []byte) (int, error) {
 	if p == nil {
-		return errors.New("nil LogStarProof")
+		return 0, errors.New("nil LogStarProof")
 	}
-	return p.UnmarshalBinary(in)
+	if err := p.UnmarshalBinary(in); err != nil {
+		return 0, err
+	}
+	return len(in), nil
 }
 
 func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w LogStarWitness) error {

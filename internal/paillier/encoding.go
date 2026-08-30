@@ -94,9 +94,12 @@ func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
 
 // UnmarshalWireValue decodes a canonical private-key message from an opaque
 // custom field in a containing wire message.
-func (sk *PrivateKey) UnmarshalWireValue(in []byte) error {
+func (sk *PrivateKey) UnmarshalWireValue(in []byte) (int, error) {
 	if sk == nil {
-		return errors.New("nil Paillier private key")
+		return 0, errors.New("nil Paillier private key")
 	}
-	return sk.UnmarshalBinary(in)
+	if err := sk.UnmarshalBinary(in); err != nil {
+		return 0, err
+	}
+	return len(in), nil
 }

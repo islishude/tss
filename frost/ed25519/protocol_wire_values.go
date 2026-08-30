@@ -52,16 +52,16 @@ func (p nonceCommitmentPoint) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes a canonical nonce commitment point.
-func (p *nonceCommitmentPoint) UnmarshalWireValue(in []byte) error {
+func (p *nonceCommitmentPoint) UnmarshalWireValue(in []byte) (int, error) {
 	if p == nil {
-		return errors.New("nil nonce commitment point")
+		return 0, errors.New("nil nonce commitment point")
 	}
 	decoded, err := newNonceCommitmentPointFromBytes(in)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	*p = decoded
-	return nil
+	return len(in), nil
 }
 
 // canonicalScalar is a validated canonical public Ed25519 scalar.
@@ -118,14 +118,14 @@ func (s canonicalScalar) MarshalWireValue() ([]byte, error) {
 }
 
 // UnmarshalWireValue decodes a canonical Ed25519 scalar.
-func (s *canonicalScalar) UnmarshalWireValue(in []byte) error {
+func (s *canonicalScalar) UnmarshalWireValue(in []byte) (int, error) {
 	if s == nil {
-		return errors.New("nil canonical scalar")
+		return 0, errors.New("nil canonical scalar")
 	}
 	decoded, err := newCanonicalScalarFromBytes(in)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	*s = decoded
-	return nil
+	return len(in), nil
 }

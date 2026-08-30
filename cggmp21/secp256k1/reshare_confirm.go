@@ -31,13 +31,6 @@ func (s *ReshareSession) handleReshareConfirmationInbound(in tss.InboundEnvelope
 	if confirmation.Sender != env.From {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("reshare confirmation sender mismatch"))
 	}
-	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if !bytes.Equal(canonical, env.Payload) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical reshare confirmation"))
-	}
 	if err := planvalidation.RequireHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
@@ -49,8 +42,7 @@ func (s *ReshareSession) handleReshareConfirmationInbound(in tss.InboundEnvelope
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a target reshare party", env.From))
 	}
 	if data.confirmation != nil {
-		existing, marshalErr := data.confirmation.MarshalBinaryWithLimits(s.limits)
-		if marshalErr == nil && bytes.Equal(existing, canonical) {
+		if equalKeygenConfirmations(data.confirmation, confirmation) {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, tss.ErrDuplicateMessage)
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting reshare confirmation from party %d", env.From))
@@ -63,6 +55,7 @@ func (s *ReshareSession) handleReshareConfirmationInbound(in tss.InboundEnvelope
 	confirmations := s.reshareConfirmationCandidates(env.From, confirmation)
 	defer destroyPaperConfirmationMap(confirmations)
 	var final *preparedPaperFinalKeyShare
+	var err error
 	if s.newShare != nil && len(confirmations) == len(s.newParties) {
 		final, err = s.buildReshareFinalKeyShare(s.newShare, confirmations)
 		if err != nil {

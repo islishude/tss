@@ -61,6 +61,22 @@ func (c *KeygenConfirmation) Clone() *KeygenConfirmation {
 	}
 }
 
+func equalKeygenConfirmations(a, b *KeygenConfirmation) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.SessionID == b.SessionID &&
+		a.Sender == b.Sender &&
+		a.Threshold == b.Threshold &&
+		slices.Equal(a.Parties, b.Parties) &&
+		bytes.Equal(a.PublicKey, b.PublicKey) &&
+		bytes.Equal(a.TranscriptHash, b.TranscriptHash) &&
+		bytes.Equal(a.CommitmentsHash, b.CommitmentsHash) &&
+		bytes.Equal(a.ChainCode, b.ChainCode) &&
+		bytes.Equal(a.PlanHash, b.PlanHash) &&
+		bytes.Equal(a.EpochID, b.EpochID)
+}
+
 // NewConfirmation constructs a confirmation message from the local key share.
 func (k *KeyShare) NewConfirmation() (*KeygenConfirmation, error) {
 	return k.NewConfirmationWithLimits(DefaultLimits())

@@ -460,7 +460,7 @@ func (fs fieldSchema) decodeCustomList(fv reflect.Value, raw []byte, limitSet Fi
 		if u == nil {
 			return fmt.Errorf("customlist item %d does not implement UnmarshalWireValue", i)
 		}
-		if err := u.UnmarshalWireValue(item); err != nil {
+		if err := unmarshalCompleteCustomValue(u, item); err != nil {
 			return fmt.Errorf("customlist item %d unmarshal: %w", i, err)
 		}
 		if elemType.Kind() == reflect.Pointer {
@@ -555,7 +555,7 @@ func (fs fieldSchema) encodeCustom(fv reflect.Value, limitSet FieldLimits) ([]by
 // ValueUnmarshaler. It validates byte and declared item limits before
 // auto-allocating nil pointers or invoking custom code, dispatches to the
 // interface (value or pointer receiver), and requires the implementation to
-// copy the input bytes.
+// copy and completely consume the input bytes.
 func (fs fieldSchema) decodeCustom(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
@@ -573,8 +573,22 @@ func (fs fieldSchema) decodeCustom(fv reflect.Value, raw []byte, limitSet FieldL
 		return fmt.Errorf("wire: field %s does not implement UnmarshalWireValue", fs.name)
 	}
 
-	if err := u.UnmarshalWireValue(raw); err != nil {
+	if err := unmarshalCompleteCustomValue(u, raw); err != nil {
 		return fmt.Errorf("wire: field %s tag %d custom unmarshal: %w", fs.name, fs.tag, err)
+	}
+	return nil
+}
+
+func unmarshalCompleteCustomValue(u ValueUnmarshaler, raw []byte) error {
+	consumed, err := u.UnmarshalWireValue(raw)
+	if err != nil {
+		return err
+	}
+	if consumed < 0 || consumed > len(raw) {
+		return fmt.Errorf("invalid consumed byte count %d for %d-byte custom value", consumed, len(raw))
+	}
+	if consumed != len(raw) {
+		return fmt.Errorf("trailing custom value data: consumed %d of %d bytes", consumed, len(raw))
 	}
 	return nil
 }

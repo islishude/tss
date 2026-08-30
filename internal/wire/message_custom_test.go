@@ -2,6 +2,7 @@ package wire
 
 import (
 	"bytes"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -633,6 +634,153 @@ func TestCustomFieldOrdering(t *testing.T) {
 	if !bytes.Equal(decoded.First.raw, []byte{1, 2}) || decoded.Second != 42 {
 		t.Fatalf("field ordering broken: First=%x Second=%d", decoded.First.raw, decoded.Second)
 	}
+}
+
+type consumingCustomValue struct {
+	raw []byte
+}
+
+func (c consumingCustomValue) MarshalWireValue() ([]byte, error) {
+	return bytes.Clone(c.raw), nil
+}
+
+func (c *consumingCustomValue) UnmarshalWireValue(in []byte) (int, error) {
+	c.raw = bytes.Clone(in)
+	if len(in) == 0 {
+		return 0, nil
+	}
+	switch in[0] {
+	case 1:
+		return len(in) - 1, nil
+	case 2:
+		return len(in) + 1, nil
+	case 3:
+		return -1, nil
+	case 4:
+		return 0, errSentinel
+	default:
+		return len(in), nil
+	}
+}
+
+type consumingCustomMessage struct {
+	Data consumingCustomValue `wire:"1,custom"`
+}
+
+func (consumingCustomMessage) WireType() string    { return "test.custom.consuming" }
+func (consumingCustomMessage) WireVersion() uint16 { return 1 }
+
+type consumingCustomListMessage struct {
+	Data []consumingCustomValue `wire:"1,customlist,max_bytes=field,max_items=items"`
+}
+
+func (consumingCustomListMessage) WireType() string    { return "test.custom.consuming-list" }
+func (consumingCustomListMessage) WireVersion() uint16 { return 1 }
+
+type consumingCustomMapMessage struct {
+	Data map[uint32]consumingCustomValue `wire:"1,map,max_bytes=field,max_items=items"`
+}
+
+func (consumingCustomMapMessage) WireType() string    { return "test.custom.consuming-map" }
+func (consumingCustomMapMessage) WireVersion() uint16 { return 1 }
+
+func TestCustomFieldRequiresCompleteConsumption(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		value        []byte
+		wantErr      string
+		wantSentinel bool
+	}{
+		{name: "complete", value: []byte{0, 0xaa}},
+		{name: "empty", value: []byte{}},
+		{name: "trailing", value: []byte{1, 0xaa}, wantErr: "trailing custom value data"},
+		{name: "over-consumed", value: []byte{2, 0xaa}, wantErr: "invalid consumed byte count"},
+		{name: "negative", value: []byte{3, 0xaa}, wantErr: "invalid consumed byte count"},
+		{name: "decoder error", value: []byte{4, 0xaa}, wantSentinel: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw, err := MarshalFields(1, consumingCustomMessage{}.WireType(), []Field{{Tag: 1, Value: tc.value}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := []byte{0xfe}
+			decoded := consumingCustomMessage{Data: consumingCustomValue{raw: bytes.Clone(original)}}
+			err = Unmarshal(raw, &decoded)
+			if tc.wantErr == "" && !tc.wantSentinel {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(decoded.Data.raw, tc.value) {
+					t.Fatalf("decoded value = %x, want %x", decoded.Data.raw, tc.value)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected custom consumption error")
+			}
+			if tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantErr)
+			}
+			if tc.wantSentinel && !errors.Is(err, errSentinel) {
+				t.Fatalf("error = %v, want errSentinel", err)
+			}
+			if !bytes.Equal(decoded.Data.raw, original) {
+				t.Fatalf("failed decode mutated destination: %x", decoded.Data.raw)
+			}
+		})
+	}
+}
+
+func TestCompoundCustomValuesRequireCompleteConsumption(t *testing.T) {
+	t.Parallel()
+
+	limits := WithFieldLimits(FieldLimits{"field": 16, "items": 4})
+	short := []byte{1, 0xaa}
+	t.Run("customlist", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := MarshalFields(1, consumingCustomListMessage{}.WireType(), []Field{{
+			Tag: 1, Value: EncodeBytesList([][]byte{short}),
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		original := []consumingCustomValue{{raw: []byte{0xfe}}}
+		decoded := consumingCustomListMessage{Data: original}
+		err = Unmarshal(raw, &decoded, limits)
+		if err == nil || !strings.Contains(err.Error(), "customlist item 0") {
+			t.Fatalf("error = %v, want indexed customlist error", err)
+		}
+		if len(decoded.Data) != 1 || !bytes.Equal(decoded.Data[0].raw, []byte{0xfe}) {
+			t.Fatal("failed customlist decode mutated destination")
+		}
+	})
+
+	t.Run("map", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := MarshalFields(1, consumingCustomMapMessage{}.WireType(), []Field{{
+			Tag: 1, Value: mapEncodeRawEntries(mapRawEntry{key: 1, value: short}),
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded := consumingCustomMapMessage{Data: map[uint32]consumingCustomValue{
+			7: {raw: []byte{0xfe}},
+		}}
+		err = Unmarshal(raw, &decoded, limits)
+		if err == nil || !strings.Contains(err.Error(), "trailing custom value data") {
+			t.Fatalf("error = %v, want custom map consumption error", err)
+		}
+		if got, ok := decoded.Data[7]; !ok || !bytes.Equal(got.raw, []byte{0xfe}) {
+			t.Fatal("failed custom map decode mutated destination")
+		}
+	})
 }
 
 func FuzzCustomField(f *testing.F) {

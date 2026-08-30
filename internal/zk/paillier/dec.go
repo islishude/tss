@@ -632,13 +632,8 @@ func validateDecPositiveBytes(name string, encoded []byte) error {
 }
 
 func validateDecSignedBytes(name string, encoded []byte) error {
-	value, err := wire.DecodeBigInt(encoded)
-	if err != nil {
+	if _, err := wire.DecodeBigInt(encoded); err != nil {
 		return fmt.Errorf("DecProof: invalid %s: %w", name, err)
-	}
-	reencoded, err := wire.EncodeBigInt(value)
-	if err != nil || !bytes.Equal(reencoded, encoded) {
-		return fmt.Errorf("DecProof: non-canonical %s", name)
 	}
 	return nil
 }

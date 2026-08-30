@@ -287,19 +287,11 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 			fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", base.From, confirmation.Sender),
 		)
 	}
-	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
-	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-	}
-	if !bytes.Equal(canonical, base.Payload) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("non-canonical keygen confirmation"))
-	}
 	if err := planvalidation.RequireHash("keygen confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if existing := s.pendingConfirmations[base.From]; existing != nil {
-		existingRaw, marshalErr := existing.MarshalBinaryWithLimits(s.limits)
-		if marshalErr == nil && bytes.Equal(existingRaw, canonical) {
+		if equalKeygenConfirmations(existing, confirmation) {
 			clear(confirmation.ChainCode)
 			return &acceptKeygenConfirmationTx{from: base.From, duplicate: true}, nil
 		}
@@ -312,8 +304,7 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 	}
 	existingConfirmation := s.confirmations.confirmations[base.From]
 	if existingConfirmation != nil {
-		existing, err := existingConfirmation.MarshalBinaryWithLimits(s.limits)
-		if err == nil && bytes.Equal(existing, canonical) {
+		if equalKeygenConfirmations(existingConfirmation, confirmation) {
 			clear(confirmation.ChainCode)
 			return &acceptKeygenConfirmationTx{from: base.From, duplicate: true}, nil
 		}

@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -99,6 +100,21 @@ func (c *KeygenConfirmation) Clone() *KeygenConfirmation {
 		ChainCode:       slices.Clone(c.ChainCode),
 		PlanHash:        slices.Clone(c.PlanHash),
 	}
+}
+
+func equalKeygenConfirmations(a, b *KeygenConfirmation) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.SessionID == b.SessionID &&
+		a.Sender == b.Sender &&
+		a.Threshold == b.Threshold &&
+		slices.Equal(a.Parties, b.Parties) &&
+		a.PublicKey.Equal(b.PublicKey) &&
+		bytes.Equal(a.TranscriptHash, b.TranscriptHash) &&
+		bytes.Equal(a.CommitmentsHash, b.CommitmentsHash) &&
+		bytes.Equal(a.ChainCode, b.ChainCode) &&
+		bytes.Equal(a.PlanHash, b.PlanHash)
 }
 
 // Validate performs structural checks on the confirmation.

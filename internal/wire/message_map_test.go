@@ -100,10 +100,10 @@ func (c mapCustomValue) MarshalWireValue() ([]byte, error) {
 	return out, nil
 }
 
-func (c *mapCustomValue) UnmarshalWireValue(in []byte) error {
+func (c *mapCustomValue) UnmarshalWireValue(in []byte) (int, error) {
 	c.data = make([]byte, len(in))
 	copy(c.data, in)
-	return nil
+	return len(in), nil
 }
 
 // mapCustomMessage uses custom (ValueMarshaler) values.
