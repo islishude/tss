@@ -145,27 +145,9 @@ func (fs fieldSchema) decodeMap(
 		}
 		prevKey = keyBytes
 
-		if fs.fixedLenSet {
-			valueLen, _, err := ReadUint32(raw, offset)
-			if err != nil {
-				return err
-			}
-			if uint64(valueLen) != uint64(fs.fixedLen) {
-				return fmt.Errorf("map value %d length %d, want %d", i, valueLen, fs.fixedLen)
-			}
-		}
-		maxValueBytes := frameLimits.MaxFieldBytes
-		if fs.maxBytes != "" {
-			semanticMax, err := fs.getLimit(fs.maxBytes, limitSet)
-			if err != nil {
-				return err
-			}
-			if maxValueBytes <= 0 || semanticMax < maxValueBytes {
-				maxValueBytes = semanticMax
-			}
-		}
-		if fs.fixedLenSet && (maxValueBytes <= 0 || fs.fixedLen < maxValueBytes) {
-			maxValueBytes = fs.fixedLen
+		maxValueBytes, err := fs.mapValueByteLimit(raw, offset, i, limitSet, frameLimits)
+		if err != nil {
+			return err
 		}
 		valueBytes, next, err := ReadBytesWithLimit(raw, offset, maxValueBytes)
 		if err != nil {
@@ -260,4 +242,30 @@ func (fs fieldSchema) decodeMapValue(
 	}
 
 	return value, nil
+}
+
+func (fs fieldSchema) mapValueByteLimit(raw []byte, offset, i int, limitSet FieldLimits, frameLimits FrameLimits) (int, error) {
+	if fs.fixedLenSet {
+		valueLen, _, err := ReadUint32(raw, offset)
+		if err != nil {
+			return 0, err
+		}
+		if uint64(valueLen) != uint64(fs.fixedLen) {
+			return 0, fmt.Errorf("map value %d length %d, want %d", i, valueLen, fs.fixedLen)
+		}
+	}
+	maxValueBytes := frameLimits.MaxFieldBytes
+	if fs.maxBytes != "" {
+		semanticMax, err := fs.getLimit(fs.maxBytes, limitSet)
+		if err != nil {
+			return 0, err
+		}
+		if maxValueBytes <= 0 || semanticMax < maxValueBytes {
+			maxValueBytes = semanticMax
+		}
+	}
+	if fs.fixedLenSet && (maxValueBytes <= 0 || fs.fixedLen < maxValueBytes) {
+		maxValueBytes = fs.fixedLen
+	}
+	return maxValueBytes, nil
 }

@@ -562,68 +562,8 @@ func validateRunIntent(run RunIntent) error {
 	if !isCanonicalPartySet(run.Parties) {
 		return fmt.Errorf("%w: parties must be sorted, unique, and non-zero", ErrInvalidRunIntent)
 	}
-	switch run.Kind {
-	case RunKeygen:
-		if run.SourceBinding != (GenerationBinding{}) {
-			return fmt.Errorf("%w: keygen must not declare a source binding", ErrInvalidRunIntent)
-		}
-		if err := validateRunTargetDescriptor(run, true); err != nil {
-			return err
-		}
-	case RunPresign:
-		if err := run.SourceBinding.Validate(); err != nil {
-			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
-		}
-		if run.Protocol != tss.ProtocolCGGMP21Secp256k1 {
-			return fmt.Errorf("%w: presign is only supported by %q", ErrInvalidRunIntent, tss.ProtocolCGGMP21Secp256k1)
-		}
-		if run.PresignID == "" || len(run.ContextDigest) != sha256.Size {
-			return fmt.Errorf("%w: presign requires presign id and %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
-		}
-		if err := validateRunSigners(run); err != nil {
-			return err
-		}
-	case RunSign:
-		if err := run.SourceBinding.Validate(); err != nil {
-			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
-		}
-		if len(run.ContextDigest) != sha256.Size {
-			return fmt.Errorf("%w: sign requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
-		}
-		switch run.Protocol {
-		case tss.ProtocolCGGMP21Secp256k1:
-			if run.PresignID == "" {
-				return fmt.Errorf("%w: CGGMP21 sign requires presign id", ErrInvalidRunIntent)
-			}
-		case tss.ProtocolFROSTEd25519:
-			if run.PresignID != "" {
-				return fmt.Errorf("%w: FROST sign does not use presign id", ErrInvalidRunIntent)
-			}
-		default:
-			return fmt.Errorf("%w: unsupported protocol %q", ErrInvalidRunIntent, run.Protocol)
-		}
-		if err := validateRunSigners(run); err != nil {
-			return err
-		}
-	case RunChildDerivation:
-		if err := run.SourceBinding.Validate(); err != nil {
-			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
-		}
-		if len(run.ContextDigest) != sha256.Size {
-			return fmt.Errorf("%w: child derivation requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
-		}
-		if err := validateRunTargetDescriptor(run, true); err != nil {
-			return err
-		}
-	case RunRefresh, RunReshare:
-		if err := run.SourceBinding.Validate(); err != nil {
-			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
-		}
-		if err := validateRunTargetDescriptor(run, false); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("%w: unknown run kind %q", ErrInvalidRunIntent, run.Kind)
+	if err := validateRunKind(run); err != nil {
+		return err
 	}
 	if run.Kind != RunKeygen && run.Kind != RunRefresh && run.Kind != RunReshare && run.Kind != RunChildDerivation &&
 		(run.TargetKeyID != "" || run.TargetKeyGeneration != "") {
@@ -750,4 +690,76 @@ func isCanonicalPartySet(parties tss.PartySet) bool {
 		prev = id
 	}
 	return true
+}
+
+func validateRunKind(run RunIntent) error {
+	switch run.Kind {
+	case RunKeygen:
+		if run.SourceBinding != (GenerationBinding{}) {
+			return fmt.Errorf("%w: keygen must not declare a source binding", ErrInvalidRunIntent)
+		}
+		if err := validateRunTargetDescriptor(run, true); err != nil {
+			return err
+		}
+	case RunPresign:
+		if err := run.SourceBinding.Validate(); err != nil {
+			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+		}
+		if run.Protocol != tss.ProtocolCGGMP21Secp256k1 {
+			return fmt.Errorf("%w: presign is only supported by %q", ErrInvalidRunIntent, tss.ProtocolCGGMP21Secp256k1)
+		}
+		if run.PresignID == "" || len(run.ContextDigest) != sha256.Size {
+			return fmt.Errorf("%w: presign requires presign id and %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
+		}
+		if err := validateRunSigners(run); err != nil {
+			return err
+		}
+	case RunSign:
+		return validateSignRun(run)
+	case RunChildDerivation:
+		if err := run.SourceBinding.Validate(); err != nil {
+			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+		}
+		if len(run.ContextDigest) != sha256.Size {
+			return fmt.Errorf("%w: child derivation requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
+		}
+		if err := validateRunTargetDescriptor(run, true); err != nil {
+			return err
+		}
+	case RunRefresh, RunReshare:
+		if err := run.SourceBinding.Validate(); err != nil {
+			return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+		}
+		if err := validateRunTargetDescriptor(run, false); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%w: unknown run kind %q", ErrInvalidRunIntent, run.Kind)
+	}
+	return nil
+}
+
+func validateSignRun(run RunIntent) error {
+	if err := run.SourceBinding.Validate(); err != nil {
+		return fmt.Errorf("%w: source generation binding required: %w", ErrInvalidRunIntent, err)
+	}
+	if len(run.ContextDigest) != sha256.Size {
+		return fmt.Errorf("%w: sign requires a %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
+	}
+	switch run.Protocol {
+	case tss.ProtocolCGGMP21Secp256k1:
+		if run.PresignID == "" {
+			return fmt.Errorf("%w: CGGMP21 sign requires presign id", ErrInvalidRunIntent)
+		}
+	case tss.ProtocolFROSTEd25519:
+		if run.PresignID != "" {
+			return fmt.Errorf("%w: FROST sign does not use presign id", ErrInvalidRunIntent)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported protocol %q", ErrInvalidRunIntent, run.Protocol)
+	}
+	if err := validateRunSigners(run); err != nil {
+		return err
+	}
+	return nil
 }

@@ -69,18 +69,7 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if err := store.AcceptPlan(ctx, run.RunID, 1, runDigest("other-digest")); !errors.Is(err, tssrun.ErrPlanDigestConflict) {
 		t.Fatalf("unbound initial digest: got %v, want ErrPlanDigestConflict", err)
 	}
-	if err := store.AcceptPlan(ctx, run.RunID, 4, digest); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
-		t.Fatalf("non-participant accept: got %v, want ErrRunPartyNotParticipant", err)
-	}
-	if err := store.MarkStarted(ctx, run.RunID, 4, digest, runSessionDescriptor(run, 4)); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
-		t.Fatalf("non-participant start: got %v, want ErrRunPartyNotParticipant", err)
-	}
-	if err := store.MarkCompleted(ctx, run.RunID, 4, tssrun.LocalRunResult{OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
-		t.Fatalf("non-participant complete: got %v, want ErrRunPartyNotParticipant", err)
-	}
-	if err := store.AbortRun(ctx, run.RunID, 4, "invalid party"); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
-		t.Fatalf("non-participant abort: got %v, want ErrRunPartyNotParticipant", err)
-	}
+	checkRunStoreNonParticipant(t, ctx, store, run, digest)
 	if err := store.AcceptPlan(ctx, run.RunID, 1, digest); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
@@ -140,26 +129,7 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 		t.Fatalf("late completed-run lookup: got %v, want ErrRunCompleted", err)
 	}
 
-	aborted := testRunIntent(t, "run-aborted")
-	if err := store.CreateRun(ctx, aborted); err != nil {
-		t.Fatalf("CreateRun aborted: %v", err)
-	}
-	abortedDigest := aborted.AcceptanceDigest()
-	if err := store.AcceptPlan(ctx, aborted.RunID, 1, abortedDigest); err != nil {
-		t.Fatalf("AcceptPlan aborted: %v", err)
-	}
-	if err := store.AbortRun(ctx, aborted.RunID, 1, "operator abort"); err != nil {
-		t.Fatalf("AbortRun aborted: %v", err)
-	}
-	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
-		t.Fatalf("aborted lookup: got %v, want ErrRunAborted", err)
-	}
-	if err := store.AcceptPlan(ctx, aborted.RunID, 2, abortedDigest); !errors.Is(err, tssrun.ErrRunAborted) {
-		t.Fatalf("late aborted-run accept: got %v, want ErrRunAborted", err)
-	}
-	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
-		t.Fatalf("late aborted-run lookup: got %v, want ErrRunAborted", err)
-	}
+	checkRunStoreAbort(t, ctx, store)
 
 	refresh := testRunIntent(t, "run-refresh-target-binding")
 	refresh.Kind = tssrun.RunRefresh
@@ -333,4 +303,44 @@ func testInboundEnvelope(t *testing.T) tss.InboundEnvelope {
 		t.Fatalf("OpenEnvelope: %v", err)
 	}
 	return in
+}
+
+func checkRunStoreAbort(t *testing.T, ctx context.Context, store tssrun.RunStore) {
+	t.Helper()
+	aborted := testRunIntent(t, "run-aborted")
+	if err := store.CreateRun(ctx, aborted); err != nil {
+		t.Fatalf("CreateRun aborted: %v", err)
+	}
+	abortedDigest := aborted.AcceptanceDigest()
+	if err := store.AcceptPlan(ctx, aborted.RunID, 1, abortedDigest); err != nil {
+		t.Fatalf("AcceptPlan aborted: %v", err)
+	}
+	if err := store.AbortRun(ctx, aborted.RunID, 1, "operator abort"); err != nil {
+		t.Fatalf("AbortRun aborted: %v", err)
+	}
+	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
+		t.Fatalf("aborted lookup: got %v, want ErrRunAborted", err)
+	}
+	if err := store.AcceptPlan(ctx, aborted.RunID, 2, abortedDigest); !errors.Is(err, tssrun.ErrRunAborted) {
+		t.Fatalf("late aborted-run accept: got %v, want ErrRunAborted", err)
+	}
+	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
+		t.Fatalf("late aborted-run lookup: got %v, want ErrRunAborted", err)
+	}
+}
+
+func checkRunStoreNonParticipant(t *testing.T, ctx context.Context, store tssrun.RunStore, run tssrun.RunIntent, digest []byte) {
+	t.Helper()
+	if err := store.AcceptPlan(ctx, run.RunID, 4, digest); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant accept: got %v, want ErrRunPartyNotParticipant", err)
+	}
+	if err := store.MarkStarted(ctx, run.RunID, 4, digest, runSessionDescriptor(run, 4)); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant start: got %v, want ErrRunPartyNotParticipant", err)
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 4, tssrun.LocalRunResult{OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant complete: got %v, want ErrRunPartyNotParticipant", err)
+	}
+	if err := store.AbortRun(ctx, run.RunID, 4, "invalid party"); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant abort: got %v, want ErrRunPartyNotParticipant", err)
+	}
 }

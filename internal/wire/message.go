@@ -229,31 +229,11 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 	// Type-level codec hook: if the message provides its own complete TLV
 	// encoding, delegate to it and bypass reflection-based field encoding.
 	if mm, ok := msg.(MessageMarshaler); ok {
-		raw, err := mm.MarshalWireMessage(opts...)
-		if err != nil {
-			return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
-		}
-		if raw == nil {
-			return nil, fmt.Errorf("wire.Marshal %s: MarshalWireMessage returned nil", v.Type().Name())
-		}
-		if err := validateMessageFrame(raw, m, marshalSelfCheckLimits(raw)); err != nil {
-			return nil, fmt.Errorf("wire.Marshal %s: invalid MarshalWireMessage output: %w", v.Type().Name(), err)
-		}
-		return raw, nil
+		return marshalCustomMessage(mm, m, v.Type(), opts)
 	}
 	if v.CanAddr() {
 		if mm, ok := reflect.TypeAssert[MessageMarshaler](v.Addr()); ok {
-			raw, err := mm.MarshalWireMessage(opts...)
-			if err != nil {
-				return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
-			}
-			if raw == nil {
-				return nil, fmt.Errorf("wire.Marshal %s: MarshalWireMessage returned nil", v.Type().Name())
-			}
-			if err := validateMessageFrame(raw, m, marshalSelfCheckLimits(raw)); err != nil {
-				return nil, fmt.Errorf("wire.Marshal %s: invalid MarshalWireMessage output: %w", v.Type().Name(), err)
-			}
-			return raw, nil
+			return marshalCustomMessage(mm, m, v.Type(), opts)
 		}
 	}
 
@@ -378,4 +358,18 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 
 	v.Set(work)
 	return nil
+}
+
+func marshalCustomMessage(mm MessageMarshaler, m Message, typ reflect.Type, opts []MarshalOption) ([]byte, error) {
+	raw, err := mm.MarshalWireMessage(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("wire.Marshal %s: %w", typ.Name(), err)
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("wire.Marshal %s: MarshalWireMessage returned nil", typ.Name())
+	}
+	if err := validateMessageFrame(raw, m, marshalSelfCheckLimits(raw)); err != nil {
+		return nil, fmt.Errorf("wire.Marshal %s: invalid MarshalWireMessage output: %w", typ.Name(), err)
+	}
+	return raw, nil
 }

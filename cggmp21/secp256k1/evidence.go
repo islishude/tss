@@ -152,25 +152,8 @@ func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx
 	if len(ctx.Parties) > 0 && !tss.ContainsParty(ctx.Parties, record.Accused) {
 		return errors.New("identification accused party is not a participant")
 	}
-	for _, field := range record.TranscriptHashes {
-		switch field.Key {
-		case evidenceFieldPartiesHash:
-			if len(ctx.Parties) > 0 && !bytes.Equal(field.Value, tss.PartySetHash(ctx.Parties, partySetHashLabel)) {
-				return errors.New("identification party-set hash mismatch")
-			}
-		case evidenceFieldSignerSetHash:
-			if len(ctx.Signers) > 0 && !bytes.Equal(field.Value, tss.PartySetHash(ctx.Signers, partySetHashLabel)) {
-				return errors.New("identification signer-set hash mismatch")
-			}
-		case evidenceFieldKeygenTranscriptHash:
-			if len(ctx.KeygenTranscriptHash) > 0 && !bytes.Equal(field.Value, ctx.KeygenTranscriptHash) {
-				return errors.New("identification keygen transcript mismatch")
-			}
-		case evidenceFieldPresignTranscriptHash:
-			if len(ctx.PresignTranscriptHash) > 0 && !bytes.Equal(field.Value, ctx.PresignTranscriptHash) {
-				return errors.New("identification presign transcript mismatch")
-			}
-		}
+	if err := verifyIdentificationTranscripts(record, ctx); err != nil {
+		return err
 	}
 	if len(record.SignedEnvelopeA) == 0 {
 		return errors.New("portable identification evidence lacks an authenticated envelope")
@@ -199,20 +182,8 @@ func verifyIdentificationRecord(evidence *tss.BlameEvidence, encoded []byte, ctx
 	if !bytes.Equal(evidence.PayloadHash, payloadHash[:]) || !bytes.Equal(evidence.EnvelopeDigest, envelopeDigest[:]) {
 		return errors.New("evidence does not bind the first signed identification envelope")
 	}
-	if len(record.SignedEnvelopeB) > 0 {
-		second, err := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeB, envelopeLimitsForEvidence(first))
-		if err != nil {
-			return fmt.Errorf("decode second signed identification envelope: %w", err)
-		}
-		if second.From != record.Accused || tss.SlotKeyFromEnvelope(first) != tss.SlotKeyFromEnvelope(second) {
-			return errors.New("signed identification envelopes do not occupy the same sender slot")
-		}
-		if err := tss.VerifyEnvelopeSignature(second, ctx.EnvelopeVerifier); err != nil {
-			return err
-		}
-		if tss.EnvelopeSigningDigest(first) == tss.EnvelopeSigningDigest(second) {
-			return errors.New("signed identification envelopes are identical")
-		}
+	if err := verifyIdentificationEquivocation(record, first, ctx); err != nil {
+		return err
 	}
 	if len(record.BroadcastCertificate) > 0 {
 		if ctx.BroadcastACKVerifier == nil {
@@ -366,27 +337,8 @@ func bindInboundAuthenticationEvidence(err error, in tss.InboundEnvelope) error 
 		hadRecord = true
 		break
 	}
-	currentDigest := env.Digest()
-	recordBindsCurrentEnvelope := evidence.From == env.From &&
-		bytes.Equal(evidence.EnvelopeDigest, currentDigest[:])
-	if !hadRecord {
-		record.SignedEnvelopeA = bytes.Clone(envelopeBytes)
-		record.BroadcastCertificate = bytes.Clone(certificateBytes)
-	} else if recordBindsCurrentEnvelope {
-		// Proof-backed identification records initially carry no transport
-		// artifact. Add the certificate only when the top-level evidence is for
-		// this exact broadcast. Cross-envelope blame (for example, a Round 3
-		// report exposing signed Round 2 equivocation) must preserve the accused
-		// direct envelopes already stored in the record.
-		if len(record.SignedEnvelopeA) == 0 {
-			record.SignedEnvelopeA = bytes.Clone(envelopeBytes)
-		} else {
-			bound, decodeErr := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeA, envelopeLimitsForEvidence(env))
-			if decodeErr != nil || bound.Digest() != currentDigest {
-				return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, errors.New("identification record envelope does not match authenticated broadcast"))
-			}
-		}
-		record.BroadcastCertificate = bytes.Clone(certificateBytes)
+	if err := bindIdentificationBroadcast(&record, evidence, env, envelopeBytes, certificateBytes, hadRecord); err != nil {
+		return err
 	}
 	if evidence.Kind == tss.EvidenceKindPresignRedAlert && bytes.Equal(record.Proof, env.Payload) {
 		// The authenticated envelope is the canonical proof carrier. Keeping a
@@ -600,4 +552,73 @@ func isSignerScopedEvidence(kind tss.EvidenceKind) bool {
 	default:
 		return false
 	}
+}
+
+func verifyIdentificationTranscripts(record tss.IdentificationRecord, ctx EvidenceContext) error {
+	for _, field := range record.TranscriptHashes {
+		switch field.Key {
+		case evidenceFieldPartiesHash:
+			if len(ctx.Parties) > 0 && !bytes.Equal(field.Value, tss.PartySetHash(ctx.Parties, partySetHashLabel)) {
+				return errors.New("identification party-set hash mismatch")
+			}
+		case evidenceFieldSignerSetHash:
+			if len(ctx.Signers) > 0 && !bytes.Equal(field.Value, tss.PartySetHash(ctx.Signers, partySetHashLabel)) {
+				return errors.New("identification signer-set hash mismatch")
+			}
+		case evidenceFieldKeygenTranscriptHash:
+			if len(ctx.KeygenTranscriptHash) > 0 && !bytes.Equal(field.Value, ctx.KeygenTranscriptHash) {
+				return errors.New("identification keygen transcript mismatch")
+			}
+		case evidenceFieldPresignTranscriptHash:
+			if len(ctx.PresignTranscriptHash) > 0 && !bytes.Equal(field.Value, ctx.PresignTranscriptHash) {
+				return errors.New("identification presign transcript mismatch")
+			}
+		}
+	}
+	return nil
+}
+
+func verifyIdentificationEquivocation(record tss.IdentificationRecord, first tss.Envelope, ctx EvidenceContext) error {
+	if len(record.SignedEnvelopeB) > 0 {
+		second, err := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeB, envelopeLimitsForEvidence(first))
+		if err != nil {
+			return fmt.Errorf("decode second signed identification envelope: %w", err)
+		}
+		if second.From != record.Accused || tss.SlotKeyFromEnvelope(first) != tss.SlotKeyFromEnvelope(second) {
+			return errors.New("signed identification envelopes do not occupy the same sender slot")
+		}
+		if err := tss.VerifyEnvelopeSignature(second, ctx.EnvelopeVerifier); err != nil {
+			return err
+		}
+		if tss.EnvelopeSigningDigest(first) == tss.EnvelopeSigningDigest(second) {
+			return errors.New("signed identification envelopes are identical")
+		}
+	}
+	return nil
+}
+
+func bindIdentificationBroadcast(record *tss.IdentificationRecord, evidence *tss.BlameEvidence, env tss.Envelope, envelopeBytes, certificateBytes []byte, hadRecord bool) error {
+	currentDigest := env.Digest()
+	recordBindsCurrentEnvelope := evidence.From == env.From &&
+		bytes.Equal(evidence.EnvelopeDigest, currentDigest[:])
+	if !hadRecord {
+		record.SignedEnvelopeA = bytes.Clone(envelopeBytes)
+		record.BroadcastCertificate = bytes.Clone(certificateBytes)
+	} else if recordBindsCurrentEnvelope {
+		// Proof-backed identification records initially carry no transport
+		// artifact. Add the certificate only when the top-level evidence is for
+		// this exact broadcast. Cross-envelope blame (for example, a Round 3
+		// report exposing signed Round 2 equivocation) must preserve the accused
+		// direct envelopes already stored in the record.
+		if len(record.SignedEnvelopeA) == 0 {
+			record.SignedEnvelopeA = bytes.Clone(envelopeBytes)
+		} else {
+			bound, decodeErr := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeA, envelopeLimitsForEvidence(env))
+			if decodeErr != nil || bound.Digest() != currentDigest {
+				return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, errors.New("identification record envelope does not match authenticated broadcast"))
+			}
+		}
+		record.BroadcastCertificate = bytes.Clone(certificateBytes)
+	}
+	return nil
 }

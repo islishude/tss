@@ -316,59 +316,7 @@ func (s *ChildDerivationSession) Handle(ctx context.Context, in tss.InboundEnvel
 	if env.PayloadType == payloadChildConfirmation {
 		return s.handleChildConfirmationLocked(ctx, in, key)
 	}
-	if s.auxInfo == nil || s.pending != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("AuxInfo message arrived outside child Figure 7"))
-	}
-	prepared, err := s.auxInfo.prepareInbound(ctx, env)
-	if err != nil {
-		return nil, paperKeygenPreparationError(env, err)
-	}
-	defer prepared.destroy()
-	var output *preparedChildDerivationOutput
-	if prepared.result != nil {
-		output, err = s.prepareChildDerivationOutput(prepared.result)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
-		}
-		defer output.destroy()
-	}
-	if err := s.validateInbound(in); err != nil {
-		return nil, err
-	}
-	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
-		return nil, err
-	}
-	if err := prepared.apply(); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, s.cfg.Self, fmt.Errorf("commit child Figure 7 transition: %w", err))
-	}
-	s.accepted[key] = struct{}{}
-	if prepared.failure != nil {
-		if finishErr := s.terminalFigure7FailureLocked(prepared.failure); finishErr != nil {
-			for i := range prepared.out {
-				clearEnvelope(&prepared.out[i])
-			}
-			return nil, finishErr
-		}
-		return prepared.out, nil
-	}
-	if output == nil {
-		return prepared.out, nil
-	}
-	s.commitChildDerivationOutputLocked(output)
-	if output.final != nil {
-		s.lifecycleFinal = output.final
-		output.final = nil
-		if err := s.persistChildGenerationLocked(s.lifecycleFinal); err != nil {
-			s.lifecycleOutbox = cloneLifecycleEnvelopes(append(prepared.out, output.confirmationEnvelope))
-			for i := range prepared.out {
-				clearEnvelope(&prepared.out[i])
-			}
-			clearEnvelope(&output.confirmationEnvelope)
-			return nil, err
-		}
-		s.lifecycleFinal = nil
-	}
-	return append(prepared.out, output.confirmationEnvelope), nil
+	return s.handleAuxInfoLocked(ctx, in, key)
 }
 
 func (s *ChildDerivationSession) validateInbound(in tss.InboundEnvelope) error {
@@ -566,4 +514,61 @@ func (s *ChildDerivationSession) terminalFigure7FailureLocked(failure *Figure7Fa
 	}
 	s.figure7Failure = clone
 	return err
+}
+
+func (s *ChildDerivationSession) handleAuxInfoLocked(ctx context.Context, in tss.InboundEnvelope, key paperKeygenMessageKey) ([]tss.Envelope, error) {
+	env := in.Envelope()
+	if s.auxInfo == nil || s.pending != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("AuxInfo message arrived outside child Figure 7"))
+	}
+	prepared, err := s.auxInfo.prepareInbound(ctx, env)
+	if err != nil {
+		return nil, paperKeygenPreparationError(env, err)
+	}
+	defer prepared.destroy()
+	var output *preparedChildDerivationOutput
+	if prepared.result != nil {
+		output, err = s.prepareChildDerivationOutput(prepared.result)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+		defer output.destroy()
+	}
+	if err := s.validateInbound(in); err != nil {
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
+	if err := prepared.apply(); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, s.cfg.Self, fmt.Errorf("commit child Figure 7 transition: %w", err))
+	}
+	s.accepted[key] = struct{}{}
+	if prepared.failure != nil {
+		if finishErr := s.terminalFigure7FailureLocked(prepared.failure); finishErr != nil {
+			for i := range prepared.out {
+				clearEnvelope(&prepared.out[i])
+			}
+			return nil, finishErr
+		}
+		return prepared.out, nil
+	}
+	if output == nil {
+		return prepared.out, nil
+	}
+	s.commitChildDerivationOutputLocked(output)
+	if output.final != nil {
+		s.lifecycleFinal = output.final
+		output.final = nil
+		if err := s.persistChildGenerationLocked(s.lifecycleFinal); err != nil {
+			s.lifecycleOutbox = cloneLifecycleEnvelopes(append(prepared.out, output.confirmationEnvelope))
+			for i := range prepared.out {
+				clearEnvelope(&prepared.out[i])
+			}
+			clearEnvelope(&output.confirmationEnvelope)
+			return nil, err
+		}
+		s.lifecycleFinal = nil
+	}
+	return append(prepared.out, output.confirmationEnvelope), nil
 }

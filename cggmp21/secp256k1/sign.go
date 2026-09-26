@@ -868,88 +868,26 @@ func (s *PresignSession) Handle(ctx context.Context, env tss.InboundEnvelope) (o
 	if !tss.ContainsParty(s.signers, base.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
-	st, ok := s.partyState(base.From)
+	_, ok := s.partyState(base.From)
 	if !ok {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
 
 	switch base.PayloadType {
 	case payloadPresignRound1:
-		if base.Round != presignStartRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 payload in wrong round"))
-		}
-		if st.round1.havePayload {
-			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round1"))
-		}
-		tx, err := s.buildAcceptPresignRound1PayloadTx(base)
-		if err != nil {
-			return nil, err
-		}
-		return applyPresignTransition(ctx, s, env, tx)
+		return s.handlePresignRound1(ctx, env)
 
 	case payloadPresignRound1Proof:
-		if base.Round != presignStartRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 proof payload in wrong round"))
-		}
-		if base.From == s.key.state.Party {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("self presign round1 proof is not expected"))
-		}
-		if st.round1.haveProof {
-			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round1 proof"))
-		}
-		tx, err := s.buildAcceptPresignRound1ProofTx(base)
-		if err != nil {
-			return nil, err
-		}
-		return applyPresignTransition(ctx, s, env, tx)
+		return s.handlePresignRound1Proof(ctx, env)
 
 	case payloadPresignRound2:
-		if base.Round != presignRound2 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round2 payload in wrong round"))
-		}
-		if st.round2.havePayload {
-			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round2"))
-		}
-		if err := s.validatePresignInboundReadiness(base); err != nil {
-			return nil, err
-		}
-		tx, err := s.buildAcceptPresignRound2Tx(base)
-		if err != nil {
-			return nil, err
-		}
-		return applyPresignTransition(ctx, s, env, tx)
+		return s.handlePresignRound2(ctx, env)
 
 	case payloadPresignRound3:
-		if base.Round != presignRound3 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round3 payload in wrong round"))
-		}
-		if st.round3.havePayload {
-			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate Figure 8 round3 payload"))
-		}
-		if err := s.validatePresignInboundReadiness(base); err != nil {
-			return nil, err
-		}
-		tx, err := s.buildAcceptPresignRound3Tx(base)
-		if err != nil {
-			return nil, err
-		}
-		return applyPresignTransition(ctx, s, env, tx)
+		return s.handlePresignRound3(ctx, env)
 
 	case payloadPresignRedAlert:
-		if base.Round != presignRedAlertRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("figure 9 payload in wrong round"))
-		}
-		if !s.identifying {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("figure 9 red-alert phase is not active"))
-		}
-		if _, exists := s.redAlertPayloads[base.From]; exists {
-			return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate Figure 9 payload"))
-		}
-		tx, err := s.buildAcceptPresignRedAlertTx(base)
-		if err != nil {
-			return nil, err
-		}
-		return applyPresignTransition(ctx, s, env, tx)
+		return s.handlePresignRedAlert(ctx, env)
 
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
@@ -1000,4 +938,95 @@ func (s *PresignSession) Presign() (PersistedPresign, bool) {
 		return PersistedPresign{}, false
 	}
 	return newPersistedPresign(s.persistedPresign.slot, s.persistedPresign.metadata), true
+}
+
+func (s *PresignSession) handlePresignRedAlert(ctx context.Context, env tss.InboundEnvelope) ([]tss.Envelope, error) {
+	base := env.Envelope()
+	if base.Round != presignRedAlertRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("figure 9 payload in wrong round"))
+	}
+	if !s.identifying {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("figure 9 red-alert phase is not active"))
+	}
+	if _, exists := s.redAlertPayloads[base.From]; exists {
+		return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate Figure 9 payload"))
+	}
+	tx, err := s.buildAcceptPresignRedAlertTx(base)
+	if err != nil {
+		return nil, err
+	}
+	return applyPresignTransition(ctx, s, env, tx)
+}
+
+func (s *PresignSession) handlePresignRound3(ctx context.Context, env tss.InboundEnvelope) ([]tss.Envelope, error) {
+	base := env.Envelope()
+	st, _ := s.partyState(base.From)
+	if base.Round != presignRound3 {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round3 payload in wrong round"))
+	}
+	if st.round3.havePayload {
+		return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate Figure 8 round3 payload"))
+	}
+	if err := s.validatePresignInboundReadiness(base); err != nil {
+		return nil, err
+	}
+	tx, err := s.buildAcceptPresignRound3Tx(base)
+	if err != nil {
+		return nil, err
+	}
+	return applyPresignTransition(ctx, s, env, tx)
+}
+
+func (s *PresignSession) handlePresignRound2(ctx context.Context, env tss.InboundEnvelope) ([]tss.Envelope, error) {
+	base := env.Envelope()
+	st, _ := s.partyState(base.From)
+	if base.Round != presignRound2 {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round2 payload in wrong round"))
+	}
+	if st.round2.havePayload {
+		return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round2"))
+	}
+	if err := s.validatePresignInboundReadiness(base); err != nil {
+		return nil, err
+	}
+	tx, err := s.buildAcceptPresignRound2Tx(base)
+	if err != nil {
+		return nil, err
+	}
+	return applyPresignTransition(ctx, s, env, tx)
+}
+
+func (s *PresignSession) handlePresignRound1Proof(ctx context.Context, env tss.InboundEnvelope) ([]tss.Envelope, error) {
+	base := env.Envelope()
+	st, _ := s.partyState(base.From)
+	if base.Round != presignStartRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 proof payload in wrong round"))
+	}
+	if base.From == s.key.state.Party {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("self presign round1 proof is not expected"))
+	}
+	if st.round1.haveProof {
+		return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round1 proof"))
+	}
+	tx, err := s.buildAcceptPresignRound1ProofTx(base)
+	if err != nil {
+		return nil, err
+	}
+	return applyPresignTransition(ctx, s, env, tx)
+}
+
+func (s *PresignSession) handlePresignRound1(ctx context.Context, env tss.InboundEnvelope) ([]tss.Envelope, error) {
+	base := env.Envelope()
+	st, _ := s.partyState(base.From)
+	if base.Round != presignStartRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 payload in wrong round"))
+	}
+	if st.round1.havePayload {
+		return s.rejectAcceptedPresignDuplicate(env, errors.New("duplicate presign round1"))
+	}
+	tx, err := s.buildAcceptPresignRound1PayloadTx(base)
+	if err != nil {
+		return nil, err
+	}
+	return applyPresignTransition(ctx, s, env, tx)
 }

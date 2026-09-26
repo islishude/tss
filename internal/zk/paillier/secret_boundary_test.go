@@ -126,7 +126,8 @@ func TestBigIntExpCallSitesRemainPublicExponentOnly(t *testing.T) {
 			"proveEncOnce": true,
 		},
 		"internal/zk/paillier/affg.go": {
-			"proveAffGOnce": true,
+			// Both Exp calls use the public Fiat-Shamir challenge e.
+			"respondAffG": true,
 		},
 		"internal/zk/paillier/logstar.go": {
 			"proveLogStarOnce": true,

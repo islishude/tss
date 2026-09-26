@@ -107,74 +107,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if id == s.selfID {
 			continue
 		}
-		receiverData := s.newPartyData[id]
-		if receiverData == nil || receiverData.paillierPub.PublicKey == nil || receiverData.ringPedersen.Params == nil {
-			return nil, fmt.Errorf("missing reshare receiver material for party %d", id)
-		}
-		targetIdentifier, ok := s.provisionalIDs[id]
-		if !ok {
-			return nil, fmt.Errorf("missing provisional reshare identifier for party %d", id)
-		}
-		parsedIdentifier, err := shamir.IdentifierFromBytes(targetIdentifier)
-		if err != nil {
-			return nil, err
-		}
-		targetLambda, err := provisionalLagrangeCoefficient(s.provisionalIDs, id, s.newParties)
-		if err != nil {
-			return nil, err
-		}
-		evaluatedShare, err := shamir.EvalAt(poly, parsedIdentifier)
-		if err != nil {
-			return nil, err
-		}
-		share, err := secpSecretScalarFromScalarAllowZero(secp.ScalarMul(targetLambda, evaluatedShare))
-		if err != nil {
-			return nil, err
-		}
-		ciphertext, randomness, err := receiverData.paillierPub.PublicKey.EncryptSecret(s.cfg.Reader(), share)
-		if err != nil {
-			share.Destroy()
-			return nil, err
-		}
-		evaluation, err := evaluateEncodedCommitmentsAtIdentifier(commitments, targetIdentifier)
-		if err != nil {
-			share.Destroy()
-			randomness.Destroy()
-			return nil, err
-		}
-		evaluation = secp.ScalarMult(evaluation, targetLambda)
-		domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, s.selfID, id, targetIdentifier, receiverData.paillierPub.PublicKey, s.planHash, s.limits)
-		if err != nil {
-			share.Destroy()
-			randomness.Destroy()
-			return nil, err
-		}
-		proof, err := zkpai.ProveLogStar(s.securityParams, domain, zkpai.LogStarStatement{
-			PaillierN:   receiverData.paillierPub.PublicKey,
-			C:           ciphertext,
-			X:           evaluation,
-			B:           secp.ScalarBaseMult(secp.ScalarOne()),
-			VerifierAux: receiverData.ringPedersen.Params,
-		}, zkpai.LogStarWitness{X: share, Rho: randomness}, s.cfg.Reader())
-		share.Destroy()
-		randomness.Destroy()
-		if err != nil {
-			return nil, err
-		}
-		sharePayload, err := (reshareSharePayload{
-			Dealer:               s.selfID,
-			Receiver:             id,
-			TargetIdentifier:     bytes.Clone(targetIdentifier),
-			Ciphertext:           ciphertext.Bytes(),
-			Proof:                *proof,
-			DealerCommitmentHash: commitmentsHash,
-			PlanHash:             s.planHash,
-		}).MarshalBinaryWithLimits(s.limits)
-		proof.Destroy()
-		if err != nil {
-			return nil, err
-		}
-		shareEnv, err := newEnvelope(dealerConfig, reshareShareRound, s.selfID, id, payloadReshareShare, sharePayload)
+		shareEnv, err := s.prepareDealerShareEnvelope(id, poly, commitments, commitmentsHash, dealerConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -492,4 +425,79 @@ func polynomialCommitments(poly shamir.Polynomial) ([][]byte, error) {
 		commitments[i] = enc
 	}
 	return commitments, nil
+}
+
+func (s *ReshareSession) prepareDealerShareEnvelope(id tss.PartyID, poly shamir.Polynomial, commitments [][]byte, commitmentsHash []byte, dealerConfig tss.ThresholdConfig) (tss.Envelope, error) {
+	receiverData := s.newPartyData[id]
+	if receiverData == nil || receiverData.paillierPub.PublicKey == nil || receiverData.ringPedersen.Params == nil {
+		return tss.Envelope{}, fmt.Errorf("missing reshare receiver material for party %d", id)
+	}
+	targetIdentifier, ok := s.provisionalIDs[id]
+	if !ok {
+		return tss.Envelope{}, fmt.Errorf("missing provisional reshare identifier for party %d", id)
+	}
+	parsedIdentifier, err := shamir.IdentifierFromBytes(targetIdentifier)
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	targetLambda, err := provisionalLagrangeCoefficient(s.provisionalIDs, id, s.newParties)
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	evaluatedShare, err := shamir.EvalAt(poly, parsedIdentifier)
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	share, err := secpSecretScalarFromScalarAllowZero(secp.ScalarMul(targetLambda, evaluatedShare))
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	ciphertext, randomness, err := receiverData.paillierPub.PublicKey.EncryptSecret(s.cfg.Reader(), share)
+	if err != nil {
+		share.Destroy()
+		return tss.Envelope{}, err
+	}
+	evaluation, err := evaluateEncodedCommitmentsAtIdentifier(commitments, targetIdentifier)
+	if err != nil {
+		share.Destroy()
+		randomness.Destroy()
+		return tss.Envelope{}, err
+	}
+	evaluation = secp.ScalarMult(evaluation, targetLambda)
+	domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, s.selfID, id, targetIdentifier, receiverData.paillierPub.PublicKey, s.planHash, s.limits)
+	if err != nil {
+		share.Destroy()
+		randomness.Destroy()
+		return tss.Envelope{}, err
+	}
+	proof, err := zkpai.ProveLogStar(s.securityParams, domain, zkpai.LogStarStatement{
+		PaillierN:   receiverData.paillierPub.PublicKey,
+		C:           ciphertext,
+		X:           evaluation,
+		B:           secp.ScalarBaseMult(secp.ScalarOne()),
+		VerifierAux: receiverData.ringPedersen.Params,
+	}, zkpai.LogStarWitness{X: share, Rho: randomness}, s.cfg.Reader())
+	share.Destroy()
+	randomness.Destroy()
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	sharePayload, err := (reshareSharePayload{
+		Dealer:               s.selfID,
+		Receiver:             id,
+		TargetIdentifier:     bytes.Clone(targetIdentifier),
+		Ciphertext:           ciphertext.Bytes(),
+		Proof:                *proof,
+		DealerCommitmentHash: commitmentsHash,
+		PlanHash:             s.planHash,
+	}).MarshalBinaryWithLimits(s.limits)
+	proof.Destroy()
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	shareEnv, err := newEnvelope(dealerConfig, reshareShareRound, s.selfID, id, payloadReshareShare, sharePayload)
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	return shareEnv, nil
 }

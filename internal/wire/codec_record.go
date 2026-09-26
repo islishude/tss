@@ -240,6 +240,25 @@ func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits, f
 		}
 	}
 
+	if err := validateDecodedRecord(work, typ); err != nil {
+		return err
+	}
+
+	if orig.Kind() == reflect.Pointer {
+		if orig.CanSet() {
+			out := reflect.New(typ)
+			out.Elem().Set(work)
+			orig.Set(out)
+		} else {
+			orig.Elem().Set(work)
+		}
+	} else {
+		orig.Set(work)
+	}
+	return nil
+}
+
+func validateDecodedRecord(work reflect.Value, typ reflect.Type) error {
 	// AfterUnmarshalWire hook — try value, then pointer.
 	if work.CanAddr() {
 		if au, ok := reflect.TypeAssert[AfterUnmarshaler](work.Addr()); ok {
@@ -266,16 +285,5 @@ func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits, f
 		}
 	}
 
-	if orig.Kind() == reflect.Pointer {
-		if orig.CanSet() {
-			out := reflect.New(typ)
-			out.Elem().Set(work)
-			orig.Set(out)
-		} else {
-			orig.Elem().Set(work)
-		}
-	} else {
-		orig.Set(work)
-	}
 	return nil
 }

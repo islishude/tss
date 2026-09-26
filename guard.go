@@ -298,34 +298,8 @@ func (g *EnvelopeGuard) validateWithParties(env InboundEnvelope, parties PartySe
 		}
 	}
 
-	// 10. Delivery mode enforcement.
-	switch policy.Mode {
-	case DeliveryDirect:
-		if base.To == BroadcastPartyId {
-			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedDirectMessage, base.PayloadType))
-		}
-	case DeliveryBroadcast:
-		if base.To != BroadcastPartyId {
-			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, base.PayloadType))
-		}
-	default:
-		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unknown delivery mode %d: %s", policy.Mode, base.PayloadType))
-	}
-
-	// 11. Confidentiality enforcement.
-	switch policy.Confidentiality {
-	case ConfidentialityRequired:
-		if info.Protection != ChannelConfidential {
-			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrMissingConfidentiality, base.PayloadType))
-		}
-	case ConfidentialityForbidden:
-		if info.Protection == ChannelConfidential {
-			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, base.PayloadType))
-		}
-	case ConfidentialityOptional:
-		// nothing to enforce — either plaintext or confidential is acceptable
-	default:
-		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unknown confidentiality policy %d: %s", policy.Confidentiality, base.PayloadType))
+	if err := validateInboundDeliveryPolicy(base, info, policy); err != nil {
+		return err
 	}
 
 	// 12. Broadcast consistency enforcement against the provided party set.
@@ -447,4 +421,38 @@ func ValidateInboundWithoutReplay(guard *EnvelopeGuard, env InboundEnvelope, exp
 		return errors.New("allowed senders must not be empty")
 	}
 	return guard.ValidateWithoutReplay(env, allowedSenders)
+}
+
+func validateInboundDeliveryPolicy(base Envelope, info ReceiveInfo, policy DeliveryPolicy) error {
+	// 10. Delivery mode enforcement.
+	switch policy.Mode {
+	case DeliveryDirect:
+		if base.To == BroadcastPartyId {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedDirectMessage, base.PayloadType))
+		}
+	case DeliveryBroadcast:
+		if base.To != BroadcastPartyId {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, base.PayloadType))
+		}
+	default:
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unknown delivery mode %d: %s", policy.Mode, base.PayloadType))
+	}
+
+	// 11. Confidentiality enforcement.
+	switch policy.Confidentiality {
+	case ConfidentialityRequired:
+		if info.Protection != ChannelConfidential {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrMissingConfidentiality, base.PayloadType))
+		}
+	case ConfidentialityForbidden:
+		if info.Protection == ChannelConfidential {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, base.PayloadType))
+		}
+	case ConfidentialityOptional:
+		// nothing to enforce — either plaintext or confidential is acceptable
+	default:
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unknown confidentiality policy %d: %s", policy.Confidentiality, base.PayloadType))
+	}
+
+	return nil
 }

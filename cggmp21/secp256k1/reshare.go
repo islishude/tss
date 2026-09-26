@@ -406,19 +406,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
 	if dealer {
-		if oldKey == nil || oldKey.state == nil {
-			return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("dealer requires old key share"))
-		}
-		if oldKey.state.Party != localParty {
-			return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("old key party does not match local party"))
-		}
-		if !plan.IsDealer(localParty) {
-			return nil, nil, planvalidation.InvalidConfig(localParty, errors.New("local party is not in dealer set"))
-		}
-		if err := validateOldKeyMatchesResharePlan(oldKey, plan); err != nil {
-			return nil, nil, planvalidation.InvalidConfig(localParty, err)
-		}
-		if err := oldKey.requireMPCMaterial(plan.limits); err != nil {
+		if err := validateReshareDealer(oldKey, plan, localParty); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -531,19 +519,7 @@ func (s *ReshareSession) Handle(ctx context.Context, in tss.InboundEnvelope) (ou
 		allowedParties = s.newParties
 	}
 	if s.completed || s.aborted {
-		if err := s.validateInbound(in, allowedParties); err != nil {
-			if errors.Is(err, tss.ErrDuplicateMessage) {
-				return nil, tss.ErrDuplicateMessage
-			}
-			return nil, err
-		}
-		if s.completed {
-			if (!s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial) || env.PayloadType == payloadKeygenConfirmation {
-				return nil, nil
-			}
-			return nil, completedSessionError(env.Round, env.From)
-		}
-		return nil, abortedSessionError(env.Round, env.From)
+		return s.handleTerminalInbound(in, allowedParties)
 	}
 	defer func() {
 		err = bindInboundAuthenticationEvidence(err, in)
@@ -581,59 +557,7 @@ func (s *ReshareSession) Handle(ctx context.Context, in tss.InboundEnvelope) (ou
 		}
 		return s.commitReshareLifecycleEffects(s.cfg.Ctx(), out)
 	}
-	if s.isReceiver && (s.auxInfo != nil || s.newShare != nil) {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("temporary reshare handoff message arrived after Figure 7 started"))
-	}
-	if env.PayloadType == payloadReshareShare && env.Round == reshareShareRound {
-		dd := s.dealerData[env.From]
-		if dd != nil && dd.commitments == nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare share arrived before dealer commitments"))
-		}
-	}
-	if s.hasAcceptedInbound(env) {
-		if err := s.validateInbound(in, allowedParties); err != nil {
-			if errors.Is(err, tss.ErrDuplicateMessage) {
-				return nil, tss.ErrDuplicateMessage
-			}
-			return nil, err
-		}
-		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("reshare message slot is already accepted"))
-	}
-	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
-		return nil, err
-	}
-	staged := s.cloneForInboundTransition()
-	liveConfigLog := staged.cfg.Log
-	liveLog := staged.log
-	stagedLog := new(stagedLifecycleLogger)
-	staged.cfg.Log = stagedLog
-	staged.log = stagedLog
-	defer stagedLog.discard()
-	stagedOwned := true
-	defer func() {
-		if stagedOwned {
-			staged.abort()
-		}
-	}()
-	out, err = staged.applyValidatedInbound(env)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.validateInbound(in, allowedParties); err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
-		}
-		return nil, err
-	}
-	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
-		return nil, err
-	}
-	staged.cfg.Log = liveConfigLog
-	staged.log = liveLog
-	s.commitInboundTransition(staged)
-	stagedOwned = false
-	stagedLog.flush(s.log)
-	return s.commitReshareLifecycleEffects(s.cfg.Ctx(), out)
+	return s.handleHandoffInbound(ctx, in, allowedParties)
 }
 
 func (s *ReshareSession) hasAcceptedInbound(env tss.Envelope) bool {
@@ -667,129 +591,22 @@ func (s *ReshareSession) hasAcceptedInbound(env tss.Envelope) bool {
 func (s *ReshareSession) applyValidatedInbound(env tss.Envelope) (out []tss.Envelope, err error) {
 	switch env.PayloadType {
 	case payloadReshareDealerCommitments:
-		if env.Round != reshareStartRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare dealer commitments in wrong round"))
-		}
-		dd, ok := s.dealerData[env.From]
-		if !ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a dealer", env.From))
-		}
-		if dd.commitments != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare dealer commitments"))
-		}
-		p, err := tss.DecodeBinaryValueWithLimits[reshareDealerCommitmentsPayload](env.Payload, s.limits)
-		if err != nil {
-			return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindReshareCommitment,
-				"malformed reshare dealer commitments", tss.NewPartySet(env.From), err,
-				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
-				hashEvidenceField("reshare_commitment_payload_hash", env.Payload))
-		}
-		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
-		}
-		if err := s.validateDealerCommitments(env.From, p.Commitments); err != nil {
-			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindReshareCommitment,
-				"invalid reshare dealer commitments", tss.NewPartySet(env.From), err,
-				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
-				rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, p.Commitments)))
-		}
-		dd.commitments = p.Commitments
+		err = s.applyReshareDealerCommitments(env)
+
 	case payloadReshareShare:
-		if env.Round != reshareShareRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare encrypted share in wrong round"))
-		}
-		if !s.isReceiver {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("local party is not a reshare receiver"))
-		}
-		p, err := tss.DecodeBinaryValueWithLimits[reshareSharePayload](env.Payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
-		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
-		}
-		dd, ok := s.dealerData[env.From]
-		if !ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a dealer", env.From))
-		}
-		if dd.share != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
-		}
-		if dd.commitments == nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare share arrived before dealer commitments"))
-		}
-		if err := s.applyReshareShare(env, p); err != nil {
-			return nil, err
-		}
+		err = s.applyReshareShareInbound(env)
+
 	case payloadReshareReceiverMaterial:
-		if env.Round != reshareStartRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare receiver material in wrong round"))
-		}
-		npd, ok := s.newPartyData[env.From]
-		if !ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a new party", env.From))
-		}
-		if npd.paillierPub.PublicKey != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare receiver material"))
-		}
-		p, err := tss.DecodeBinaryValueWithLimits[reshareReceiverMaterialPayload](env.Payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
-		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
-		}
-		if err := s.verifyAndStoreReceiverMaterial(env, p); err != nil {
-			return nil, err
-		}
-		out, err = s.maybeSendDealerMessages()
-		if err != nil {
-			return nil, err
-		}
-		factorOut, err := s.maybeSendReceiverFactorProofs()
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, factorOut...)
+		out, err = s.applyReshareReceiverMaterial(env)
+
 	case payloadReshareFactorProof:
-		if env.Round != reshareShareRound || !s.isReceiver {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("unexpected reshare factor proof"))
-		}
-		p, err := tss.DecodeBinaryValueWithLimits[reshareFactorProofPayload](env.Payload, s.limits)
-		if err != nil {
-			return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
-				"malformed reshare Paillier factor proof", tss.NewPartySet(env.From), err,
-				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
-		}
-		if p.Prover != env.From || p.Verifier != s.selfID || !s.newParties.Contains(p.Prover) {
-			return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
-				"reshare factor proof identity mismatch", tss.NewPartySet(env.From), errors.New("reshare factor proof identity mismatch"),
-				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
-		}
-		if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, protocolErrorWithEvidence(tss.ErrCodeVerification, env, tss.EvidenceKindPaillierAux,
-				"reshare factor proof plan mismatch", tss.NewPartySet(env.From), err,
-				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
-		}
-		npd := s.newPartyData[env.From]
-		if npd.factorProof != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare factor proof"))
-		}
-		selfRP := s.newPartyData[s.selfID].ringPedersen.Params
-		domain, err := reshareFactorProofDomain(s.receiverConfig(), env.From, s.selfID, &p.PaillierPublicKey, selfRP, s.planHash, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
-		}
-		if err := zkpai.VerifyFactor(s.securityParams, domain, zkpai.FactorStatement{ProverPaillierN: &p.PaillierPublicKey, VerifierAux: selfRP}, &p.Proof); err != nil {
-			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "invalid reshare Paillier factor proof", tss.NewPartySet(env.From), err)
-		}
-		if npd.paillierPub.PublicKey != nil && npd.paillierPub.PublicKey.N.Cmp(p.PaillierPublicKey.N) != 0 {
-			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "reshare factor proof key mismatch", tss.NewPartySet(env.From), errors.New("factor proof Paillier key differs from receiver broadcast"))
-		}
-		npd.factorProof = p.Proof.Clone()
-		npd.factorKey = p.PaillierPublicKey.Clone()
+		err = s.applyReshareFactorProof(env)
+
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
+	}
+	if err != nil {
+		return nil, err
 	}
 	completionOut, err := s.tryComplete()
 	if err != nil {
@@ -1031,4 +848,231 @@ func (s *ReshareSession) allReshareConfirmationsReceived() bool {
 		}
 	}
 	return true
+}
+
+func validateReshareDealer(oldKey *KeyShare, plan *ResharePlan, localParty tss.PartyID) error {
+	if oldKey == nil || oldKey.state == nil {
+		return planvalidation.InvalidConfig(localParty, errors.New("dealer requires old key share"))
+	}
+	if oldKey.state.Party != localParty {
+		return planvalidation.InvalidConfig(localParty, errors.New("old key party does not match local party"))
+	}
+	if !plan.IsDealer(localParty) {
+		return planvalidation.InvalidConfig(localParty, errors.New("local party is not in dealer set"))
+	}
+	if err := validateOldKeyMatchesResharePlan(oldKey, plan); err != nil {
+		return planvalidation.InvalidConfig(localParty, err)
+	}
+	if err := oldKey.requireMPCMaterial(plan.limits); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *ReshareSession) handleTerminalInbound(in tss.InboundEnvelope, allowedParties tss.PartySet) ([]tss.Envelope, error) {
+	env := in.Envelope()
+	if err := s.validateInbound(in, allowedParties); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
+		return nil, err
+	}
+	if s.completed {
+		if (!s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial) || env.PayloadType == payloadKeygenConfirmation {
+			return nil, nil
+		}
+		return nil, completedSessionError(env.Round, env.From)
+	}
+	return nil, abortedSessionError(env.Round, env.From)
+}
+
+func (s *ReshareSession) handleHandoffInbound(ctx context.Context, in tss.InboundEnvelope, allowedParties tss.PartySet) ([]tss.Envelope, error) {
+	env := in.Envelope()
+	if s.isReceiver && (s.auxInfo != nil || s.newShare != nil) {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("temporary reshare handoff message arrived after Figure 7 started"))
+	}
+	if env.PayloadType == payloadReshareShare && env.Round == reshareShareRound {
+		dd := s.dealerData[env.From]
+		if dd != nil && dd.commitments == nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare share arrived before dealer commitments"))
+		}
+	}
+	if s.hasAcceptedInbound(env) {
+		if err := s.validateInbound(in, allowedParties); err != nil {
+			if errors.Is(err, tss.ErrDuplicateMessage) {
+				return nil, tss.ErrDuplicateMessage
+			}
+			return nil, err
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("reshare message slot is already accepted"))
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
+	staged := s.cloneForInboundTransition()
+	liveConfigLog := staged.cfg.Log
+	liveLog := staged.log
+	stagedLog := new(stagedLifecycleLogger)
+	staged.cfg.Log = stagedLog
+	staged.log = stagedLog
+	defer stagedLog.discard()
+	stagedOwned := true
+	defer func() {
+		if stagedOwned {
+			staged.abort()
+		}
+	}()
+	out, err := staged.applyValidatedInbound(env)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateInbound(in, allowedParties); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
+		return nil, err
+	}
+	if err := tss.CheckHandlerContext(ctx, s.cfg.Ctx()); err != nil {
+		return nil, err
+	}
+	staged.cfg.Log = liveConfigLog
+	staged.log = liveLog
+	s.commitInboundTransition(staged)
+	stagedOwned = false
+	stagedLog.flush(s.log)
+	return s.commitReshareLifecycleEffects(s.cfg.Ctx(), out)
+}
+
+func (s *ReshareSession) applyReshareFactorProof(env tss.Envelope) error {
+	if env.Round != reshareShareRound || !s.isReceiver {
+		return tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("unexpected reshare factor proof"))
+	}
+	p, err := tss.DecodeBinaryValueWithLimits[reshareFactorProofPayload](env.Payload, s.limits)
+	if err != nil {
+		return protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
+			"malformed reshare Paillier factor proof", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
+	}
+	if p.Prover != env.From || p.Verifier != s.selfID || !s.newParties.Contains(p.Prover) {
+		return protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
+			"reshare factor proof identity mismatch", tss.NewPartySet(env.From), errors.New("reshare factor proof identity mismatch"),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
+	}
+	if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
+		return protocolErrorWithEvidence(tss.ErrCodeVerification, env, tss.EvidenceKindPaillierAux,
+			"reshare factor proof plan mismatch", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
+	}
+	npd := s.newPartyData[env.From]
+	if npd.factorProof != nil {
+		return tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare factor proof"))
+	}
+	selfRP := s.newPartyData[s.selfID].ringPedersen.Params
+	domain, err := reshareFactorProofDomain(s.receiverConfig(), env.From, s.selfID, &p.PaillierPublicKey, selfRP, s.planHash, s.limits)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	if err := zkpai.VerifyFactor(s.securityParams, domain, zkpai.FactorStatement{ProverPaillierN: &p.PaillierPublicKey, VerifierAux: selfRP}, &p.Proof); err != nil {
+		return verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "invalid reshare Paillier factor proof", tss.NewPartySet(env.From), err)
+	}
+	if npd.paillierPub.PublicKey != nil && npd.paillierPub.PublicKey.N.Cmp(p.PaillierPublicKey.N) != 0 {
+		return verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "reshare factor proof key mismatch", tss.NewPartySet(env.From), errors.New("factor proof Paillier key differs from receiver broadcast"))
+	}
+	npd.factorProof = p.Proof.Clone()
+	npd.factorKey = p.PaillierPublicKey.Clone()
+	return nil
+}
+
+func (s *ReshareSession) applyReshareReceiverMaterial(env tss.Envelope) (out []tss.Envelope, err error) {
+	if env.Round != reshareStartRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare receiver material in wrong round"))
+	}
+	npd, ok := s.newPartyData[env.From]
+	if !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a new party", env.From))
+	}
+	if npd.paillierPub.PublicKey != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare receiver material"))
+	}
+	p, err := tss.DecodeBinaryValueWithLimits[reshareReceiverMaterialPayload](env.Payload, s.limits)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
+	if err := s.verifyAndStoreReceiverMaterial(env, p); err != nil {
+		return nil, err
+	}
+	out, err = s.maybeSendDealerMessages()
+	if err != nil {
+		return nil, err
+	}
+	factorOut, err := s.maybeSendReceiverFactorProofs()
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, factorOut...)
+	return out, nil
+}
+
+func (s *ReshareSession) applyReshareShareInbound(env tss.Envelope) error {
+	if env.Round != reshareShareRound {
+		return tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare encrypted share in wrong round"))
+	}
+	if !s.isReceiver {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("local party is not a reshare receiver"))
+	}
+	p, err := tss.DecodeBinaryValueWithLimits[reshareSharePayload](env.Payload, s.limits)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
+	dd, ok := s.dealerData[env.From]
+	if !ok {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a dealer", env.From))
+	}
+	if dd.share != nil {
+		return tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
+	}
+	if dd.commitments == nil {
+		return tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare share arrived before dealer commitments"))
+	}
+	if err := s.applyReshareShare(env, p); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *ReshareSession) applyReshareDealerCommitments(env tss.Envelope) error {
+	if env.Round != reshareStartRound {
+		return tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare dealer commitments in wrong round"))
+	}
+	dd, ok := s.dealerData[env.From]
+	if !ok {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a dealer", env.From))
+	}
+	if dd.commitments != nil {
+		return tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare dealer commitments"))
+	}
+	p, err := tss.DecodeBinaryValueWithLimits[reshareDealerCommitmentsPayload](env.Payload, s.limits)
+	if err != nil {
+		return protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindReshareCommitment,
+			"malformed reshare dealer commitments", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
+			hashEvidenceField("reshare_commitment_payload_hash", env.Payload))
+	}
+	if err := planvalidation.RequireHash("reshare", p.PlanHash, s.planHash); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
+	if err := s.validateDealerCommitments(env.From, p.Commitments); err != nil {
+		return verificationErrorWithEvidence(env, tss.EvidenceKindReshareCommitment,
+			"invalid reshare dealer commitments", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, p.Commitments)))
+	}
+	dd.commitments = p.Commitments
+	return nil
 }

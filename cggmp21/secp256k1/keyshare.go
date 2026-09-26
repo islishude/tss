@@ -358,26 +358,8 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if _, err := secpScalarFromSecret(k.state.Secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
-	if len(k.state.GroupCommitments) != k.state.Threshold {
-		return errors.New("group commitments length must equal threshold")
-	}
-	for i, commitment := range k.state.GroupCommitments {
-		if commitment == nil {
-			if i == 0 {
-				return errors.New("missing group commitment 0")
-			}
-			continue
-		}
-		if _, err := secp.PointBytes(commitment); err != nil {
-			return fmt.Errorf("invalid group commitment %d: %w", i, err)
-		}
-	}
-	groupPublicKey, err := secp.PointBytes(k.state.GroupCommitments[0])
-	if err != nil {
-		return fmt.Errorf("invalid group commitment 0: %w", err)
-	}
-	if !bytes.Equal(groupPublicKey, k.state.PublicKey) {
-		return errors.New("group commitment constant does not match public key")
+	if err := k.validateGroupCommitments(); err != nil {
+		return err
 	}
 	if err := k.state.validateEpochBinding(limits); err != nil {
 		return fmt.Errorf("invalid epoch binding: %w", err)
@@ -408,112 +390,11 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		return errors.New("missing keygen transcript hash")
 	}
 	for _, id := range k.state.Parties {
-		data := k.state.PartyData[id]
-		if len(data.VerificationShare) == 0 {
-			return fmt.Errorf("missing verification share for party %d", id)
-		}
-		if _, err := secp.PointFromBytes(data.VerificationShare); err != nil {
-			return fmt.Errorf("invalid verification share for %d: %w", id, err)
-		}
-		if data.PaillierPublicKey == nil || data.PaillierProof == nil {
-			return fmt.Errorf("incomplete paillier public key for party %d", id)
-		}
-		if data.RingPedersenParams == nil || data.RingPedersenProof == nil {
-			return fmt.Errorf("incomplete Ring-Pedersen public parameters for party %d", id)
-		}
-		peerPK := data.PaillierPublicKey
-		if err := peerPK.Validate(); err != nil {
-			return fmt.Errorf("invalid paillier public key for party %d: %w", id, err)
-		}
-		if err := checkPaillierModulusBounds(peerPK, limits, k.state.SecurityParams); err != nil {
-			return fmt.Errorf("paillier modulus for party %d does not meet security requirements: %w", id, err)
-		}
-		peerProof := data.PaillierProof
-		if err := peerProof.Validate(); err != nil {
-			return fmt.Errorf("invalid paillier proof for party %d: %w", id, err)
-		}
-		var proofDomain []byte
-		if id == k.state.Party {
-			proofDomain, err = keySharePaillierProofDomainWithLimits(k, limits)
-		} else {
-			proofDomain, err = k.paillierPublicProofDomainFor(id)
-		}
-		if err != nil {
+		if err := k.validatePartyPublicMaterial(id, limits); err != nil {
 			return err
 		}
-		if !zkpai.VerifyModulus(proofDomain, peerPK, id, peerProof) {
-			return fmt.Errorf("invalid paillier proof for party %d", id)
-		}
-		peerRPParams := data.RingPedersenParams
-		if err := peerRPParams.Validate(); err != nil {
-			return fmt.Errorf("invalid Ring-Pedersen parameters for party %d: %w", id, err)
-		}
-		if peerRPParams.N.Cmp(peerPK.N) == 0 {
-			return fmt.Errorf("Ring-Pedersen auxiliary modulus equals Paillier modulus for party %d", id)
-		}
-		peerRPProof := data.RingPedersenProof
-		if err := peerRPProof.Validate(); err != nil {
-			return fmt.Errorf("invalid Ring-Pedersen proof for party %d: %w", id, err)
-		}
-		rpDomain, err := keyShareRingPedersenProofDomain(k, id, peerRPParams)
-		if err != nil {
-			return err
-		}
-		if !zkpai.VerifyRingPedersen(k.state.SecurityParams, rpDomain, peerRPParams, id, peerRPProof) {
-			return fmt.Errorf("invalid Ring-Pedersen proof for party %d", id)
-		}
 	}
-	localData := k.state.PartyData[k.state.Party]
-	pk := localData.PaillierPublicKey
-	sk := k.state.PaillierPrivateKey
-	if err := sk.Validate(); err != nil {
-		return fmt.Errorf("invalid paillier private key: %w", err)
-	}
-	if err := zkpai.ValidateFactorPrivateKey(k.state.SecurityParams, sk); err != nil {
-		return fmt.Errorf("local Paillier factors do not meet Pi-fac bounds: %w", err)
-	}
-	localRP := localData.RingPedersenParams
-	for _, id := range k.state.Parties {
-		data := k.state.PartyData[id]
-		if id == k.state.Party {
-			if data.PaillierFactorProof != nil {
-				return errors.New("local party must not store a self factor proof")
-			}
-			continue
-		}
-		if data.PaillierFactorProof == nil {
-			return fmt.Errorf("missing Paillier factor proof for party %d", id)
-		}
-		factorDomain, err := keyShareFactorProofDomain(k, id)
-		if err != nil {
-			return err
-		}
-		if err := zkpai.VerifyFactor(k.state.SecurityParams, factorDomain, zkpai.FactorStatement{ProverPaillierN: data.PaillierPublicKey, VerifierAux: localRP}, data.PaillierFactorProof); err != nil {
-			return fmt.Errorf("invalid Paillier factor proof for party %d: %w", id, err)
-		}
-	}
-	if sk.N.Cmp(pk.N) != 0 || sk.G.Cmp(pk.G) != 0 || sk.NSquared.Cmp(pk.NSquared) != 0 {
-		return errors.New("paillier public/private key mismatch")
-	}
-	verificationShare, ok := k.verificationShare(k.state.Party)
-	if !ok {
-		return errors.New("missing local verification share")
-	}
-	secretScalar, err := secpScalarFromSecret(k.state.Secret)
-	if err != nil {
-		return fmt.Errorf("invalid secret scalar: %w", err)
-	}
-	verificationPoint, err := secp.PointFromBytes(verificationShare)
-	if err != nil {
-		return fmt.Errorf("invalid verification share: %w", err)
-	}
-	if !secp.Equal(secp.ScalarBaseMult(secretScalar), verificationPoint) {
-		return errors.New("local secret scalar does not match verification share")
-	}
-	if !schnorr.Verify(k.state.KeygenTranscriptHash, verificationShare, k.state.ShareProof) {
-		return errors.New("invalid local share proof")
-	}
-	return nil
+	return k.validateLocalMaterial()
 }
 
 // Validate checks share structure, canonical secp256k1/Paillier material, and
@@ -615,49 +496,8 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 		return fmt.Errorf("paillier private key too large: %d > %d", len(paillierPrivateKeyBytes), limits.Paillier.MaxPrivateKeyBytes)
 	}
 	for _, id := range k.state.Parties {
-		data, ok := k.state.PartyData[id]
-		if !ok {
-			return fmt.Errorf("missing party data for participant %d", id)
-		}
-		if len(data.VerificationShare) > limits.Curve.MaxPointBytes {
-			return fmt.Errorf("verification share for party %d too large: %d > %d", id, len(data.VerificationShare), limits.Curve.MaxPointBytes)
-		}
-		paillierPublicKeyBytes, err := canonicalWireMessageBytes(data.PaillierPublicKey, limits)
-		if err != nil {
-			return fmt.Errorf("paillier public key for party %d: %w", id, err)
-		}
-		if len(paillierPublicKeyBytes) > limits.Paillier.MaxPublicKeyBytes {
-			return fmt.Errorf("paillier public key for party %d too large: %d > %d", id, len(paillierPublicKeyBytes), limits.Paillier.MaxPublicKeyBytes)
-		}
-		paillierProofBytes, err := canonicalWireMessageBytes(data.PaillierProof, limits)
-		if err != nil {
-			return fmt.Errorf("paillier proof for party %d: %w", id, err)
-		}
-		if len(paillierProofBytes) > limits.ZK.MaxProofBytes {
-			return fmt.Errorf("paillier proof for party %d too large: %d > %d", id, len(paillierProofBytes), limits.ZK.MaxProofBytes)
-		}
-		if id != k.state.Party {
-			factorProofBytes, err := canonicalWireMessageBytes(data.PaillierFactorProof, limits)
-			if err != nil {
-				return fmt.Errorf("paillier factor proof for party %d: %w", id, err)
-			}
-			if len(factorProofBytes) > limits.ZK.MaxProofBytes {
-				return fmt.Errorf("paillier factor proof for party %d too large: %d > %d", id, len(factorProofBytes), limits.ZK.MaxProofBytes)
-			}
-		}
-		ringPedersenParamsBytes, err := canonicalWireMessageBytes(data.RingPedersenParams, limits)
-		if err != nil {
-			return fmt.Errorf("Ring-Pedersen parameters for party %d: %w", id, err)
-		}
-		if len(ringPedersenParamsBytes) > limits.Paillier.MaxRingPedersenBytes {
-			return fmt.Errorf("Ring-Pedersen parameters for party %d too large: %d > %d", id, len(ringPedersenParamsBytes), limits.Paillier.MaxRingPedersenBytes)
-		}
-		ringPedersenProofBytes, err := canonicalWireMessageBytes(data.RingPedersenProof, limits)
-		if err != nil {
-			return fmt.Errorf("Ring-Pedersen proof for party %d: %w", id, err)
-		}
-		if len(ringPedersenProofBytes) > limits.Paillier.MaxProofBytes {
-			return fmt.Errorf("Ring-Pedersen proof for party %d too large: %d > %d", id, len(ringPedersenProofBytes), limits.Paillier.MaxProofBytes)
+		if err := k.validatePartyResourceLimits(id, limits); err != nil {
+			return err
 		}
 	}
 	if k.state.ShareProof != nil {
@@ -876,4 +716,190 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		KeygenTranscriptHash:   slices.Clone(k.state.KeygenTranscriptHash),
 		Epoch:                  k.state.Epoch.Clone(),
 	}}
+}
+
+func (k *KeyShare) validateGroupCommitments() error {
+	if len(k.state.GroupCommitments) != k.state.Threshold {
+		return errors.New("group commitments length must equal threshold")
+	}
+	for i, commitment := range k.state.GroupCommitments {
+		if commitment == nil {
+			if i == 0 {
+				return errors.New("missing group commitment 0")
+			}
+			continue
+		}
+		if _, err := secp.PointBytes(commitment); err != nil {
+			return fmt.Errorf("invalid group commitment %d: %w", i, err)
+		}
+	}
+	groupPublicKey, err := secp.PointBytes(k.state.GroupCommitments[0])
+	if err != nil {
+		return fmt.Errorf("invalid group commitment 0: %w", err)
+	}
+	if !bytes.Equal(groupPublicKey, k.state.PublicKey) {
+		return errors.New("group commitment constant does not match public key")
+	}
+	return nil
+}
+
+func (k *KeyShare) validatePartyPublicMaterial(id tss.PartyID, limits Limits) error {
+	var err error
+	data := k.state.PartyData[id]
+	if len(data.VerificationShare) == 0 {
+		return fmt.Errorf("missing verification share for party %d", id)
+	}
+	if _, err := secp.PointFromBytes(data.VerificationShare); err != nil {
+		return fmt.Errorf("invalid verification share for %d: %w", id, err)
+	}
+	if data.PaillierPublicKey == nil || data.PaillierProof == nil {
+		return fmt.Errorf("incomplete paillier public key for party %d", id)
+	}
+	if data.RingPedersenParams == nil || data.RingPedersenProof == nil {
+		return fmt.Errorf("incomplete Ring-Pedersen public parameters for party %d", id)
+	}
+	peerPK := data.PaillierPublicKey
+	if err := peerPK.Validate(); err != nil {
+		return fmt.Errorf("invalid paillier public key for party %d: %w", id, err)
+	}
+	if err := checkPaillierModulusBounds(peerPK, limits, k.state.SecurityParams); err != nil {
+		return fmt.Errorf("paillier modulus for party %d does not meet security requirements: %w", id, err)
+	}
+	peerProof := data.PaillierProof
+	if err := peerProof.Validate(); err != nil {
+		return fmt.Errorf("invalid paillier proof for party %d: %w", id, err)
+	}
+	var proofDomain []byte
+	if id == k.state.Party {
+		proofDomain, err = keySharePaillierProofDomainWithLimits(k, limits)
+	} else {
+		proofDomain, err = k.paillierPublicProofDomainFor(id)
+	}
+	if err != nil {
+		return err
+	}
+	if !zkpai.VerifyModulus(proofDomain, peerPK, id, peerProof) {
+		return fmt.Errorf("invalid paillier proof for party %d", id)
+	}
+	peerRPParams := data.RingPedersenParams
+	if err := peerRPParams.Validate(); err != nil {
+		return fmt.Errorf("invalid Ring-Pedersen parameters for party %d: %w", id, err)
+	}
+	if peerRPParams.N.Cmp(peerPK.N) == 0 {
+		return fmt.Errorf("Ring-Pedersen auxiliary modulus equals Paillier modulus for party %d", id)
+	}
+	peerRPProof := data.RingPedersenProof
+	if err := peerRPProof.Validate(); err != nil {
+		return fmt.Errorf("invalid Ring-Pedersen proof for party %d: %w", id, err)
+	}
+	rpDomain, err := keyShareRingPedersenProofDomain(k, id, peerRPParams)
+	if err != nil {
+		return err
+	}
+	if !zkpai.VerifyRingPedersen(k.state.SecurityParams, rpDomain, peerRPParams, id, peerRPProof) {
+		return fmt.Errorf("invalid Ring-Pedersen proof for party %d", id)
+	}
+	return nil
+}
+
+func (k *KeyShare) validateLocalMaterial() error {
+	localData := k.state.PartyData[k.state.Party]
+	pk := localData.PaillierPublicKey
+	sk := k.state.PaillierPrivateKey
+	if err := sk.Validate(); err != nil {
+		return fmt.Errorf("invalid paillier private key: %w", err)
+	}
+	if err := zkpai.ValidateFactorPrivateKey(k.state.SecurityParams, sk); err != nil {
+		return fmt.Errorf("local Paillier factors do not meet Pi-fac bounds: %w", err)
+	}
+	localRP := localData.RingPedersenParams
+	for _, id := range k.state.Parties {
+		data := k.state.PartyData[id]
+		if id == k.state.Party {
+			if data.PaillierFactorProof != nil {
+				return errors.New("local party must not store a self factor proof")
+			}
+			continue
+		}
+		if data.PaillierFactorProof == nil {
+			return fmt.Errorf("missing Paillier factor proof for party %d", id)
+		}
+		factorDomain, err := keyShareFactorProofDomain(k, id)
+		if err != nil {
+			return err
+		}
+		if err := zkpai.VerifyFactor(k.state.SecurityParams, factorDomain, zkpai.FactorStatement{ProverPaillierN: data.PaillierPublicKey, VerifierAux: localRP}, data.PaillierFactorProof); err != nil {
+			return fmt.Errorf("invalid Paillier factor proof for party %d: %w", id, err)
+		}
+	}
+	if sk.N.Cmp(pk.N) != 0 || sk.G.Cmp(pk.G) != 0 || sk.NSquared.Cmp(pk.NSquared) != 0 {
+		return errors.New("paillier public/private key mismatch")
+	}
+	verificationShare, ok := k.verificationShare(k.state.Party)
+	if !ok {
+		return errors.New("missing local verification share")
+	}
+	secretScalar, err := secpScalarFromSecret(k.state.Secret)
+	if err != nil {
+		return fmt.Errorf("invalid secret scalar: %w", err)
+	}
+	verificationPoint, err := secp.PointFromBytes(verificationShare)
+	if err != nil {
+		return fmt.Errorf("invalid verification share: %w", err)
+	}
+	if !secp.Equal(secp.ScalarBaseMult(secretScalar), verificationPoint) {
+		return errors.New("local secret scalar does not match verification share")
+	}
+	if !schnorr.Verify(k.state.KeygenTranscriptHash, verificationShare, k.state.ShareProof) {
+		return errors.New("invalid local share proof")
+	}
+	return nil
+}
+
+func (k *KeyShare) validatePartyResourceLimits(id tss.PartyID, limits Limits) error {
+	data, ok := k.state.PartyData[id]
+	if !ok {
+		return fmt.Errorf("missing party data for participant %d", id)
+	}
+	if len(data.VerificationShare) > limits.Curve.MaxPointBytes {
+		return fmt.Errorf("verification share for party %d too large: %d > %d", id, len(data.VerificationShare), limits.Curve.MaxPointBytes)
+	}
+	paillierPublicKeyBytes, err := canonicalWireMessageBytes(data.PaillierPublicKey, limits)
+	if err != nil {
+		return fmt.Errorf("paillier public key for party %d: %w", id, err)
+	}
+	if len(paillierPublicKeyBytes) > limits.Paillier.MaxPublicKeyBytes {
+		return fmt.Errorf("paillier public key for party %d too large: %d > %d", id, len(paillierPublicKeyBytes), limits.Paillier.MaxPublicKeyBytes)
+	}
+	paillierProofBytes, err := canonicalWireMessageBytes(data.PaillierProof, limits)
+	if err != nil {
+		return fmt.Errorf("paillier proof for party %d: %w", id, err)
+	}
+	if len(paillierProofBytes) > limits.ZK.MaxProofBytes {
+		return fmt.Errorf("paillier proof for party %d too large: %d > %d", id, len(paillierProofBytes), limits.ZK.MaxProofBytes)
+	}
+	if id != k.state.Party {
+		factorProofBytes, err := canonicalWireMessageBytes(data.PaillierFactorProof, limits)
+		if err != nil {
+			return fmt.Errorf("paillier factor proof for party %d: %w", id, err)
+		}
+		if len(factorProofBytes) > limits.ZK.MaxProofBytes {
+			return fmt.Errorf("paillier factor proof for party %d too large: %d > %d", id, len(factorProofBytes), limits.ZK.MaxProofBytes)
+		}
+	}
+	ringPedersenParamsBytes, err := canonicalWireMessageBytes(data.RingPedersenParams, limits)
+	if err != nil {
+		return fmt.Errorf("Ring-Pedersen parameters for party %d: %w", id, err)
+	}
+	if len(ringPedersenParamsBytes) > limits.Paillier.MaxRingPedersenBytes {
+		return fmt.Errorf("Ring-Pedersen parameters for party %d too large: %d > %d", id, len(ringPedersenParamsBytes), limits.Paillier.MaxRingPedersenBytes)
+	}
+	ringPedersenProofBytes, err := canonicalWireMessageBytes(data.RingPedersenProof, limits)
+	if err != nil {
+		return fmt.Errorf("Ring-Pedersen proof for party %d: %w", id, err)
+	}
+	if len(ringPedersenProofBytes) > limits.Paillier.MaxProofBytes {
+		return fmt.Errorf("Ring-Pedersen proof for party %d too large: %d > %d", id, len(ringPedersenProofBytes), limits.Paillier.MaxProofBytes)
+	}
+	return nil
 }

@@ -45,23 +45,8 @@ func validatePresignPublicMetadata(key *KeyShare, metadata PresignPublicMetadata
 			return err
 		}
 	}
-	if key.state.Epoch == nil || !bytes.Equal(metadata.EpochID, key.state.Epoch.EpochID) {
-		return errors.New("presign epoch binding mismatch")
-	}
-	if metadata.Epoch == nil {
-		return errors.New("missing presign epoch context")
-	}
-	if err := metadata.Epoch.ValidateWithLimits(limits); err != nil {
-		return fmt.Errorf("invalid presign epoch context: %w", err)
-	}
-	if !bytes.Equal(metadata.EpochID, metadata.Epoch.EpochID) || !bytes.Equal(metadata.Epoch.EpochID, key.state.Epoch.EpochID) {
-		return errors.New("presign epoch context mismatch")
-	}
-	sourceEpochID, _ := metadata.Epoch.SourceEpochIDBytes()
-	if metadata.SID != metadata.Epoch.SID || metadata.RID != metadata.Epoch.RID ||
-		!sameEpochPartyIdentifiers(metadata.Identifiers, metadata.Epoch.Identifiers) ||
-		!bytes.Equal(metadata.SourceEpochID, sourceEpochID) {
-		return errors.New("presign explicit epoch metadata does not match full epoch context")
+	if err := validatePresignMetadataEpoch(key, metadata, limits); err != nil {
+		return err
 	}
 	wantSlot, err := PresignSlotID(metadata.PresignID)
 	if err != nil {
@@ -100,20 +85,8 @@ func validatePresignPublicMetadata(key *KeyShare, metadata PresignPublicMetadata
 	if !bytes.Equal(metadata.ContextHash, presignContextHash(metadata.Context)) {
 		return errors.New("presign context hash mismatch")
 	}
-	if metadata.Derivation == nil {
-		return errors.New("missing presign generation derivation binding")
-	}
-	if err := validateDerivationResult(metadata.Derivation); err != nil {
+	if err := validatePresignMetadataDerivation(key, metadata); err != nil {
 		return err
-	}
-	shift, err := secp.ScalarFromBytesAllowZero(metadata.Derivation.AdditiveShift)
-	if err != nil || !shift.IsZero() || len(metadata.Derivation.RequestedPath) != 0 || len(metadata.Derivation.ResolvedPath) != 0 {
-		return errors.New("presign derivation must bind the current generation with an empty path and zero shift")
-	}
-	if !bytes.Equal(metadata.Derivation.ChildPublicKey, metadata.VerificationKey) ||
-		!bytes.Equal(metadata.Derivation.ChildPublicKey, key.state.PublicKey) ||
-		!bytes.Equal(metadata.Derivation.ChildChainCode, key.state.ChainCode) {
-		return errors.New("presign derivation generation binding mismatch")
 	}
 	epochPublicKey, _, err := epochContextGroupPublicKey(metadata.Epoch)
 	if err != nil {
@@ -280,4 +253,45 @@ func normalizedCommitmentFor(presign *Presign, party tss.PartyID) (normalizedPre
 		}
 	}
 	return normalizedPresignCommitment{}, false
+}
+
+func validatePresignMetadataEpoch(key *KeyShare, metadata PresignPublicMetadata, limits Limits) error {
+	if key.state.Epoch == nil || !bytes.Equal(metadata.EpochID, key.state.Epoch.EpochID) {
+		return errors.New("presign epoch binding mismatch")
+	}
+	if metadata.Epoch == nil {
+		return errors.New("missing presign epoch context")
+	}
+	if err := metadata.Epoch.ValidateWithLimits(limits); err != nil {
+		return fmt.Errorf("invalid presign epoch context: %w", err)
+	}
+	if !bytes.Equal(metadata.EpochID, metadata.Epoch.EpochID) || !bytes.Equal(metadata.Epoch.EpochID, key.state.Epoch.EpochID) {
+		return errors.New("presign epoch context mismatch")
+	}
+	sourceEpochID, _ := metadata.Epoch.SourceEpochIDBytes()
+	if metadata.SID != metadata.Epoch.SID || metadata.RID != metadata.Epoch.RID ||
+		!sameEpochPartyIdentifiers(metadata.Identifiers, metadata.Epoch.Identifiers) ||
+		!bytes.Equal(metadata.SourceEpochID, sourceEpochID) {
+		return errors.New("presign explicit epoch metadata does not match full epoch context")
+	}
+	return nil
+}
+
+func validatePresignMetadataDerivation(key *KeyShare, metadata PresignPublicMetadata) error {
+	if metadata.Derivation == nil {
+		return errors.New("missing presign generation derivation binding")
+	}
+	if err := validateDerivationResult(metadata.Derivation); err != nil {
+		return err
+	}
+	shift, err := secp.ScalarFromBytesAllowZero(metadata.Derivation.AdditiveShift)
+	if err != nil || !shift.IsZero() || len(metadata.Derivation.RequestedPath) != 0 || len(metadata.Derivation.ResolvedPath) != 0 {
+		return errors.New("presign derivation must bind the current generation with an empty path and zero shift")
+	}
+	if !bytes.Equal(metadata.Derivation.ChildPublicKey, metadata.VerificationKey) ||
+		!bytes.Equal(metadata.Derivation.ChildPublicKey, key.state.PublicKey) ||
+		!bytes.Equal(metadata.Derivation.ChildChainCode, key.state.ChainCode) {
+		return errors.New("presign derivation generation binding mismatch")
+	}
+	return nil
 }

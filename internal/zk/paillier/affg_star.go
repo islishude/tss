@@ -169,8 +169,6 @@ func ProveAffGStar(params SecurityParams, state []byte, stmt AffGStarStatement, 
 	if rounds > affGStarMaxRounds {
 		return nil, errors.New("AffGStarProof: too many soundness rounds")
 	}
-	n0 := stmt.ReceiverPaillierN
-	n1 := stmt.ProverPaillierN
 	proof := &AffGStarProof{
 		A:      make([][]byte, rounds),
 		B:      make([][]byte, rounds),
@@ -180,82 +178,17 @@ func ProveAffGStar(params SecurityParams, state []byte, stmt AffGStarStatement, 
 		W:      make([][]byte, rounds),
 		Lambda: make([][]byte, rounds),
 	}
-	alpha := make([]*secret.SignedInt, rounds)
-	beta := make([]*secret.SignedInt, rounds)
-	randomness0 := make([]*secret.Scalar, rounds)
-	randomness1 := make([]*secret.Scalar, rounds)
+	masks := make([]affGStarRoundSecrets, rounds)
 	defer func() {
-		for i := range rounds {
-			if alpha[i] != nil {
-				alpha[i].Destroy()
-			}
-			if beta[i] != nil {
-				beta[i].Destroy()
-			}
-			if randomness0[i] != nil {
-				randomness0[i].Destroy()
-			}
-			if randomness1[i] != nil {
-				randomness1[i].Destroy()
-			}
+		for i := range masks {
+			masks[i].destroy()
 		}
 	}()
 
 	for i := range rounds {
-		for {
-			candidate, err := sampleSignedSecret(rng, params.EncRange())
-			if err != nil {
-				return nil, err
-			}
-			candidateScalar, err := signedSecretSecpScalar(candidate)
-			if err != nil {
-				candidate.Destroy()
-				return nil, err
-			}
-			rPoint := secp.ScalarBaseMult(candidateScalar)
-			candidateScalar.Set(secp.ScalarZero())
-			if rPoint.Inf != 0 {
-				candidate.Destroy()
-				continue
-			}
-			alpha[i] = candidate
-			proof.R[i], err = secp.PointBytes(rPoint)
-			if err != nil {
-				return nil, err
-			}
-			break
-		}
-		var err error
-		beta[i], err = sampleSignedSecret(rng, params.AffGRange())
-		if err != nil {
+		if err := masks[i].prepare(params, stmt, rng, proof, i); err != nil {
 			return nil, err
 		}
-		randomness0[i], err = sampleZNStarSecret(rng, n0.N)
-		if err != nil {
-			return nil, err
-		}
-		randomness1[i], err = sampleZNStarSecret(rng, n1.N)
-		if err != nil {
-			return nil, err
-		}
-		alphaC, err := OMulCT(n0, alpha[i], stmt.C, signedPowerOfTwoBytes(params.EncRange()))
-		if err != nil {
-			return nil, err
-		}
-		encBeta0, err := encRandomSecrets(n0, beta[i], randomness0[i])
-		if err != nil {
-			return nil, err
-		}
-		a, err := OAdd(n0, alphaC, encBeta0)
-		if err != nil {
-			return nil, err
-		}
-		proof.A[i] = a.Bytes()
-		b, err := encRandomSecrets(n1, beta[i], randomness1[i])
-		if err != nil {
-			return nil, err
-		}
-		proof.B[i] = b.Bytes()
 	}
 
 	root, err := affGStarTranscript(params, state, stmt, proof.A, proof.B, proof.R)
@@ -284,48 +217,9 @@ func ProveAffGStar(params SecurityParams, state []byte, stmt AffGStarStatement, 
 	}
 	defer secret.ClearBigInt(mu)
 	for i := range rounds {
-		z, err := signedSecretBig(alpha[i])
-		if err != nil {
+		if err := masks[i].respond(stmt, proof, challenges, i, x, y, rho, mu); err != nil {
 			return nil, err
 		}
-		zPrime, err := signedSecretBig(beta[i])
-		if err != nil {
-			secret.ClearBigInt(z)
-			return nil, err
-		}
-		w, err := secretScalarBig(randomness0[i])
-		if err != nil {
-			secret.ClearBigInt(z)
-			secret.ClearBigInt(zPrime)
-			return nil, err
-		}
-		lambda, err := secretScalarBig(randomness1[i])
-		if err != nil {
-			secret.ClearBigInt(z)
-			secret.ClearBigInt(zPrime)
-			secret.ClearBigInt(w)
-			return nil, err
-		}
-		if affGStarChallengeBit(challenges, i) == 1 {
-			z.Add(z, x)
-			zPrime.Add(zPrime, y)
-			w.Mul(w, rho).Mod(w, n0.N)
-			lambda.Mul(lambda, mu).Mod(lambda, n1.N)
-		}
-		proof.Z[i], err = wire.EncodeBigInt(z)
-		secret.ClearBigInt(z)
-		if err != nil {
-			return nil, err
-		}
-		proof.ZPrime[i], err = wire.EncodeBigInt(zPrime)
-		secret.ClearBigInt(zPrime)
-		if err != nil {
-			return nil, err
-		}
-		proof.W[i] = w.Bytes()
-		secret.ClearBigInt(w)
-		proof.Lambda[i] = lambda.Bytes()
-		secret.ClearBigInt(lambda)
 	}
 	proof.TranscriptHash = root
 	if err := proof.Validate(); err != nil {
@@ -354,80 +248,9 @@ func VerifyAffGStar(params SecurityParams, state []byte, stmt AffGStarStatement,
 		return errors.New("AffGStarProof: transcript hash mismatch")
 	}
 	challenges := affGStarChallenges(root, rounds)
-	n0 := stmt.ReceiverPaillierN
-	n1 := stmt.ProverPaillierN
 	for i := range rounds {
-		a := new(big.Int).SetBytes(proof.A[i])
-		b := new(big.Int).SetBytes(proof.B[i])
-		if _, err := RequireZN2Star(a, n0.N); err != nil {
-			return fmt.Errorf("AffGStarProof: invalid A[%d]: %w", i, err)
-		}
-		if _, err := RequireZN2Star(b, n1.N); err != nil {
-			return fmt.Errorf("AffGStarProof: invalid B[%d]: %w", i, err)
-		}
-		r, _ := secp.PointFromBytes(proof.R[i])
-		z, _ := wire.DecodeBigInt(proof.Z[i])
-		zPrime, _ := wire.DecodeBigInt(proof.ZPrime[i])
-		w := new(big.Int).SetBytes(proof.W[i])
-		lambda := new(big.Int).SetBytes(proof.Lambda[i])
-		if _, err := RequireZNStar(w, n0.N); err != nil {
-			return fmt.Errorf("AffGStarProof: invalid w[%d]: %w", i, err)
-		}
-		if _, err := RequireZNStar(lambda, n1.N); err != nil {
-			return fmt.Errorf("AffGStarProof: invalid lambda[%d]: %w", i, err)
-		}
-		if !InSignedPowerOfTwo(z, params.EncRange()+1) {
-			return fmt.Errorf("AffGStarProof: z[%d] out of range", i)
-		}
-		if !InSignedPowerOfTwo(zPrime, params.AffGRange()+1) {
-			return fmt.Errorf("AffGStarProof: zPrime[%d] out of range", i)
-		}
-
-		zC, err := OMulPublic(n0, z, stmt.C)
-		if err != nil {
+		if err := verifyAffGStarRound(params, stmt, proof, challenges, i); err != nil {
 			return err
-		}
-		encZPrime0, err := EncRandom(n0, zPrime, w)
-		if err != nil {
-			return err
-		}
-		left0, err := OAdd(n0, zC, encZPrime0)
-		if err != nil {
-			return err
-		}
-		right0 := a
-		if affGStarChallengeBit(challenges, i) == 1 {
-			right0, err = OAdd(n0, a, stmt.D)
-			if err != nil {
-				return err
-			}
-		}
-		if left0.Cmp(right0) != 0 {
-			return fmt.Errorf("AffGStarProof: affine equation failed in round %d", i)
-		}
-
-		leftCurve := secp.ScalarBaseMult(secp.ScalarFromBigInt(z))
-		rightCurve := r
-		if affGStarChallengeBit(challenges, i) == 1 {
-			rightCurve = secp.Add(r, stmt.X)
-		}
-		if !secp.Equal(leftCurve, rightCurve) {
-			return fmt.Errorf("AffGStarProof: curve equation failed in round %d", i)
-		}
-
-		left1, err := EncRandom(n1, zPrime, lambda)
-		if err != nil {
-			return err
-		}
-		right1 := b
-		if affGStarChallengeBit(challenges, i) == 1 {
-			right1, err = OAdd(n1, b, stmt.Y)
-			if err != nil {
-				return err
-			}
-		}
-		if left1.Cmp(right1) != 0 {
-			return fmt.Errorf("AffGStarProof: encryption equation failed in round %d", i)
 		}
 	}
 	return nil
@@ -600,5 +423,218 @@ func validateCanonicalSignedBytes(name string, encoded []byte) error {
 	if _, err := wire.DecodeBigInt(encoded); err != nil {
 		return fmt.Errorf("AffGStarProof: invalid %s: %w", name, err)
 	}
+	return nil
+}
+
+type affGStarRoundSecrets struct {
+	alpha       *secret.SignedInt
+	beta        *secret.SignedInt
+	randomness0 *secret.Scalar
+	randomness1 *secret.Scalar
+}
+
+func (m *affGStarRoundSecrets) destroy() {
+	if m.alpha != nil {
+		m.alpha.Destroy()
+	}
+	if m.beta != nil {
+		m.beta.Destroy()
+	}
+	if m.randomness0 != nil {
+		m.randomness0.Destroy()
+	}
+	if m.randomness1 != nil {
+		m.randomness1.Destroy()
+	}
+}
+
+func (m *affGStarRoundSecrets) prepare(params SecurityParams, stmt AffGStarStatement, rng io.Reader, proof *AffGStarProof, i int) error {
+	n0, n1 := stmt.ReceiverPaillierN, stmt.ProverPaillierN
+
+	for {
+		candidate, err := sampleSignedSecret(rng, params.EncRange())
+		if err != nil {
+			return err
+		}
+		candidateScalar, err := signedSecretSecpScalar(candidate)
+		if err != nil {
+			candidate.Destroy()
+			return err
+		}
+		rPoint := secp.ScalarBaseMult(candidateScalar)
+		candidateScalar.Set(secp.ScalarZero())
+		if rPoint.Inf != 0 {
+			candidate.Destroy()
+			continue
+		}
+		m.alpha = candidate
+		proof.R[i], err = secp.PointBytes(rPoint)
+		if err != nil {
+			return err
+		}
+		break
+	}
+	var err error
+	m.beta, err = sampleSignedSecret(rng, params.AffGRange())
+	if err != nil {
+		return err
+	}
+	m.randomness0, err = sampleZNStarSecret(rng, n0.N)
+	if err != nil {
+		return err
+	}
+	m.randomness1, err = sampleZNStarSecret(rng, n1.N)
+	if err != nil {
+		return err
+	}
+	alphaC, err := OMulCT(n0, m.alpha, stmt.C, signedPowerOfTwoBytes(params.EncRange()))
+	if err != nil {
+		return err
+	}
+	encBeta0, err := encRandomSecrets(n0, m.beta, m.randomness0)
+	if err != nil {
+		return err
+	}
+	a, err := OAdd(n0, alphaC, encBeta0)
+	if err != nil {
+		return err
+	}
+	proof.A[i] = a.Bytes()
+	b, err := encRandomSecrets(n1, m.beta, m.randomness1)
+	if err != nil {
+		return err
+	}
+	proof.B[i] = b.Bytes()
+
+	return nil
+}
+
+func (m *affGStarRoundSecrets) respond(stmt AffGStarStatement, proof *AffGStarProof, challenges []byte, i int, x, y, rho, mu *big.Int) error {
+	n0, n1 := stmt.ReceiverPaillierN, stmt.ProverPaillierN
+
+	z, err := signedSecretBig(m.alpha)
+	if err != nil {
+		return err
+	}
+	zPrime, err := signedSecretBig(m.beta)
+	if err != nil {
+		secret.ClearBigInt(z)
+		return err
+	}
+	w, err := secretScalarBig(m.randomness0)
+	if err != nil {
+		secret.ClearBigInt(z)
+		secret.ClearBigInt(zPrime)
+		return err
+	}
+	lambda, err := secretScalarBig(m.randomness1)
+	if err != nil {
+		secret.ClearBigInt(z)
+		secret.ClearBigInt(zPrime)
+		secret.ClearBigInt(w)
+		return err
+	}
+	if affGStarChallengeBit(challenges, i) == 1 {
+		z.Add(z, x)
+		zPrime.Add(zPrime, y)
+		w.Mul(w, rho).Mod(w, n0.N)
+		lambda.Mul(lambda, mu).Mod(lambda, n1.N)
+	}
+	proof.Z[i], err = wire.EncodeBigInt(z)
+	secret.ClearBigInt(z)
+	if err != nil {
+		return err
+	}
+	proof.ZPrime[i], err = wire.EncodeBigInt(zPrime)
+	secret.ClearBigInt(zPrime)
+	if err != nil {
+		return err
+	}
+	proof.W[i] = w.Bytes()
+	secret.ClearBigInt(w)
+	proof.Lambda[i] = lambda.Bytes()
+	secret.ClearBigInt(lambda)
+
+	return nil
+}
+
+// verifyAffGStarRound requires the outer verifier to validate proof shape
+// and bind the challenge to the complete transcript before indexing a round.
+func verifyAffGStarRound(params SecurityParams, stmt AffGStarStatement, proof *AffGStarProof, challenges []byte, i int) error {
+	n0, n1 := stmt.ReceiverPaillierN, stmt.ProverPaillierN
+
+	a := new(big.Int).SetBytes(proof.A[i])
+	b := new(big.Int).SetBytes(proof.B[i])
+	if _, err := RequireZN2Star(a, n0.N); err != nil {
+		return fmt.Errorf("AffGStarProof: invalid A[%d]: %w", i, err)
+	}
+	if _, err := RequireZN2Star(b, n1.N); err != nil {
+		return fmt.Errorf("AffGStarProof: invalid B[%d]: %w", i, err)
+	}
+	r, _ := secp.PointFromBytes(proof.R[i])
+	z, _ := wire.DecodeBigInt(proof.Z[i])
+	zPrime, _ := wire.DecodeBigInt(proof.ZPrime[i])
+	w := new(big.Int).SetBytes(proof.W[i])
+	lambda := new(big.Int).SetBytes(proof.Lambda[i])
+	if _, err := RequireZNStar(w, n0.N); err != nil {
+		return fmt.Errorf("AffGStarProof: invalid w[%d]: %w", i, err)
+	}
+	if _, err := RequireZNStar(lambda, n1.N); err != nil {
+		return fmt.Errorf("AffGStarProof: invalid lambda[%d]: %w", i, err)
+	}
+	if !InSignedPowerOfTwo(z, params.EncRange()+1) {
+		return fmt.Errorf("AffGStarProof: z[%d] out of range", i)
+	}
+	if !InSignedPowerOfTwo(zPrime, params.AffGRange()+1) {
+		return fmt.Errorf("AffGStarProof: zPrime[%d] out of range", i)
+	}
+
+	zC, err := OMulPublic(n0, z, stmt.C)
+	if err != nil {
+		return err
+	}
+	encZPrime0, err := EncRandom(n0, zPrime, w)
+	if err != nil {
+		return err
+	}
+	left0, err := OAdd(n0, zC, encZPrime0)
+	if err != nil {
+		return err
+	}
+	right0 := a
+	if affGStarChallengeBit(challenges, i) == 1 {
+		right0, err = OAdd(n0, a, stmt.D)
+		if err != nil {
+			return err
+		}
+	}
+	if left0.Cmp(right0) != 0 {
+		return fmt.Errorf("AffGStarProof: affine equation failed in round %d", i)
+	}
+
+	leftCurve := secp.ScalarBaseMult(secp.ScalarFromBigInt(z))
+	rightCurve := r
+	if affGStarChallengeBit(challenges, i) == 1 {
+		rightCurve = secp.Add(r, stmt.X)
+	}
+	if !secp.Equal(leftCurve, rightCurve) {
+		return fmt.Errorf("AffGStarProof: curve equation failed in round %d", i)
+	}
+
+	left1, err := EncRandom(n1, zPrime, lambda)
+	if err != nil {
+		return err
+	}
+	right1 := b
+	if affGStarChallengeBit(challenges, i) == 1 {
+		right1, err = OAdd(n1, b, stmt.Y)
+		if err != nil {
+			return err
+		}
+	}
+	if left1.Cmp(right1) != 0 {
+		return fmt.Errorf("AffGStarProof: encryption equation failed in round %d", i)
+	}
+
 	return nil
 }
