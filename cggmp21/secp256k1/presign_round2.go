@@ -154,34 +154,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 	if !ok || !selfState.round1.havePayload {
 		return nil, false, errors.New("missing local Figure 8 round1 state")
 	}
-	gammaPoint, err := secp.PointFromBytes(s.gammaComm)
-	if err != nil {
-		return nil, false, err
-	}
-	yPoint, err := secp.PointFromBytes(selfState.round1.payload.Y)
-	if err != nil {
-		return nil, false, err
-	}
-	b1Point, err := secp.PointFromBytes(selfState.round1.payload.B1)
-	if err != nil {
-		return nil, false, err
-	}
-	b2Point, err := secp.PointFromBytes(selfState.round1.payload.B2)
-	if err != nil {
-		return nil, false, err
-	}
-	elogDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, s.key.state.Party, tss.BroadcastPartyId, "elog-gamma")
-	if err != nil {
-		return nil, false, err
-	}
-	gammaProof, err := zkpai.ProveElog(elogDomain, zkpai.ElogStatement{
-		Generator:         secp.G,
-		LambdaCommitment:  b1Point,
-		ElGamalCommitment: b2Point,
-		ElGamalBase:       yPoint,
-		ResultCommitment:  gammaPoint,
-		ResultBase:        secp.G,
-	}, zkpai.ElogWitness{Y: s.gamma, Lambda: s.b}, s.config.Reader())
+	gammaProof, err := s.proveRound2Gamma(selfState.round1.payload)
 	if err != nil {
 		return nil, false, err
 	}
@@ -427,4 +400,39 @@ func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
 		return nil, err
 	}
 	return secp.PointBytes(secp.ScalarMult(point, lambda))
+}
+
+func (s *PresignSession) proveRound2Gamma(payload presignRound1Payload) (*zkpai.ElogProof, error) {
+	gammaPoint, err := secp.PointFromBytes(s.gammaComm)
+	if err != nil {
+		return nil, err
+	}
+	yPoint, err := secp.PointFromBytes(payload.Y)
+	if err != nil {
+		return nil, err
+	}
+	b1Point, err := secp.PointFromBytes(payload.B1)
+	if err != nil {
+		return nil, err
+	}
+	b2Point, err := secp.PointFromBytes(payload.B2)
+	if err != nil {
+		return nil, err
+	}
+	elogDomain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash, s.signers, presignRound2, s.key.state.Party, tss.BroadcastPartyId, "elog-gamma")
+	if err != nil {
+		return nil, err
+	}
+	gammaProof, err := zkpai.ProveElog(elogDomain, zkpai.ElogStatement{
+		Generator:         secp.G,
+		LambdaCommitment:  b1Point,
+		ElGamalCommitment: b2Point,
+		ElGamalBase:       yPoint,
+		ResultCommitment:  gammaPoint,
+		ResultBase:        secp.G,
+	}, zkpai.ElogWitness{Y: s.gamma, Lambda: s.b}, s.config.Reader())
+	if err != nil {
+		return nil, err
+	}
+	return gammaProof, nil
 }

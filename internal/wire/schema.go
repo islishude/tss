@@ -176,30 +176,9 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		return fieldSchema{}, fmt.Errorf("tag must be in [1, 65535]: %d", tag)
 	}
 
-	var kind wireKind
-	optStart := 1 // first option index after tag
-
-	if len(parts) > 1 {
-		kindStr := strings.TrimSpace(parts[1])
-		if isKnownKind(kindStr) {
-			kind, err = parseKind(kindStr, f.Type)
-			if err != nil {
-				return fieldSchema{}, err
-			}
-			optStart = 2
-		} else {
-			// Second segment is not a known kind — infer from Go type.
-			kind, err = inferKind(f.Type)
-			if err != nil {
-				return fieldSchema{}, err
-			}
-			optStart = 1
-		}
-	} else {
-		kind, err = inferKind(f.Type)
-		if err != nil {
-			return fieldSchema{}, err
-		}
+	kind, optStart, err := fieldTagKind(parts, f.Type)
+	if err != nil {
+		return fieldSchema{}, err
 	}
 
 	fs := fieldSchema{
@@ -210,61 +189,8 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		typ:   f.Type,
 	}
 
-	// Parse options.
-	seenOptions := make(map[string]bool)
-	for _, opt := range parts[optStart:] {
-		opt = strings.TrimSpace(opt)
-		if opt == "" {
-			continue
-		}
-		if opt == "optional" {
-			if seenOptions["optional"] {
-				return fieldSchema{}, fmt.Errorf("duplicate wire option %q", "optional")
-			}
-			seenOptions["optional"] = true
-			fs.optional = true
-			continue
-		}
-		kv := strings.SplitN(opt, "=", 2)
-		if len(kv) != 2 {
-			return fieldSchema{}, fmt.Errorf("invalid option %q", opt)
-		}
-		key := strings.TrimSpace(kv[0])
-		val := strings.TrimSpace(kv[1])
-		if seenOptions[key] {
-			return fieldSchema{}, fmt.Errorf("duplicate wire option %q", key)
-		}
-		seenOptions[key] = true
-
-		switch key {
-		case "len":
-			n, err := strconv.Atoi(val)
-			if err != nil {
-				return fieldSchema{}, fmt.Errorf("invalid len value %q", val)
-			}
-			if n <= 0 {
-				return fieldSchema{}, fmt.Errorf("len must be positive")
-			}
-			fs.fixedLen = n
-			fs.fixedLenSet = true
-		case "max_bytes":
-			if !validLimitName(val) {
-				return fieldSchema{}, fmt.Errorf("invalid max_bytes limit name %q", val)
-			}
-			fs.maxBytes = val
-		case "max_items":
-			if !validLimitName(val) {
-				return fieldSchema{}, fmt.Errorf("invalid max_items limit name %q", val)
-			}
-			fs.maxItems = val
-		case "max_bits":
-			if !validLimitName(val) {
-				return fieldSchema{}, fmt.Errorf("invalid max_bits limit name %q", val)
-			}
-			fs.maxBits = val
-		default:
-			return fieldSchema{}, fmt.Errorf("unknown option %q", key)
-		}
+	if err := fs.parseOptions(parts[optStart:]); err != nil {
+		return fieldSchema{}, err
 	}
 
 	// Arrays have an intrinsic exact width even when len=N is omitted.
@@ -282,24 +208,8 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		return fieldSchema{}, fmt.Errorf("optional is not supported for %s fields", kindName(fs.kind))
 	}
 
-	// Map kind requires additional schema initialization for key/value types.
-	if fs.kind == kindMap {
-		if err := fs.initMapSchema(); err != nil {
-			return fieldSchema{}, err
-		}
-		valueType := indirectType(fs.mapValueType)
-		if fs.mapValueKind == kindBytes && valueType.Kind() == reflect.Array {
-			if fs.fixedLenSet && valueType.Len() != fs.fixedLen {
-				return fieldSchema{}, fmt.Errorf(
-					"field %s: len=%d does not match map array value length %d",
-					f.Name,
-					fs.fixedLen,
-					valueType.Len(),
-				)
-			}
-			fs.fixedLen = valueType.Len()
-			fs.fixedLenSet = true
-		}
+	if err := fs.initMapField(f); err != nil {
+		return fieldSchema{}, err
 	}
 	if err := validateFieldOptions(fs); err != nil {
 		return fieldSchema{}, err
@@ -489,6 +399,13 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 			return 0, fmt.Errorf("string requires string, got %s", t)
 		}
 		return kindString, nil
+	default:
+		return parseCompositeKind(kindStr, t)
+	}
+}
+
+func parseCompositeKind(kindStr string, t reflect.Type) (wireKind, error) {
+	switch kindStr {
 	case "u32list":
 		if t.Kind() != reflect.Slice {
 			return 0, fmt.Errorf("u32list requires []uint32 or []int, got %s", t)
@@ -518,6 +435,13 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 			return 0, fmt.Errorf("partybytepairs requires []PartyBytePair[T], got %s", t)
 		}
 		return kindPartyBytePairs, nil
+	default:
+		return parseDomainKind(kindStr, t)
+	}
+}
+
+func parseDomainKind(kindStr string, t reflect.Type) (wireKind, error) {
+	switch kindStr {
 	case "nested":
 		msgType := reflect.TypeFor[Message]()
 		if !t.Implements(msgType) && !reflect.PointerTo(t).Implements(msgType) {
@@ -865,4 +789,126 @@ func inferMapValueKind(t reflect.Type) (wireKind, error) {
 	default:
 		return 0, fmt.Errorf("cannot infer map value kind for %s", t)
 	}
+}
+
+func (fs *fieldSchema) parseOptions(options []string) error {
+	// Parse options.
+	seenOptions := make(map[string]bool)
+	for _, opt := range options {
+		opt = strings.TrimSpace(opt)
+		if opt == "" {
+			continue
+		}
+		if opt == "optional" {
+			if seenOptions["optional"] {
+				return fmt.Errorf("duplicate wire option %q", "optional")
+			}
+			seenOptions["optional"] = true
+			fs.optional = true
+			continue
+		}
+		kv := strings.SplitN(opt, "=", 2)
+		if len(kv) != 2 {
+			return fmt.Errorf("invalid option %q", opt)
+		}
+		key := strings.TrimSpace(kv[0])
+		val := strings.TrimSpace(kv[1])
+		if seenOptions[key] {
+			return fmt.Errorf("duplicate wire option %q", key)
+		}
+		seenOptions[key] = true
+
+		if err := fs.setOption(key, val); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (fs *fieldSchema) setOption(key, val string) error {
+	switch key {
+	case "len":
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			return fmt.Errorf("invalid len value %q", val)
+		}
+		if n <= 0 {
+			return fmt.Errorf("len must be positive")
+		}
+		fs.fixedLen = n
+		fs.fixedLenSet = true
+	case "max_bytes":
+		if !validLimitName(val) {
+			return fmt.Errorf("invalid max_bytes limit name %q", val)
+		}
+		fs.maxBytes = val
+	case "max_items":
+		if !validLimitName(val) {
+			return fmt.Errorf("invalid max_items limit name %q", val)
+		}
+		fs.maxItems = val
+	case "max_bits":
+		if !validLimitName(val) {
+			return fmt.Errorf("invalid max_bits limit name %q", val)
+		}
+		fs.maxBits = val
+	default:
+		return fmt.Errorf("unknown option %q", key)
+	}
+	return nil
+}
+
+func fieldTagKind(parts []string, typ reflect.Type) (wireKind, int, error) {
+	var kind wireKind
+	var err error
+	optStart := 1 // first option index after tag
+
+	if len(parts) > 1 {
+		kindStr := strings.TrimSpace(parts[1])
+		if isKnownKind(kindStr) {
+			kind, err = parseKind(kindStr, typ)
+			if err != nil {
+				return 0, 0, err
+			}
+			optStart = 2
+		} else {
+			// Second segment is not a known kind — infer from Go type.
+			kind, err = inferKind(typ)
+			if err != nil {
+				return 0, 0, err
+			}
+			optStart = 1
+		}
+	} else {
+		kind, err = inferKind(typ)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+
+	return kind, optStart, nil
+}
+
+func (fs *fieldSchema) initMapField(f reflect.StructField) error {
+	// Map kind requires additional schema initialization for key/value types.
+	if fs.kind == kindMap {
+		if err := fs.initMapSchema(); err != nil {
+			return err
+		}
+		valueType := indirectType(fs.mapValueType)
+		if fs.mapValueKind == kindBytes && valueType.Kind() == reflect.Array {
+			if fs.fixedLenSet && valueType.Len() != fs.fixedLen {
+				return fmt.Errorf(
+					"field %s: len=%d does not match map array value length %d",
+					f.Name,
+					fs.fixedLen,
+					valueType.Len(),
+				)
+			}
+			fs.fixedLen = valueType.Len()
+			fs.fixedLenSet = true
+		}
+	}
+	return nil
 }

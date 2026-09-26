@@ -360,95 +360,11 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	if _, err := secp.PointFromBytes(p.state.OldGroupPublicKey); err != nil {
 		return fmt.Errorf("invalid old group public key: %w", err)
 	}
-	if p.state.OldThreshold <= 0 || p.state.OldThreshold > len(p.state.OldParties) {
-		return errors.New("invalid old threshold")
+	if err := p.validateThresholds(limits); err != nil {
+		return err
 	}
-	if len(p.state.OldParties) > limits.Threshold.MaxParties {
-		return fmt.Errorf("too many old parties: %d > %d", len(p.state.OldParties), limits.Threshold.MaxParties)
-	}
-	if p.state.OldThreshold > limits.Threshold.MaxThreshold {
-		return fmt.Errorf("old threshold too large: %d > %d", p.state.OldThreshold, limits.Threshold.MaxThreshold)
-	}
-	if err := limits.Threshold.ValidateThreshold(p.state.OldThreshold, len(p.state.OldParties)); err != nil {
-		return fmt.Errorf("old %w", err)
-	}
-	if p.state.NewThreshold <= 0 || p.state.NewThreshold > len(p.state.NewParties) {
-		return errors.New("invalid new threshold")
-	}
-	if len(p.state.NewParties) > limits.Threshold.MaxParties {
-		return fmt.Errorf("too many new parties: %d > %d", len(p.state.NewParties), limits.Threshold.MaxParties)
-	}
-	if p.state.NewThreshold > limits.Threshold.MaxThreshold {
-		return fmt.Errorf("new threshold too large: %d > %d", p.state.NewThreshold, limits.Threshold.MaxThreshold)
-	}
-	if err := limits.Threshold.ValidateThreshold(p.state.NewThreshold, len(p.state.NewParties)); err != nil {
-		return fmt.Errorf("new %w", err)
-	}
-	if len(p.state.OldGroupCommitments) != p.state.OldThreshold {
-		return errors.New("old group commitments length must equal old threshold")
-	}
-	for i, commitment := range p.state.OldGroupCommitments {
-		if _, err := secp.PointFromBytes(commitment); err != nil {
-			return fmt.Errorf("invalid old group commitment %d: %w", i, err)
-		}
-	}
-	if !bytes.Equal(p.state.OldGroupCommitments[0], p.state.OldGroupPublicKey) {
-		return errors.New("old group commitment constant must equal old public key")
-	}
-	if err := wire.ValidateStrictSortedIDs(p.state.OldParties); err != nil {
-		return fmt.Errorf("invalid old participant set: %w", err)
-	}
-	if p.state.SourceEpoch.Threshold != p.state.OldThreshold || len(p.state.SourceEpoch.Identifiers) != len(p.state.OldParties) {
-		return errors.New("reshare source epoch threshold or party count does not match old committee")
-	}
-	if err := wire.ValidateStrictSortedIDs(p.state.DealerParties); err != nil {
-		return fmt.Errorf("invalid dealer set: %w", err)
-	}
-	if len(p.state.DealerParties) > limits.Threshold.MaxParties {
-		return fmt.Errorf("too many dealer parties: %d > %d", len(p.state.DealerParties), limits.Threshold.MaxParties)
-	}
-	if err := wire.ValidateStrictSortedIDs(p.state.NewParties); err != nil {
-		return fmt.Errorf("invalid new participant set: %w", err)
-	}
-	if len(p.state.DealerParties) < p.state.OldThreshold {
-		return errors.New("dealer set is smaller than old threshold")
-	}
-	for _, dealer := range p.state.DealerParties {
-		if !tss.ContainsParty(p.state.OldParties, dealer) {
-			return fmt.Errorf("dealer %d is not an old participant", dealer)
-		}
-	}
-	if len(p.state.OldVerificationShares) != len(p.state.OldParties) {
-		return errors.New("old verification share count must equal old party count")
-	}
-	for _, id := range p.state.OldParties {
-		verificationShare, ok := p.state.OldVerificationShares[id]
-		if !ok {
-			return fmt.Errorf("missing old verification share for party %d", id)
-		}
-		if _, err := secp.PointFromBytes(verificationShare); err != nil {
-			return fmt.Errorf("invalid old verification share for party %d: %w", id, err)
-		}
-		identifier, ok := p.state.SourceEpoch.Identifier(id)
-		if !ok {
-			return fmt.Errorf("missing source epoch identifier for party %d", id)
-		}
-		expected, err := evaluateEncodedCommitmentsAtIdentifier(p.state.OldGroupCommitments, identifier)
-		clear(identifier)
-		if err != nil {
-			return fmt.Errorf("evaluate old verification share for party %d: %w", id, err)
-		}
-		expectedBytes, err := secp.PointBytes(expected)
-		if err != nil {
-			return fmt.Errorf("encode old verification share for party %d: %w", id, err)
-		}
-		if !bytes.Equal(expectedBytes, verificationShare) {
-			return fmt.Errorf("old verification share mismatch for party %d", id)
-		}
-		epochShare, ok := p.state.SourceEpoch.PublicShare(id)
-		if !ok || !bytes.Equal(epochShare.PublicKey, verificationShare) {
-			return fmt.Errorf("source epoch public share mismatch for party %d", id)
-		}
+	if err := p.validateCommittees(limits); err != nil {
+		return err
 	}
 	if len(p.state.ChainCode) != 32 {
 		return errors.New("chain code must be 32 bytes")
@@ -538,4 +454,109 @@ func (p *ResharePlan) IsReceiver(party tss.PartyID) bool {
 // IsOverlap reports whether party is both an old dealer and a new receiver.
 func (p *ResharePlan) IsOverlap(party tss.PartyID) bool {
 	return p.IsDealer(party) && p.IsReceiver(party)
+}
+
+func (p *ResharePlan) validateThresholds(limits Limits) error {
+	if p.state.OldThreshold <= 0 || p.state.OldThreshold > len(p.state.OldParties) {
+		return errors.New("invalid old threshold")
+	}
+	if len(p.state.OldParties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many old parties: %d > %d", len(p.state.OldParties), limits.Threshold.MaxParties)
+	}
+	if p.state.OldThreshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("old threshold too large: %d > %d", p.state.OldThreshold, limits.Threshold.MaxThreshold)
+	}
+	if err := limits.Threshold.ValidateThreshold(p.state.OldThreshold, len(p.state.OldParties)); err != nil {
+		return fmt.Errorf("old %w", err)
+	}
+	if p.state.NewThreshold <= 0 || p.state.NewThreshold > len(p.state.NewParties) {
+		return errors.New("invalid new threshold")
+	}
+	if len(p.state.NewParties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many new parties: %d > %d", len(p.state.NewParties), limits.Threshold.MaxParties)
+	}
+	if p.state.NewThreshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("new threshold too large: %d > %d", p.state.NewThreshold, limits.Threshold.MaxThreshold)
+	}
+	if err := limits.Threshold.ValidateThreshold(p.state.NewThreshold, len(p.state.NewParties)); err != nil {
+		return fmt.Errorf("new %w", err)
+	}
+	return nil
+}
+
+func (p *ResharePlan) validateCommittees(limits Limits) error {
+	if len(p.state.OldGroupCommitments) != p.state.OldThreshold {
+		return errors.New("old group commitments length must equal old threshold")
+	}
+	for i, commitment := range p.state.OldGroupCommitments {
+		if _, err := secp.PointFromBytes(commitment); err != nil {
+			return fmt.Errorf("invalid old group commitment %d: %w", i, err)
+		}
+	}
+	if !bytes.Equal(p.state.OldGroupCommitments[0], p.state.OldGroupPublicKey) {
+		return errors.New("old group commitment constant must equal old public key")
+	}
+	if err := wire.ValidateStrictSortedIDs(p.state.OldParties); err != nil {
+		return fmt.Errorf("invalid old participant set: %w", err)
+	}
+	if p.state.SourceEpoch.Threshold != p.state.OldThreshold || len(p.state.SourceEpoch.Identifiers) != len(p.state.OldParties) {
+		return errors.New("reshare source epoch threshold or party count does not match old committee")
+	}
+	if err := wire.ValidateStrictSortedIDs(p.state.DealerParties); err != nil {
+		return fmt.Errorf("invalid dealer set: %w", err)
+	}
+	if len(p.state.DealerParties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many dealer parties: %d > %d", len(p.state.DealerParties), limits.Threshold.MaxParties)
+	}
+	if err := wire.ValidateStrictSortedIDs(p.state.NewParties); err != nil {
+		return fmt.Errorf("invalid new participant set: %w", err)
+	}
+	if len(p.state.DealerParties) < p.state.OldThreshold {
+		return errors.New("dealer set is smaller than old threshold")
+	}
+	for _, dealer := range p.state.DealerParties {
+		if !tss.ContainsParty(p.state.OldParties, dealer) {
+			return fmt.Errorf("dealer %d is not an old participant", dealer)
+		}
+	}
+	if len(p.state.OldVerificationShares) != len(p.state.OldParties) {
+		return errors.New("old verification share count must equal old party count")
+	}
+	for _, id := range p.state.OldParties {
+		if err := p.validateOldVerificationShare(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *ResharePlan) validateOldVerificationShare(id tss.PartyID) error {
+	verificationShare, ok := p.state.OldVerificationShares[id]
+	if !ok {
+		return fmt.Errorf("missing old verification share for party %d", id)
+	}
+	if _, err := secp.PointFromBytes(verificationShare); err != nil {
+		return fmt.Errorf("invalid old verification share for party %d: %w", id, err)
+	}
+	identifier, ok := p.state.SourceEpoch.Identifier(id)
+	if !ok {
+		return fmt.Errorf("missing source epoch identifier for party %d", id)
+	}
+	expected, err := evaluateEncodedCommitmentsAtIdentifier(p.state.OldGroupCommitments, identifier)
+	clear(identifier)
+	if err != nil {
+		return fmt.Errorf("evaluate old verification share for party %d: %w", id, err)
+	}
+	expectedBytes, err := secp.PointBytes(expected)
+	if err != nil {
+		return fmt.Errorf("encode old verification share for party %d: %w", id, err)
+	}
+	if !bytes.Equal(expectedBytes, verificationShare) {
+		return fmt.Errorf("old verification share mismatch for party %d", id)
+	}
+	epochShare, ok := p.state.SourceEpoch.PublicShare(id)
+	if !ok || !bytes.Equal(epochShare.PublicKey, verificationShare) {
+		return fmt.Errorf("source epoch public share mismatch for party %d", id)
+	}
+	return nil
 }

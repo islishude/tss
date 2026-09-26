@@ -20,37 +20,8 @@ import (
 // retains only the public Figure 10 context and exact broadcast outbox.
 func StartSign(plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelope, error) {
 	local := runtime.Local
-	if plan == nil || plan.state == nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("nil sign plan"))
-	}
-	if local.Self == tss.BroadcastPartyId {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("SignRuntime.Local.Self is required"))
-	}
-	if runtime.LifecycleStore == nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("SignRuntime.LifecycleStore is required"))
-	}
-	if err := runtime.Binding.Validate(); err != nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
-	}
-	if err := validateSignLifecycleIdentifier(runtime.PresignID); err != nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid SignRuntime.PresignID"))
-	}
-	if err := validateCanonicalPresignSlot(runtime.PresignID, plan.state.protocolPresignID); err != nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
-	}
-	if err := validateSignLifecycleIdentifier(runtime.AttemptID); err != nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("invalid SignRuntime.AttemptID"))
-	}
-	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self, CGGMP21Policies()); err != nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
-	}
-	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, err)
-	}
-	if !plan.state.signers.Contains(local.Self) ||
-		!bytes.Equal(plan.state.epochID, runtime.Binding.EpochID[:]) ||
-		plan.state.intent.Context.KeyID != runtime.Binding.KeyID {
-		return nil, nil, planvalidation.InvalidConfig(local.Self, errors.New("sign plan does not match lifecycle binding or local party"))
+	if err := validateSignRuntime(plan, runtime); err != nil {
+		return nil, nil, err
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
@@ -468,20 +439,9 @@ func signSessionFromLifecycleAttempt(ctx context.Context, key *KeyShare, record 
 			return nil, nil, fmt.Errorf("%w: delivery and exact outbox identity mismatch", ErrSignAttemptCorrupt)
 		}
 	}
-	var signature *Signature
-	if record.Completed {
-		completion, decodeErr := unmarshalSignAttemptCompletion(record.Completion, limits)
-		if decodeErr != nil {
-			return nil, nil, decodeErr
-		}
-		if !bytes.Equal(completion.IntentDigest, outbox.IntentDigest) {
-			return nil, nil, fmt.Errorf("%w: completion intent mismatch", ErrSignAttemptCorrupt)
-		}
-		signature = &Signature{R: bytes.Clone(completion.SignatureR), S: bytes.Clone(completion.SignatureS), RecoveryID: completion.RecoveryID}
-		if !VerifyDigest(publicContext.VerificationKey, outbox.Digest, signature) ||
-			!signatureRecoveryIDMatchesPublicKey(publicContext.VerificationKey, outbox.Digest, signature) {
-			return nil, nil, fmt.Errorf("%w: stored completion verification failed", ErrSignAttemptCorrupt)
-		}
+	signature, err := recoverAttemptSignature(record, outbox, publicContext, limits)
+	if err != nil {
+		return nil, nil, err
 	}
 	sessionRecord := record.Clone()
 	clear(sessionRecord.PresignMetadata)
@@ -511,31 +471,7 @@ func signSessionFromLifecycleAttempt(ctx context.Context, key *KeyShare, record 
 	}
 	ownedContext = false
 	ownedOutbox = false
-	if len(s.outbox.CanonicalEnvelope) != 0 {
-		env, payload, decodeErr := decodeSignAttemptEnvelopeWithLimits(s.outbox.CanonicalEnvelope, limits)
-		if decodeErr != nil {
-			_ = s.Close(context.Background())
-			return nil, nil, fmt.Errorf("%w: decode exact sign outbox: %w", ErrSignAttemptCorrupt, decodeErr)
-		}
-		defer payload.S.Destroy()
-		partial, verifyErr := s.verifySignPartial(key.state.Party, payload)
-		if verifyErr != nil {
-			_ = s.Close(context.Background())
-			return nil, nil, fmt.Errorf("%w: local sign partial verification failed: %w", ErrSignAttemptCorrupt, verifyErr)
-		}
-		s.partials[key.state.Party] = partial
-		s.partialEnvelopes[key.state.Party] = env.Clone()
-		if !record.Completed && coordinator != nil {
-			if _, err := s.tryCompleteSign(s.coordinatorCtx); err != nil {
-				_ = s.Close(context.Background())
-				return nil, nil, err
-			}
-		}
-		if !record.Delivered {
-			return s, []tss.Envelope{env}, nil
-		}
-	}
-	return s, nil, nil
+	return s.restoreLocalPartial(key, record, coordinator, limits)
 }
 
 func validateSignLifecycleBinding(key *KeyShare, publicContext signAttemptPublicContext, binding tssrun.GenerationBinding) error {
@@ -642,4 +578,88 @@ func BurnPresign(ctx context.Context, store tssrun.LifecycleStore, binding tssru
 		return err
 	}
 	return store.BurnPresign(ctx, binding, presignID, reason)
+}
+
+func validateSignRuntime(plan *SignPlan, runtime SignRuntime) error {
+	local := runtime.Local
+	if plan == nil || plan.state == nil {
+		return planvalidation.InvalidConfig(local.Self, errors.New("nil sign plan"))
+	}
+	if local.Self == tss.BroadcastPartyId {
+		return planvalidation.InvalidConfig(local.Self, errors.New("SignRuntime.Local.Self is required"))
+	}
+	if runtime.LifecycleStore == nil {
+		return planvalidation.InvalidConfig(local.Self, errors.New("SignRuntime.LifecycleStore is required"))
+	}
+	if err := runtime.Binding.Validate(); err != nil {
+		return planvalidation.InvalidConfig(local.Self, err)
+	}
+	if err := validateSignLifecycleIdentifier(runtime.PresignID); err != nil {
+		return planvalidation.InvalidConfig(local.Self, errors.New("invalid SignRuntime.PresignID"))
+	}
+	if err := validateCanonicalPresignSlot(runtime.PresignID, plan.state.protocolPresignID); err != nil {
+		return planvalidation.InvalidConfig(local.Self, err)
+	}
+	if err := validateSignLifecycleIdentifier(runtime.AttemptID); err != nil {
+		return planvalidation.InvalidConfig(local.Self, errors.New("invalid SignRuntime.AttemptID"))
+	}
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self, CGGMP21Policies()); err != nil {
+		return planvalidation.InvalidConfig(local.Self, err)
+	}
+	if err := requireLocalEnvelopeSigner(runtime.Guard, local.EnvelopeSigner); err != nil {
+		return planvalidation.InvalidConfig(local.Self, err)
+	}
+	if !plan.state.signers.Contains(local.Self) ||
+		!bytes.Equal(plan.state.epochID, runtime.Binding.EpochID[:]) ||
+		plan.state.intent.Context.KeyID != runtime.Binding.KeyID {
+		return planvalidation.InvalidConfig(local.Self, errors.New("sign plan does not match lifecycle binding or local party"))
+	}
+	return nil
+}
+
+func recoverAttemptSignature(record tssrun.SignAttemptRecord, outbox signAttemptOutbox, publicContext signAttemptPublicContext, limits Limits) (*Signature, error) {
+	var signature *Signature
+	if record.Completed {
+		completion, decodeErr := unmarshalSignAttemptCompletion(record.Completion, limits)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		if !bytes.Equal(completion.IntentDigest, outbox.IntentDigest) {
+			return nil, fmt.Errorf("%w: completion intent mismatch", ErrSignAttemptCorrupt)
+		}
+		signature = &Signature{R: bytes.Clone(completion.SignatureR), S: bytes.Clone(completion.SignatureS), RecoveryID: completion.RecoveryID}
+		if !VerifyDigest(publicContext.VerificationKey, outbox.Digest, signature) ||
+			!signatureRecoveryIDMatchesPublicKey(publicContext.VerificationKey, outbox.Digest, signature) {
+			return nil, fmt.Errorf("%w: stored completion verification failed", ErrSignAttemptCorrupt)
+		}
+	}
+	return signature, nil
+}
+
+func (s *SignSession) restoreLocalPartial(key *KeyShare, record tssrun.SignAttemptRecord, coordinator *signAttemptCoordinator, limits Limits) (*SignSession, []tss.Envelope, error) {
+	if len(s.outbox.CanonicalEnvelope) != 0 {
+		env, payload, decodeErr := decodeSignAttemptEnvelopeWithLimits(s.outbox.CanonicalEnvelope, limits)
+		if decodeErr != nil {
+			_ = s.Close(context.Background())
+			return nil, nil, fmt.Errorf("%w: decode exact sign outbox: %w", ErrSignAttemptCorrupt, decodeErr)
+		}
+		defer payload.S.Destroy()
+		partial, verifyErr := s.verifySignPartial(key.state.Party, payload)
+		if verifyErr != nil {
+			_ = s.Close(context.Background())
+			return nil, nil, fmt.Errorf("%w: local sign partial verification failed: %w", ErrSignAttemptCorrupt, verifyErr)
+		}
+		s.partials[key.state.Party] = partial
+		s.partialEnvelopes[key.state.Party] = env.Clone()
+		if !record.Completed && coordinator != nil {
+			if _, err := s.tryCompleteSign(s.coordinatorCtx); err != nil {
+				_ = s.Close(context.Background())
+				return nil, nil, err
+			}
+		}
+		if !record.Delivered {
+			return s, []tss.Envelope{env}, nil
+		}
+	}
+	return s, nil, nil
 }

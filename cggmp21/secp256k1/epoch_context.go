@@ -340,46 +340,8 @@ func (e EpochContext) ValidateWithLimits(limits Limits) error {
 		return fmt.Errorf("epoch context: too many parties: %d > %d", len(e.Identifiers), limits.Threshold.MaxParties)
 	}
 
-	seenIdentifiers := make(map[[secp.ScalarSize]byte]struct{}, len(e.Identifiers))
-	var last tss.PartyID
-	for i := range e.Identifiers {
-		identifier := e.Identifiers[i]
-		publicShare := e.PublicShares[i]
-		if identifier.Party == tss.BroadcastPartyId || publicShare.Party == tss.BroadcastPartyId {
-			return errors.New("epoch context: party id 0 is reserved")
-		}
-		if i > 0 && identifier.Party <= last {
-			return errors.New("epoch context: parties must be strictly increasing")
-		}
-		if publicShare.Party != identifier.Party {
-			return fmt.Errorf("epoch context: public share party %d does not match identifier party %d", publicShare.Party, identifier.Party)
-		}
-		if len(publicShare.PublicKey) > limits.Curve.MaxPointBytes {
-			return fmt.Errorf("epoch context: public share for party %d too large", publicShare.Party)
-		}
-		if _, err := secp.PointFromBytes(publicShare.PublicKey); err != nil {
-			return fmt.Errorf("epoch context: invalid public share for party %d: %w", publicShare.Party, err)
-		}
-		parsed, err := shamir.IdentifierFromBytes(identifier.Identifier)
-		if err != nil {
-			return fmt.Errorf("epoch context: party %d: %w", identifier.Party, err)
-		}
-		parsedBytes := parsed.Bytes()
-		var identifierKey [secp.ScalarSize]byte
-		copy(identifierKey[:], parsedBytes)
-		clear(parsedBytes)
-		if _, ok := seenIdentifiers[identifierKey]; ok {
-			return errors.New("epoch context: duplicate Shamir identifier")
-		}
-		seenIdentifiers[identifierKey] = struct{}{}
-		expected, err := DeriveEpochIdentifier(e.SID, e.RID, identifier.Party)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(expected, identifier.Identifier) {
-			return fmt.Errorf("epoch context: identifier mismatch for party %d", identifier.Party)
-		}
-		last = identifier.Party
+	if err := e.validatePartyVectors(limits); err != nil {
+		return err
 	}
 	expectedEpochID := e.computeID()
 	if !bytes.Equal(expectedEpochID, e.EpochID) {
@@ -551,6 +513,51 @@ func (state *keyShareState) validateEpochBinding(limits Limits) error {
 		if !bytes.Equal(expectedBytes, publicShare.PublicKey) {
 			return fmt.Errorf("epoch public share for party %d does not match group commitments", party)
 		}
+	}
+	return nil
+}
+
+func (e EpochContext) validatePartyVectors(limits Limits) error {
+	seenIdentifiers := make(map[[secp.ScalarSize]byte]struct{}, len(e.Identifiers))
+	var last tss.PartyID
+	for i := range e.Identifiers {
+		identifier := e.Identifiers[i]
+		publicShare := e.PublicShares[i]
+		if identifier.Party == tss.BroadcastPartyId || publicShare.Party == tss.BroadcastPartyId {
+			return errors.New("epoch context: party id 0 is reserved")
+		}
+		if i > 0 && identifier.Party <= last {
+			return errors.New("epoch context: parties must be strictly increasing")
+		}
+		if publicShare.Party != identifier.Party {
+			return fmt.Errorf("epoch context: public share party %d does not match identifier party %d", publicShare.Party, identifier.Party)
+		}
+		if len(publicShare.PublicKey) > limits.Curve.MaxPointBytes {
+			return fmt.Errorf("epoch context: public share for party %d too large", publicShare.Party)
+		}
+		if _, err := secp.PointFromBytes(publicShare.PublicKey); err != nil {
+			return fmt.Errorf("epoch context: invalid public share for party %d: %w", publicShare.Party, err)
+		}
+		parsed, err := shamir.IdentifierFromBytes(identifier.Identifier)
+		if err != nil {
+			return fmt.Errorf("epoch context: party %d: %w", identifier.Party, err)
+		}
+		parsedBytes := parsed.Bytes()
+		var identifierKey [secp.ScalarSize]byte
+		copy(identifierKey[:], parsedBytes)
+		clear(parsedBytes)
+		if _, ok := seenIdentifiers[identifierKey]; ok {
+			return errors.New("epoch context: duplicate Shamir identifier")
+		}
+		seenIdentifiers[identifierKey] = struct{}{}
+		expected, err := DeriveEpochIdentifier(e.SID, e.RID, identifier.Party)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(expected, identifier.Identifier) {
+			return fmt.Errorf("epoch context: identifier mismatch for party %d", identifier.Party)
+		}
+		last = identifier.Party
 	}
 	return nil
 }

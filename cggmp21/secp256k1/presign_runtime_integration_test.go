@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"testing"
 
@@ -87,6 +88,39 @@ func TestPresignRuntimeLoadsClaimsAndPersistsAuthoritatively(t *testing.T) {
 		}
 		if _, ok := session.Presign(); ok {
 			t.Fatal("presign descriptor visible before durable completion")
+		}
+	})
+
+	t.Run("preparation_failure_aborts_lease_without_output", func(t *testing.T) {
+		// Exhaust randomness during each nonce sample or the first MtA opening.
+		for _, available := range []int64{0, 32, 64, 96, 128, 160} {
+			t.Run(fmt.Sprintf("random_bytes_%d", available), func(t *testing.T) {
+				sessionID := mustPresignRuntimeSessionID(t)
+				plan := testAuthoritativePresignPlan(t, shares[1], sessionID)
+				store, runtime := testAuthoritativePresignRuntime(t, shares[1], plan, nil)
+				runtime.Local.Rand = io.LimitReader(testutil.DeterministicReader(314), available)
+				session, out, err := StartPresign(plan, runtime)
+				if !errors.Is(err, io.EOF) || session != nil || len(out) != 0 {
+					t.Fatalf("failed preparation session=%v out=%d err=%v", session != nil, len(out), err)
+				}
+				if !slices.Equal(store.calls, []string{"load", "acquire", fmt.Sprintf("finish-%d", tssrun.LeaseAborted)}) {
+					t.Fatalf("failed preparation lifecycle calls = %v", store.calls)
+				}
+				lease, err := store.QueryRunLease(context.Background(), runtime.Binding, tssrun.RunPresign, sessionID)
+				if err != nil || lease.State != tssrun.RunLeaseAborted {
+					t.Fatalf("failed preparation lease state=%v err=%v", lease.State, err)
+				}
+				slotID, err := PresignSlotID(plan.state.presignID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				candidate, err := store.PreparePresignCandidate(context.Background(), runtime.Binding, slotID)
+				clear(candidate.Blob)
+				clear(candidate.Metadata)
+				if !errors.Is(err, tssrun.ErrPresignUnavailable) {
+					t.Fatalf("failed preparation candidate error = %v", err)
+				}
+			})
 		}
 	})
 

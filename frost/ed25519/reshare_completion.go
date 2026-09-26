@@ -8,6 +8,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/secret"
 )
 
 func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
@@ -166,40 +167,7 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		return nil, false, err
 	}
 
-	newSecret := fed.NewScalar()
-	if s.isRefresh() {
-		// Refresh: new_secret = old_secret + Σ f_i(self) mod L.
-		// New commitments = old_commitments + Σ dealer_commitments.
-		oldSecret, err := s.oldKey.secretScalar()
-		if err != nil {
-			newSecret.Set(fed.NewScalar())
-			return nil, false, err
-		}
-		newSecret.Add(newSecret, oldSecret)
-		oldSecret.Set(fed.NewScalar())
-		for _, dealer := range s.oldParties {
-			share, err := edScalarFromSecret(s.shares[dealer])
-			if err != nil {
-				newSecret.Set(fed.NewScalar())
-				return nil, false, err
-			}
-			newSecret.Add(newSecret, share)
-			share.Set(fed.NewScalar())
-		}
-	} else {
-		// True reshare: new_secret = Σ g_i(self) mod L.
-		for _, dealer := range s.oldParties {
-			share, err := edScalarFromSecret(s.shares[dealer])
-			if err != nil {
-				newSecret.Set(fed.NewScalar())
-				return nil, false, err
-			}
-			newSecret.Add(newSecret, share)
-			share.Set(fed.NewScalar())
-		}
-	}
-	newSecretScalar, err := newEdSecretScalarFromFed(newSecret)
-	newSecret.Set(fed.NewScalar())
+	newSecretScalar, err := s.aggregateReshareSecret()
 	if err != nil {
 		return nil, false, err
 	}
@@ -497,4 +465,46 @@ func (s *ReshareSession) aggregateCommitments() (groupCommitments, error) {
 		return groupCommitments{}, fmt.Errorf("invalid reshared group public key: %w", err)
 	}
 	return out, nil
+}
+
+func (s *ReshareSession) aggregateReshareSecret() (*secret.Scalar, error) {
+	newSecret := fed.NewScalar()
+	if s.isRefresh() {
+		// Refresh: new_secret = old_secret + Σ f_i(self) mod L.
+		// New commitments = old_commitments + Σ dealer_commitments.
+		oldSecret, err := s.oldKey.secretScalar()
+		if err != nil {
+			newSecret.Set(fed.NewScalar())
+			return nil, err
+		}
+		newSecret.Add(newSecret, oldSecret)
+		oldSecret.Set(fed.NewScalar())
+		for _, dealer := range s.oldParties {
+			share, err := edScalarFromSecret(s.shares[dealer])
+			if err != nil {
+				newSecret.Set(fed.NewScalar())
+				return nil, err
+			}
+			newSecret.Add(newSecret, share)
+			share.Set(fed.NewScalar())
+		}
+	} else {
+		// True reshare: new_secret = Σ g_i(self) mod L.
+		for _, dealer := range s.oldParties {
+			share, err := edScalarFromSecret(s.shares[dealer])
+			if err != nil {
+				newSecret.Set(fed.NewScalar())
+				return nil, err
+			}
+			newSecret.Add(newSecret, share)
+			share.Set(fed.NewScalar())
+		}
+	}
+	newSecretScalar, err := newEdSecretScalarFromFed(newSecret)
+	newSecret.Set(fed.NewScalar())
+	if err != nil {
+		return nil, err
+	}
+
+	return newSecretScalar, nil
 }

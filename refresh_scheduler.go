@@ -220,6 +220,38 @@ func (s *RefreshScheduler[K]) runOnce(ctx context.Context) (runErr error) {
 	if err := sendRefreshEnvelopes(ctx, s.opts.Transport, out); err != nil {
 		return fmt.Errorf("send initial refresh envelopes: %w", err)
 	}
+	return s.driveRefresh(ctx, current, session)
+}
+
+func sendRefreshEnvelopes(ctx context.Context, transport Transport, envs []Envelope) error {
+	for i, env := range envs {
+		var err error
+		if env.To == BroadcastPartyId {
+			err = transport.Broadcast(ctx, env)
+		} else {
+			err = transport.Send(ctx, env)
+		}
+		if err != nil {
+			return fmt.Errorf("envelope %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func isNilRefreshValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
+func (s *RefreshScheduler[K]) driveRefresh(ctx context.Context, current K, session RefreshSession[K]) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -248,33 +280,5 @@ func (s *RefreshScheduler[K]) runOnce(ctx context.Context) (runErr error) {
 		if err := sendRefreshEnvelopes(ctx, s.opts.Transport, out); err != nil {
 			return fmt.Errorf("send refresh envelopes: %w", err)
 		}
-	}
-}
-
-func sendRefreshEnvelopes(ctx context.Context, transport Transport, envs []Envelope) error {
-	for i, env := range envs {
-		var err error
-		if env.To == BroadcastPartyId {
-			err = transport.Broadcast(ctx, env)
-		} else {
-			err = transport.Send(ctx, env)
-		}
-		if err != nil {
-			return fmt.Errorf("envelope %d: %w", i, err)
-		}
-	}
-	return nil
-}
-
-func isNilRefreshValue(value any) bool {
-	if value == nil {
-		return true
-	}
-	v := reflect.ValueOf(value)
-	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return v.IsNil()
-	default:
-		return false
 	}
 }

@@ -172,104 +172,15 @@ func ProveDec(params SecurityParams, state []byte, stmt DecStatement, witness De
 		W:  make([][]byte, rounds),
 		Nu: make([][]byte, rounds),
 	}
-	alpha := make([]*secret.SignedInt, rounds)
-	beta := make([]*secret.SignedInt, rounds)
-	randomness := make([]*secret.Scalar, rounds)
+	masks := make([]decRoundSecrets, rounds)
 	defer func() {
-		for i := range rounds {
-			if alpha[i] != nil {
-				alpha[i].Destroy()
-			}
-			if beta[i] != nil {
-				beta[i].Destroy()
-			}
-			if randomness[i] != nil {
-				randomness[i].Destroy()
-			}
+		for i := range masks {
+			masks[i].destroy()
 		}
 	}()
 
 	for i := range rounds {
-		var alphaScalar, betaScalar secp.Scalar
-		for {
-			candidate, err := sampleSignedSecret(rng, params.EncRange())
-			if err != nil {
-				return nil, err
-			}
-			alphaScalar, err = signedSecretSecpScalar(candidate)
-			if err != nil {
-				candidate.Destroy()
-				return nil, err
-			}
-			if alphaScalar.IsZero() {
-				candidate.Destroy()
-				continue
-			}
-			alpha[i] = candidate
-			break
-		}
-		for {
-			candidate, err := sampleSignedSecret(rng, params.DecRange())
-			if err != nil {
-				alphaScalar.Set(secp.ScalarZero())
-				return nil, err
-			}
-			betaScalar, err = signedSecretSecpScalar(candidate)
-			if err != nil {
-				candidate.Destroy()
-				alphaScalar.Set(secp.ScalarZero())
-				return nil, err
-			}
-			if betaScalar.IsZero() {
-				candidate.Destroy()
-				continue
-			}
-			beta[i] = candidate
-			break
-		}
-		var err error
-		randomness[i], err = sampleZNStarSecret(rng, stmt.PaillierN.N)
-		if err != nil {
-			alphaScalar.Set(secp.ScalarZero())
-			betaScalar.Set(secp.ScalarZero())
-			return nil, err
-		}
-		negativeAlpha, err := negateSignedSecret(alpha[i])
-		if err != nil {
-			alphaScalar.Set(secp.ScalarZero())
-			betaScalar.Set(secp.ScalarZero())
-			return nil, err
-		}
-		kNegativeAlpha, err := OMulCT(stmt.PaillierN, negativeAlpha, stmt.K, negativeAlpha.FixedLen())
-		negativeAlpha.Destroy()
-		if err != nil {
-			alphaScalar.Set(secp.ScalarZero())
-			betaScalar.Set(secp.ScalarZero())
-			return nil, err
-		}
-		encBeta, err := encRandomSecrets(stmt.PaillierN, beta[i], randomness[i])
-		if err != nil {
-			alphaScalar.Set(secp.ScalarZero())
-			betaScalar.Set(secp.ScalarZero())
-			return nil, err
-		}
-		a, err := OAdd(stmt.PaillierN, kNegativeAlpha, encBeta)
-		if err != nil {
-			alphaScalar.Set(secp.ScalarZero())
-			betaScalar.Set(secp.ScalarZero())
-			return nil, err
-		}
-		proof.A[i] = a.Bytes()
-		proof.B[i], err = secp.PointBytes(secp.ScalarMult(stmt.PlaintextBase, betaScalar))
-		if err != nil {
-			alphaScalar.Set(secp.ScalarZero())
-			betaScalar.Set(secp.ScalarZero())
-			return nil, err
-		}
-		proof.C[i], err = secp.PointBytes(secp.ScalarBaseMult(alphaScalar))
-		alphaScalar.Set(secp.ScalarZero())
-		betaScalar.Set(secp.ScalarZero())
-		if err != nil {
+		if err := masks[i].prepare(params, stmt, rng, proof, i); err != nil {
 			return nil, err
 		}
 	}
@@ -295,41 +206,9 @@ func ProveDec(params SecurityParams, state []byte, stmt DecStatement, witness De
 	}
 	defer secret.ClearBigInt(rho)
 	for i := range rounds {
-		z, err := signedSecretBig(alpha[i])
-		if err != nil {
+		if err := masks[i].respond(stmt, proof, challenges, i, x, y, rho); err != nil {
 			return nil, err
 		}
-		w, err := signedSecretBig(beta[i])
-		if err != nil {
-			secret.ClearBigInt(z)
-			return nil, err
-		}
-		nu, err := secretScalarBig(randomness[i])
-		if err != nil {
-			secret.ClearBigInt(z)
-			secret.ClearBigInt(w)
-			return nil, err
-		}
-		if decChallengeBit(challenges, i) == 1 {
-			z.Add(z, x)
-			w.Add(w, y)
-			nu.Mul(nu, rho).Mod(nu, stmt.PaillierN.N)
-		}
-		proof.Z[i], err = wire.EncodeBigInt(z)
-		secret.ClearBigInt(z)
-		if err != nil {
-			secret.ClearBigInt(w)
-			secret.ClearBigInt(nu)
-			return nil, err
-		}
-		proof.W[i], err = wire.EncodeBigInt(w)
-		secret.ClearBigInt(w)
-		if err != nil {
-			secret.ClearBigInt(nu)
-			return nil, err
-		}
-		proof.Nu[i] = nu.Bytes()
-		secret.ClearBigInt(nu)
 	}
 	proof.TranscriptHash = root
 	if err := proof.Validate(); err != nil {
@@ -360,67 +239,8 @@ func VerifyDec(params SecurityParams, state []byte, stmt DecStatement, proof *De
 	}
 	challenges := decChallenges(root, rounds)
 	for i := range rounds {
-		a := new(big.Int).SetBytes(proof.A[i])
-		if _, err := RequireZN2Star(a, stmt.PaillierN.N); err != nil {
-			return fmt.Errorf("DecProof: invalid A[%d]: %w", i, err)
-		}
-		b, _ := secp.PointFromBytes(proof.B[i])
-		c, _ := secp.PointFromBytes(proof.C[i])
-		z, _ := wire.DecodeBigInt(proof.Z[i])
-		w, _ := wire.DecodeBigInt(proof.W[i])
-		nu := new(big.Int).SetBytes(proof.Nu[i])
-		if _, err := RequireZNStar(nu, stmt.PaillierN.N); err != nil {
-			return fmt.Errorf("DecProof: invalid nu[%d]: %w", i, err)
-		}
-		if !InSignedPowerOfTwo(z, params.EncRange()+1) {
-			return fmt.Errorf("DecProof: z[%d] out of range", i)
-		}
-		if !InSignedPowerOfTwo(w, params.DecRange()+1) {
-			return fmt.Errorf("DecProof: w[%d] out of range", i)
-		}
-
-		leftPaillier, err := EncRandom(stmt.PaillierN, w, nu)
-		if err != nil {
+		if err := verifyDecRound(params, stmt, proof, challenges, i); err != nil {
 			return err
-		}
-		kZ, err := OMulPublic(stmt.PaillierN, z, stmt.K)
-		if err != nil {
-			return err
-		}
-		rightPaillier, err := OAdd(stmt.PaillierN, a, kZ)
-		if err != nil {
-			return err
-		}
-		if decChallengeBit(challenges, i) == 1 {
-			rightPaillier, err = OAdd(stmt.PaillierN, rightPaillier, stmt.D)
-			if err != nil {
-				return err
-			}
-		}
-		if leftPaillier.Cmp(rightPaillier) != 0 {
-			return fmt.Errorf("DecProof: Paillier equation failed in round %d", i)
-		}
-
-		zScalar := secp.ScalarFromBigInt(z)
-		leftX := secp.ScalarBaseMult(zScalar)
-		zScalar.Set(secp.ScalarZero())
-		rightX := c
-		if decChallengeBit(challenges, i) == 1 {
-			rightX = secp.Add(c, stmt.X)
-		}
-		if !secp.Equal(leftX, rightX) {
-			return fmt.Errorf("DecProof: x commitment equation failed in round %d", i)
-		}
-
-		wScalar := secp.ScalarFromBigInt(w)
-		leftS := secp.ScalarMult(stmt.PlaintextBase, wScalar)
-		wScalar.Set(secp.ScalarZero())
-		rightS := b
-		if decChallengeBit(challenges, i) == 1 {
-			rightS = secp.Add(b, stmt.S)
-		}
-		if !secp.Equal(leftS, rightS) {
-			return fmt.Errorf("DecProof: plaintext commitment equation failed in round %d", i)
 		}
 	}
 	return nil
@@ -635,5 +455,219 @@ func validateDecSignedBytes(name string, encoded []byte) error {
 	if _, err := wire.DecodeBigInt(encoded); err != nil {
 		return fmt.Errorf("DecProof: invalid %s: %w", name, err)
 	}
+	return nil
+}
+
+type decRoundSecrets struct {
+	alpha      *secret.SignedInt
+	beta       *secret.SignedInt
+	randomness *secret.Scalar
+}
+
+func (m *decRoundSecrets) destroy() {
+	if m.alpha != nil {
+		m.alpha.Destroy()
+	}
+	if m.beta != nil {
+		m.beta.Destroy()
+	}
+	if m.randomness != nil {
+		m.randomness.Destroy()
+	}
+}
+
+func (m *decRoundSecrets) prepare(params SecurityParams, stmt DecStatement, rng io.Reader, proof *DecProof, i int) error {
+	var alphaScalar, betaScalar secp.Scalar
+	for {
+		candidate, err := sampleSignedSecret(rng, params.EncRange())
+		if err != nil {
+			return err
+		}
+		alphaScalar, err = signedSecretSecpScalar(candidate)
+		if err != nil {
+			candidate.Destroy()
+			return err
+		}
+		if alphaScalar.IsZero() {
+			candidate.Destroy()
+			continue
+		}
+		m.alpha = candidate
+		break
+	}
+	for {
+		candidate, err := sampleSignedSecret(rng, params.DecRange())
+		if err != nil {
+			alphaScalar.Set(secp.ScalarZero())
+			return err
+		}
+		betaScalar, err = signedSecretSecpScalar(candidate)
+		if err != nil {
+			candidate.Destroy()
+			alphaScalar.Set(secp.ScalarZero())
+			return err
+		}
+		if betaScalar.IsZero() {
+			candidate.Destroy()
+			continue
+		}
+		m.beta = candidate
+		break
+	}
+	var err error
+	m.randomness, err = sampleZNStarSecret(rng, stmt.PaillierN.N)
+	if err != nil {
+		alphaScalar.Set(secp.ScalarZero())
+		betaScalar.Set(secp.ScalarZero())
+		return err
+	}
+	negativeAlpha, err := negateSignedSecret(m.alpha)
+	if err != nil {
+		alphaScalar.Set(secp.ScalarZero())
+		betaScalar.Set(secp.ScalarZero())
+		return err
+	}
+	kNegativeAlpha, err := OMulCT(stmt.PaillierN, negativeAlpha, stmt.K, negativeAlpha.FixedLen())
+	negativeAlpha.Destroy()
+	if err != nil {
+		alphaScalar.Set(secp.ScalarZero())
+		betaScalar.Set(secp.ScalarZero())
+		return err
+	}
+	encBeta, err := encRandomSecrets(stmt.PaillierN, m.beta, m.randomness)
+	if err != nil {
+		alphaScalar.Set(secp.ScalarZero())
+		betaScalar.Set(secp.ScalarZero())
+		return err
+	}
+	a, err := OAdd(stmt.PaillierN, kNegativeAlpha, encBeta)
+	if err != nil {
+		alphaScalar.Set(secp.ScalarZero())
+		betaScalar.Set(secp.ScalarZero())
+		return err
+	}
+	proof.A[i] = a.Bytes()
+	proof.B[i], err = secp.PointBytes(secp.ScalarMult(stmt.PlaintextBase, betaScalar))
+	if err != nil {
+		alphaScalar.Set(secp.ScalarZero())
+		betaScalar.Set(secp.ScalarZero())
+		return err
+	}
+	proof.C[i], err = secp.PointBytes(secp.ScalarBaseMult(alphaScalar))
+	alphaScalar.Set(secp.ScalarZero())
+	betaScalar.Set(secp.ScalarZero())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *decRoundSecrets) respond(stmt DecStatement, proof *DecProof, challenges []byte, i int, x, y, rho *big.Int) error {
+	z, err := signedSecretBig(m.alpha)
+	if err != nil {
+		return err
+	}
+	w, err := signedSecretBig(m.beta)
+	if err != nil {
+		secret.ClearBigInt(z)
+		return err
+	}
+	nu, err := secretScalarBig(m.randomness)
+	if err != nil {
+		secret.ClearBigInt(z)
+		secret.ClearBigInt(w)
+		return err
+	}
+	if decChallengeBit(challenges, i) == 1 {
+		z.Add(z, x)
+		w.Add(w, y)
+		nu.Mul(nu, rho).Mod(nu, stmt.PaillierN.N)
+	}
+	proof.Z[i], err = wire.EncodeBigInt(z)
+	secret.ClearBigInt(z)
+	if err != nil {
+		secret.ClearBigInt(w)
+		secret.ClearBigInt(nu)
+		return err
+	}
+	proof.W[i], err = wire.EncodeBigInt(w)
+	secret.ClearBigInt(w)
+	if err != nil {
+		secret.ClearBigInt(nu)
+		return err
+	}
+	proof.Nu[i] = nu.Bytes()
+	secret.ClearBigInt(nu)
+
+	return nil
+}
+
+// verifyDecRound requires the outer verifier to validate proof shape
+// and bind the challenge to the complete transcript before indexing a round.
+func verifyDecRound(params SecurityParams, stmt DecStatement, proof *DecProof, challenges []byte, i int) error {
+	a := new(big.Int).SetBytes(proof.A[i])
+	if _, err := RequireZN2Star(a, stmt.PaillierN.N); err != nil {
+		return fmt.Errorf("DecProof: invalid A[%d]: %w", i, err)
+	}
+	b, _ := secp.PointFromBytes(proof.B[i])
+	c, _ := secp.PointFromBytes(proof.C[i])
+	z, _ := wire.DecodeBigInt(proof.Z[i])
+	w, _ := wire.DecodeBigInt(proof.W[i])
+	nu := new(big.Int).SetBytes(proof.Nu[i])
+	if _, err := RequireZNStar(nu, stmt.PaillierN.N); err != nil {
+		return fmt.Errorf("DecProof: invalid nu[%d]: %w", i, err)
+	}
+	if !InSignedPowerOfTwo(z, params.EncRange()+1) {
+		return fmt.Errorf("DecProof: z[%d] out of range", i)
+	}
+	if !InSignedPowerOfTwo(w, params.DecRange()+1) {
+		return fmt.Errorf("DecProof: w[%d] out of range", i)
+	}
+
+	leftPaillier, err := EncRandom(stmt.PaillierN, w, nu)
+	if err != nil {
+		return err
+	}
+	kZ, err := OMulPublic(stmt.PaillierN, z, stmt.K)
+	if err != nil {
+		return err
+	}
+	rightPaillier, err := OAdd(stmt.PaillierN, a, kZ)
+	if err != nil {
+		return err
+	}
+	if decChallengeBit(challenges, i) == 1 {
+		rightPaillier, err = OAdd(stmt.PaillierN, rightPaillier, stmt.D)
+		if err != nil {
+			return err
+		}
+	}
+	if leftPaillier.Cmp(rightPaillier) != 0 {
+		return fmt.Errorf("DecProof: Paillier equation failed in round %d", i)
+	}
+
+	zScalar := secp.ScalarFromBigInt(z)
+	leftX := secp.ScalarBaseMult(zScalar)
+	zScalar.Set(secp.ScalarZero())
+	rightX := c
+	if decChallengeBit(challenges, i) == 1 {
+		rightX = secp.Add(c, stmt.X)
+	}
+	if !secp.Equal(leftX, rightX) {
+		return fmt.Errorf("DecProof: x commitment equation failed in round %d", i)
+	}
+
+	wScalar := secp.ScalarFromBigInt(w)
+	leftS := secp.ScalarMult(stmt.PlaintextBase, wScalar)
+	wScalar.Set(secp.ScalarZero())
+	rightS := b
+	if decChallengeBit(challenges, i) == 1 {
+		rightS = secp.Add(b, stmt.S)
+	}
+	if !secp.Equal(leftS, rightS) {
+		return fmt.Errorf("DecProof: plaintext commitment equation failed in round %d", i)
+	}
+
 	return nil
 }

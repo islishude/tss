@@ -40,7 +40,7 @@ linters:
     dupl:
       threshold: 150
     gocognit:
-      min-complexity: 150
+      min-complexity: 30
   exclusions:
     rules:
       # Keep unparam focused on production code; constant-only test-helper

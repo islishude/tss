@@ -829,63 +829,9 @@ func (s *auxInfoState) prepareLocalRound3(
 	}
 	clear(identifierBytes)
 
-	for _, receiver := range s.cfg.Parties {
-		if receiver == s.cfg.Self {
-			continue
-		}
-		receiverReveal := reveals[receiver]
-		factorDomain, err := figure7FactorDomain(s.stableSID, s.cfg.SessionID, rid, epoch.EpochID, s.cfg.Parties, s.cfg.Threshold, s.cfg.Self, receiver, s.planHash)
-		if err != nil {
-			prepared.destroy()
-			return nil, err
-		}
-		factorProof, err := zkpai.ProveFactor(s.securityParams, factorDomain, s.local.paillier, receiverReveal.RingPedersenParams, s.cfg.Reader())
-		if err != nil {
-			prepared.destroy()
-			return nil, err
-		}
-		evaluation, err := evaluateFigure7Polynomial(s.local.polynomial, epoch, receiver)
-		if err != nil {
-			prepared.destroy()
-			return nil, err
-		}
-		peerDH, ok := auxInfoDHKeyFor(receiverReveal.DHKeys, s.cfg.Self)
-		if !ok {
-			prepared.destroy()
-			return nil, fmt.Errorf("missing auxinfo DH key from receiver %d", receiver)
-		}
-		shared, err := figure7DHSharedSecret(peerDH, s.local.dhSecrets[receiver])
-		clear(peerDH)
-		if err != nil {
-			prepared.destroy()
-			return nil, err
-		}
-		mask, err := deriveFigure7DHMask(s.stableSID, s.cfg.SessionID, rid, epoch.EpochID, s.cfg.Self, receiver, shared, s.planHash)
-		clear(shared)
-		if err != nil {
-			prepared.destroy()
-			return nil, err
-		}
-		directPayload := auxInfoDirectPayload{
-			ModulusProof: localModulusProof.Clone(),
-			FactorProof:  factorProof.Clone(),
-			MaskedShare:  maskFigure7Share(evaluation, mask),
-			RID:          rid,
-			EpochID:      bytes.Clone(epoch.EpochID),
-			PlanHash:     s.planHash,
-		}
-		directBytes, err := directPayload.MarshalBinaryWithLimits(s.limits)
-		if err != nil {
-			prepared.destroy()
-			return nil, err
-		}
-		directEnv, err := newEnvelope(s.cfg, s.schedule.ProofRound, s.cfg.Self, receiver, payloadAuxInfoDirect, directBytes)
-		clear(directBytes)
-		if err != nil {
-			prepared.destroy()
-			return nil, auxInfoOutboundConstruction(err)
-		}
-		prepared.out = append(prepared.out, directEnv)
+	if err := s.prepareRound3Direct(prepared, reveals, rid, epoch, localModulusProof); err != nil {
+		prepared.destroy()
+		return nil, err
 	}
 	prepared.commit = func() error {
 		s.slots[trigger].reveal = cloneAuxInfoReveal(triggerReveal)
@@ -1544,4 +1490,58 @@ func (s *auxInfoState) auxInfoTranscriptHash(
 		t.AppendBytes("modulus_proof", modBytes)
 	}
 	return t.Sum(), nil
+}
+
+func (s *auxInfoState) prepareRound3Direct(prepared *preparedAuxInfoInbound, reveals map[tss.PartyID]*auxInfoRevealPayload, rid tss.SessionID, epoch *EpochContext, localModulusProof *zkpai.ModulusProof) error {
+	for _, receiver := range s.cfg.Parties {
+		if receiver == s.cfg.Self {
+			continue
+		}
+		receiverReveal := reveals[receiver]
+		factorDomain, err := figure7FactorDomain(s.stableSID, s.cfg.SessionID, rid, epoch.EpochID, s.cfg.Parties, s.cfg.Threshold, s.cfg.Self, receiver, s.planHash)
+		if err != nil {
+			return err
+		}
+		factorProof, err := zkpai.ProveFactor(s.securityParams, factorDomain, s.local.paillier, receiverReveal.RingPedersenParams, s.cfg.Reader())
+		if err != nil {
+			return err
+		}
+		evaluation, err := evaluateFigure7Polynomial(s.local.polynomial, epoch, receiver)
+		if err != nil {
+			return err
+		}
+		peerDH, ok := auxInfoDHKeyFor(receiverReveal.DHKeys, s.cfg.Self)
+		if !ok {
+			return fmt.Errorf("missing auxinfo DH key from receiver %d", receiver)
+		}
+		shared, err := figure7DHSharedSecret(peerDH, s.local.dhSecrets[receiver])
+		clear(peerDH)
+		if err != nil {
+			return err
+		}
+		mask, err := deriveFigure7DHMask(s.stableSID, s.cfg.SessionID, rid, epoch.EpochID, s.cfg.Self, receiver, shared, s.planHash)
+		clear(shared)
+		if err != nil {
+			return err
+		}
+		directPayload := auxInfoDirectPayload{
+			ModulusProof: localModulusProof.Clone(),
+			FactorProof:  factorProof.Clone(),
+			MaskedShare:  maskFigure7Share(evaluation, mask),
+			RID:          rid,
+			EpochID:      bytes.Clone(epoch.EpochID),
+			PlanHash:     s.planHash,
+		}
+		directBytes, err := directPayload.MarshalBinaryWithLimits(s.limits)
+		if err != nil {
+			return err
+		}
+		directEnv, err := newEnvelope(s.cfg, s.schedule.ProofRound, s.cfg.Self, receiver, payloadAuxInfoDirect, directBytes)
+		clear(directBytes)
+		if err != nil {
+			return auxInfoOutboundConstruction(err)
+		}
+		prepared.out = append(prepared.out, directEnv)
+	}
+	return nil
 }

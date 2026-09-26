@@ -144,10 +144,7 @@ func proveAffGOnce(params SecurityParams, state []byte, stmt AffGStatement, w Af
 	if rng == nil {
 		rng = rand.Reader
 	}
-	if err := params.Validate(); err != nil {
-		return nil, err
-	}
-	if err := validateAffGStatement(params, stmt, w); err != nil {
+	if err := validateAffGProver(params, stmt, w); err != nil {
 		return nil, err
 	}
 
@@ -296,112 +293,22 @@ func proveAffGOnce(params SecurityParams, state []byte, stmt AffGStatement, w Af
 		return nil, err
 	}
 
-	// Responses.
-	xBig, err := secretScalarBig(w.X)
+	proof, err := respondAffG(stmt, w, e, affGResponseMasks{
+		alpha: alpha, beta: beta, mask: mask, gamma: gamma,
+		mu: mu, delta: delta, r: r, rY: rY,
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer secret.ClearBigInt(xBig)
-	yBig, err := signedSecretBig(w.Y)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(yBig)
-	alphaBig, err := signedSecretBig(alpha)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(alphaBig)
-	betaBig, err := signedSecretBig(beta)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(betaBig)
-	maskBig, err := signedSecretBig(mask)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(maskBig)
-	gammaBig, err := signedSecretBig(gamma)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(gammaBig)
-	muBig, err := signedSecretBig(mu)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(muBig)
-	deltaBig, err := signedSecretBig(delta)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(deltaBig)
-	z1 := new(big.Int).Mul(e, xBig)
-	z1.Add(z1, alphaBig)
-	z2 := new(big.Int).Mul(e, yBig)
-	z2.Add(z2, betaBig)
-	z3 := new(big.Int).Mul(e, maskBig)
-	z3.Add(z3, gammaBig)
-	z4 := new(big.Int).Mul(e, muBig)
-	z4.Add(z4, deltaBig)
-
-	// w = r * rho^e mod Nj.
-	// math/big.Int.Exp is used here with a secret base (w.Rho, Paillier
-	// randomness) but a public exponent (e, the Fiat-Shamir challenge).
-	// This is acceptable because the prover generates the proof locally
-	// and already owns the witness; observable timing differences in base
-	// size are not exploitable by a remote verifier in the non-interactive
-	// setting. The value is further masked by multiplication with the
-	// fresh random r before being included in the proof.
-	rhoBig, err := secretScalarBig(w.Rho)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(rhoBig)
-	rBig, err := secretScalarBig(r)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(rBig)
-	rhoExp := new(big.Int).Exp(rhoBig, e, Nj.N)
-	defer secret.ClearBigInt(rhoExp)
-	wVal := new(big.Int).Mul(rBig, rhoExp)
-	wVal.Mod(wVal, Nj.N)
-
-	// wY = rY * rhoY^e mod Ni.
-	// Same rationale as above: public exponent, prover-local computation.
-	rhoYBig, err := secretScalarBig(w.RhoY)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(rhoYBig)
-	rYBig, err := secretScalarBig(rY)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(rYBig)
-	rhoYExp := new(big.Int).Exp(rhoYBig, e, Ni.N)
-	defer secret.ClearBigInt(rhoYExp)
-	wY := new(big.Int).Mul(rYBig, rhoYExp)
-	wY.Mod(wY, Ni.N)
-
-	return &AffGProof{
-		A:              new(big.Int).Set(A),
-		Bx:             Bx,
-		By:             new(big.Int).Set(By),
-		E:              new(big.Int).Set(E),
-		S:              new(big.Int).Set(S),
-		F:              new(big.Int).Set(F),
-		T:              new(big.Int).Set(T),
-		Z1:             new(big.Int).Set(z1),
-		Z2:             new(big.Int).Set(z2),
-		Z3:             new(big.Int).Set(z3),
-		Z4:             new(big.Int).Set(z4),
-		W:              new(big.Int).Set(wVal),
-		WY:             new(big.Int).Set(wY),
-		TranscriptHash: transcript.Sum(),
-	}, nil
+	proof.A = new(big.Int).Set(A)
+	proof.Bx = Bx
+	proof.By = new(big.Int).Set(By)
+	proof.E = new(big.Int).Set(E)
+	proof.S = new(big.Int).Set(S)
+	proof.F = new(big.Int).Set(F)
+	proof.T = new(big.Int).Set(T)
+	proof.TranscriptHash = transcript.Sum()
+	return proof, nil
 }
 
 // VerifyAffG checks a Πaff-g proof. Returns nil on success or an error.
@@ -419,63 +326,8 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	Nj := stmt.ReceiverPaillierN
 	Nhat := stmt.VerifierAux.N
 
-	// Structural checks.
-	if err := params.CheckPaillierModulus(Ni); err != nil {
+	if err := validateAffGProofElements(params, stmt, proof); err != nil {
 		return err
-	}
-	if err := params.CheckPaillierModulus(Nj); err != nil {
-		return err
-	}
-	if _, err := RequireZN2Star(stmt.C, Nj.N); err != nil {
-		return fmt.Errorf("AffGProof: C not in Z*_Nj^2: %w", err)
-	}
-	if _, err := RequireZN2Star(stmt.D, Nj.N); err != nil {
-		return fmt.Errorf("AffGProof: D not in Z*_Nj^2: %w", err)
-	}
-	// Validate proof fields.
-	if _, err := RequireZN2Star(proof.A, Nj.N); err != nil {
-		return fmt.Errorf("AffGProof: A not in Z*_Nj^2: %w", err)
-	}
-	if proof.Bx == nil {
-		return errors.New("AffGProof: nil Bx")
-	}
-	if _, err := RequireZN2Star(proof.By, Ni.N); err != nil {
-		return fmt.Errorf("AffGProof: By not in Z*_Ni^2: %w", err)
-	}
-	if _, err := RequireZNStar(proof.E, Nhat); err != nil {
-		return fmt.Errorf("AffGProof: E not in Z*_Nhat: %w", err)
-	}
-	if _, err := RequireZNStar(proof.S, Nhat); err != nil {
-		return fmt.Errorf("AffGProof: S not in Z*_Nhat: %w", err)
-	}
-	if _, err := RequireZNStar(proof.F, Nhat); err != nil {
-		return fmt.Errorf("AffGProof: F not in Z*_Nhat: %w", err)
-	}
-	if _, err := RequireZNStar(proof.T, Nhat); err != nil {
-		return fmt.Errorf("AffGProof: T not in Z*_Nhat: %w", err)
-	}
-	if _, err := RequireZNStar(proof.W, Nj.N); err != nil {
-		return fmt.Errorf("AffGProof: w not in Z*_Nj: %w", err)
-	}
-	if _, err := RequireZNStar(proof.WY, Ni.N); err != nil {
-		return fmt.Errorf("AffGProof: wY not in Z*_Ni: %w", err)
-	}
-
-	// Range checks BEFORE algebraic equations.
-	// +1 accounts for the addition of mask and challenge*secret term.
-	if !InSignedPowerOfTwo(proof.Z1, params.EncRange()+1) {
-		return fmt.Errorf("AffGProof: z1 out of range ±2^%d", params.EncRange()+1)
-	}
-	if !InSignedPowerOfTwo(proof.Z2, params.AffGRange()+1) {
-		return fmt.Errorf("AffGProof: z2 out of range ±2^%d", params.AffGRange()+1)
-	}
-	// z3 ∈ ±(Nhat * 2^(EncRange + 1))
-	if !inMultRange(proof.Z3, Nhat, params.EncRange()+1) {
-		return errors.New("AffGProof: z3 out of range")
-	}
-	// z4 ∈ ±(Nhat * 2^(AffGRange + 1))
-	if !inMultRange(proof.Z4, Nhat, params.AffGRange()+1) {
-		return errors.New("AffGProof: z4 out of range")
 	}
 
 	// Recompute challenge.
@@ -807,4 +659,187 @@ func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement
 		return nil, err
 	}
 	return t, nil
+}
+
+type affGResponseMasks struct {
+	alpha, beta, mask, gamma, mu, delta *secret.SignedInt
+	r, rY                               *secret.Scalar
+}
+
+// respondAffG borrows the masks; the prover retains their destruction guards.
+func respondAffG(stmt AffGStatement, w AffGWitness, e *big.Int, masks affGResponseMasks) (*AffGProof, error) {
+	Ni, Nj := stmt.ProverPaillierN, stmt.ReceiverPaillierN
+	// Responses.
+	xBig, err := secretScalarBig(w.X)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(xBig)
+	yBig, err := signedSecretBig(w.Y)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(yBig)
+	alphaBig, err := signedSecretBig(masks.alpha)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(alphaBig)
+	betaBig, err := signedSecretBig(masks.beta)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(betaBig)
+	maskBig, err := signedSecretBig(masks.mask)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(maskBig)
+	gammaBig, err := signedSecretBig(masks.gamma)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(gammaBig)
+	muBig, err := signedSecretBig(masks.mu)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(muBig)
+	deltaBig, err := signedSecretBig(masks.delta)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(deltaBig)
+	z1 := new(big.Int).Mul(e, xBig)
+	z1.Add(z1, alphaBig)
+	z2 := new(big.Int).Mul(e, yBig)
+	z2.Add(z2, betaBig)
+	z3 := new(big.Int).Mul(e, maskBig)
+	z3.Add(z3, gammaBig)
+	z4 := new(big.Int).Mul(e, muBig)
+	z4.Add(z4, deltaBig)
+
+	// w = r * rho^e mod Nj.
+	// math/big.Int.Exp is used here with a secret base (w.Rho, Paillier
+	// randomness) but a public exponent (e, the Fiat-Shamir challenge).
+	// This is acceptable because the prover generates the proof locally
+	// and already owns the witness; observable timing differences in base
+	// size are not exploitable by a remote verifier in the non-interactive
+	// setting. The value is further masked by multiplication with the
+	// fresh random r before being included in the proof.
+	rhoBig, err := secretScalarBig(w.Rho)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rhoBig)
+	rBig, err := secretScalarBig(masks.r)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rBig)
+	rhoExp := new(big.Int).Exp(rhoBig, e, Nj.N)
+	defer secret.ClearBigInt(rhoExp)
+	wVal := new(big.Int).Mul(rBig, rhoExp)
+	wVal.Mod(wVal, Nj.N)
+
+	// wY = rY * rhoY^e mod Ni.
+	// Same rationale as above: public exponent, prover-local computation.
+	rhoYBig, err := secretScalarBig(w.RhoY)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rhoYBig)
+	rYBig, err := secretScalarBig(masks.rY)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rYBig)
+	rhoYExp := new(big.Int).Exp(rhoYBig, e, Ni.N)
+	defer secret.ClearBigInt(rhoYExp)
+	wY := new(big.Int).Mul(rYBig, rhoYExp)
+	wY.Mod(wY, Ni.N)
+
+	return &AffGProof{
+		Z1: new(big.Int).Set(z1),
+		Z2: new(big.Int).Set(z2),
+		Z3: new(big.Int).Set(z3),
+		Z4: new(big.Int).Set(z4),
+		W:  new(big.Int).Set(wVal),
+		WY: new(big.Int).Set(wY),
+	}, nil
+}
+
+func validateAffGProofElements(params SecurityParams, stmt AffGStatement, proof *AffGProof) error {
+	Ni, Nj, Nhat := stmt.ProverPaillierN, stmt.ReceiverPaillierN, stmt.VerifierAux.N
+	// Structural checks.
+	if err := params.CheckPaillierModulus(Ni); err != nil {
+		return err
+	}
+	if err := params.CheckPaillierModulus(Nj); err != nil {
+		return err
+	}
+	if _, err := RequireZN2Star(stmt.C, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: C not in Z*_Nj^2: %w", err)
+	}
+	if _, err := RequireZN2Star(stmt.D, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: D not in Z*_Nj^2: %w", err)
+	}
+	// Validate proof fields.
+	if _, err := RequireZN2Star(proof.A, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: A not in Z*_Nj^2: %w", err)
+	}
+	if proof.Bx == nil {
+		return errors.New("AffGProof: nil Bx")
+	}
+	if _, err := RequireZN2Star(proof.By, Ni.N); err != nil {
+		return fmt.Errorf("AffGProof: By not in Z*_Ni^2: %w", err)
+	}
+	if _, err := RequireZNStar(proof.E, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: E not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.S, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: S not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.F, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: F not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.T, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: T not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.W, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: w not in Z*_Nj: %w", err)
+	}
+	if _, err := RequireZNStar(proof.WY, Ni.N); err != nil {
+		return fmt.Errorf("AffGProof: wY not in Z*_Ni: %w", err)
+	}
+
+	// Range checks BEFORE algebraic equations.
+	// +1 accounts for the addition of mask and challenge*secret term.
+	if !InSignedPowerOfTwo(proof.Z1, params.EncRange()+1) {
+		return fmt.Errorf("AffGProof: z1 out of range ±2^%d", params.EncRange()+1)
+	}
+	if !InSignedPowerOfTwo(proof.Z2, params.AffGRange()+1) {
+		return fmt.Errorf("AffGProof: z2 out of range ±2^%d", params.AffGRange()+1)
+	}
+	// z3 ∈ ±(Nhat * 2^(EncRange + 1))
+	if !inMultRange(proof.Z3, Nhat, params.EncRange()+1) {
+		return errors.New("AffGProof: z3 out of range")
+	}
+	// z4 ∈ ±(Nhat * 2^(AffGRange + 1))
+	if !inMultRange(proof.Z4, Nhat, params.AffGRange()+1) {
+		return errors.New("AffGProof: z4 out of range")
+	}
+
+	return nil
+}
+
+func validateAffGProver(params SecurityParams, stmt AffGStatement, w AffGWitness) error {
+	if err := params.Validate(); err != nil {
+		return err
+	}
+	if err := validateAffGStatement(params, stmt, w); err != nil {
+		return err
+	}
+
+	return nil
 }

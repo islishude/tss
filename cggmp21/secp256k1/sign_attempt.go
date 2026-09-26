@@ -641,29 +641,7 @@ func validateSignAttemptPublicContext(context signAttemptPublicContext, limits L
 			return fmt.Errorf("%w: sign signer %d is outside epoch", ErrSignAttemptCorrupt, signer)
 		}
 	}
-	deltaPoints := make([]*secp.Point, 0, len(context.Commitments))
-	sPoints := make([]*secp.Point, 0, len(context.Commitments))
-	for i := range context.Commitments {
-		commitment := context.Commitments[i]
-		if commitment.Party != context.Signers[i] {
-			return fmt.Errorf("%w: sign public commitment order mismatch", ErrSignAttemptCorrupt)
-		}
-		delta, err := decodePresignGroupElement(commitment.DeltaTilde)
-		if err != nil {
-			return fmt.Errorf("%w: invalid DeltaTilde for party %d: %w", ErrSignAttemptCorrupt, commitment.Party, err)
-		}
-		sPoint, err := decodePresignGroupElement(commitment.STilde)
-		if err != nil {
-			return fmt.Errorf("%w: invalid STilde for party %d: %w", ErrSignAttemptCorrupt, commitment.Party, err)
-		}
-		deltaPoints = append(deltaPoints, delta)
-		sPoints = append(sPoints, sPoint)
-	}
-	if !secp.Equal(secp.AddPoints(deltaPoints...), secp.G) ||
-		!secp.Equal(secp.AddPoints(sPoints...), publicKey) {
-		return fmt.Errorf("%w: sign public commitments do not aggregate", ErrSignAttemptCorrupt)
-	}
-	return nil
+	return validateSignPublicCommitments(context, publicKey)
 }
 
 func signAttemptPublicContextMatchesPresign(context signAttemptPublicContext, presign *Presign) bool {
@@ -825,4 +803,30 @@ func clearSignAttemptOutbox(outbox *signAttemptOutbox) {
 		outbox.DeliveryPolicy.Recipients[i] = 0
 	}
 	*outbox = signAttemptOutbox{}
+}
+
+func validateSignPublicCommitments(context signAttemptPublicContext, publicKey *secp.Point) error {
+	deltaPoints := make([]*secp.Point, 0, len(context.Commitments))
+	sPoints := make([]*secp.Point, 0, len(context.Commitments))
+	for i := range context.Commitments {
+		commitment := context.Commitments[i]
+		if commitment.Party != context.Signers[i] {
+			return fmt.Errorf("%w: sign public commitment order mismatch", ErrSignAttemptCorrupt)
+		}
+		delta, err := decodePresignGroupElement(commitment.DeltaTilde)
+		if err != nil {
+			return fmt.Errorf("%w: invalid DeltaTilde for party %d: %w", ErrSignAttemptCorrupt, commitment.Party, err)
+		}
+		sPoint, err := decodePresignGroupElement(commitment.STilde)
+		if err != nil {
+			return fmt.Errorf("%w: invalid STilde for party %d: %w", ErrSignAttemptCorrupt, commitment.Party, err)
+		}
+		deltaPoints = append(deltaPoints, delta)
+		sPoints = append(sPoints, sPoint)
+	}
+	if !secp.Equal(secp.AddPoints(deltaPoints...), secp.G) ||
+		!secp.Equal(secp.AddPoints(sPoints...), publicKey) {
+		return fmt.Errorf("%w: sign public commitments do not aggregate", ErrSignAttemptCorrupt)
+	}
+	return nil
 }

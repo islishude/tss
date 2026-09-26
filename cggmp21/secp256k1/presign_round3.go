@@ -263,35 +263,7 @@ func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Out
 	if err != nil {
 		return nil, false, err
 	}
-	self, ok := s.partyState(s.key.state.Party)
-	if !ok || !self.round1.havePayload {
-		return nil, false, errors.New("missing local Figure 8 round1 state")
-	}
-	yPoint, err := secp.PointFromBytes(self.round1.payload.Y)
-	if err != nil {
-		return nil, false, err
-	}
-	a1Point, err := secp.PointFromBytes(self.round1.payload.A1)
-	if err != nil {
-		return nil, false, err
-	}
-	a2Point, err := secp.PointFromBytes(self.round1.payload.A2)
-	if err != nil {
-		return nil, false, err
-	}
-	domain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash,
-		s.signers, presignRound3, s.key.state.Party, tss.BroadcastPartyId, "elog-delta")
-	if err != nil {
-		return nil, false, err
-	}
-	proof, err := zkpai.ProveElog(domain, zkpai.ElogStatement{
-		Generator:         secp.G,
-		LambdaCommitment:  a1Point,
-		ElGamalCommitment: a2Point,
-		ElGamalBase:       yPoint,
-		ResultCommitment:  deltaPoint,
-		ResultBase:        gamma,
-	}, zkpai.ElogWitness{Y: s.kShare, Lambda: s.a}, s.config.Reader())
+	proof, err := s.proveRound3Delta(deltaPoint, gamma)
 	if err != nil {
 		return nil, false, err
 	}
@@ -687,3 +659,39 @@ func (s *PresignSession) round1Echo() []byte {
 }
 
 func defaultEnvelopeLimitsForEvidence() tss.EnvelopeLimits { return tss.DefaultEnvelopeLimits() }
+
+func (s *PresignSession) proveRound3Delta(deltaPoint, gamma *secp.Point) (*zkpai.ElogProof, error) {
+	self, ok := s.partyState(s.key.state.Party)
+	if !ok || !self.round1.havePayload {
+		return nil, errors.New("missing local Figure 8 round1 state")
+	}
+	yPoint, err := secp.PointFromBytes(self.round1.payload.Y)
+	if err != nil {
+		return nil, err
+	}
+	a1Point, err := secp.PointFromBytes(self.round1.payload.A1)
+	if err != nil {
+		return nil, err
+	}
+	a2Point, err := secp.PointFromBytes(self.round1.payload.A2)
+	if err != nil {
+		return nil, err
+	}
+	domain, err := figure8ProofDomain(s.sessionID, s.epochID, s.presignID, s.planHash, s.contextHash,
+		s.signers, presignRound3, s.key.state.Party, tss.BroadcastPartyId, "elog-delta")
+	if err != nil {
+		return nil, err
+	}
+	proof, err := zkpai.ProveElog(domain, zkpai.ElogStatement{
+		Generator:         secp.G,
+		LambdaCommitment:  a1Point,
+		ElGamalCommitment: a2Point,
+		ElGamalBase:       yPoint,
+		ResultCommitment:  deltaPoint,
+		ResultBase:        gamma,
+	}, zkpai.ElogWitness{Y: s.kShare, Lambda: s.a}, s.config.Reader())
+	if err != nil {
+		return nil, err
+	}
+	return proof, nil
+}

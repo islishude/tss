@@ -970,36 +970,8 @@ func recoverFileLifecycleSnapshotArtifacts(store *FileLifecycleStore) error {
 		filepath.Join(store.directory, fileLifecycleSnapshotsDirectory),
 		filepath.Join(store.directory, fileLifecycleIndexesDirectory),
 	} {
-		rootedArtifacts, err := os.OpenRoot(artifactRoot)
-		if err != nil {
+		if err := removeUnreferencedLifecycleArtifacts(artifactRoot, referenced, changedDirectories); err != nil {
 			return err
-		}
-		walkErr := fs.WalkDir(rootedArtifacts.FS(), ".", func(relativePath string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".enc") {
-				return fmt.Errorf("%w: unexpected lifecycle snapshot artifact", ErrLifecycleCorrupt)
-			}
-			path := filepath.Join(artifactRoot, filepath.FromSlash(relativePath))
-			if _, ok := referenced[path]; ok {
-				return nil
-			}
-			if err := rootedArtifacts.Remove(filepath.FromSlash(relativePath)); err != nil {
-				return err
-			}
-			changedDirectories[filepath.Dir(path)] = struct{}{}
-			return nil
-		})
-		closeErr := rootedArtifacts.Close()
-		if walkErr != nil {
-			return walkErr
-		}
-		if closeErr != nil {
-			return closeErr
 		}
 	}
 	rootedStore, err := os.OpenRoot(store.directory)
@@ -1028,6 +1000,41 @@ func recoverFileLifecycleSnapshotArtifacts(store *FileLifecycleStore) error {
 	}
 	if rootChanged {
 		return syncLifecycleDirectory(store.directory)
+	}
+	return nil
+}
+
+func removeUnreferencedLifecycleArtifacts(artifactRoot string, referenced, changedDirectories map[string]struct{}) error {
+	rootedArtifacts, err := os.OpenRoot(artifactRoot)
+	if err != nil {
+		return err
+	}
+	walkErr := fs.WalkDir(rootedArtifacts.FS(), ".", func(relativePath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !entry.Type().IsRegular() || !strings.HasSuffix(entry.Name(), ".enc") {
+			return fmt.Errorf("%w: unexpected lifecycle snapshot artifact", ErrLifecycleCorrupt)
+		}
+		path := filepath.Join(artifactRoot, filepath.FromSlash(relativePath))
+		if _, ok := referenced[path]; ok {
+			return nil
+		}
+		if err := rootedArtifacts.Remove(filepath.FromSlash(relativePath)); err != nil {
+			return err
+		}
+		changedDirectories[filepath.Dir(path)] = struct{}{}
+		return nil
+	})
+	closeErr := rootedArtifacts.Close()
+	if walkErr != nil {
+		return walkErr
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	return nil
 }
