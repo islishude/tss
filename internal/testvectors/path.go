@@ -65,6 +65,8 @@ func validateDir(dir string) error {
 	if !filepath.IsAbs(dir) {
 		return fmt.Errorf("testvectors directory is not absolute: %s", dir)
 	}
+	// #nosec G703 -- dir is the source directory or an explicit local environment
+	// override; this sanity check appends only the fixed README.md name.
 	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
 		return fmt.Errorf("testvectors directory sanity check: %w", err)
 	}

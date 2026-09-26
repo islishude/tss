@@ -128,6 +128,8 @@ func NewFileLifecycleStore(directory string, passphrase []byte, params *tss.Pass
 		return nil, err
 	}
 	legacyKeys := filepath.Join(absolute, fileLifecycleKeysDirectory)
+	// #nosec G703 -- legacyKeys appends only the fixed keys name to the
+	// caller-selected private store root validated above.
 	if _, err := os.Lstat(legacyKeys); err == nil {
 		if err := preparePrivateLifecycleDirectory(legacyKeys); err != nil {
 			return nil, err

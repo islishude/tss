@@ -53,6 +53,8 @@ func openOrCreateFileLifecycleKey(directory string, passphrase []byte, params ts
 
 func openOrCreateFileLifecycleKeyLocked(directory string, passphrase []byte, params tss.PassphraseParams) ([]byte, []byte, error) {
 	metaPath := filepath.Join(directory, fileLifecycleMetaName)
+	// #nosec G703 -- metaPath is the fixed store.meta name beneath the
+	// constructor-validated private store root.
 	if _, err := os.Lstat(metaPath); errors.Is(err, os.ErrNotExist) {
 		stateExists, stateErr := fileLifecycleEncryptedStateExists(directory)
 		if stateErr != nil {
@@ -62,6 +64,8 @@ func openOrCreateFileLifecycleKeyLocked(directory string, passphrase []byte, par
 			return nil, nil, fmt.Errorf("%w: lifecycle store metadata is missing for existing encrypted state", ErrLifecycleCorrupt)
 		}
 		legacyPath := filepath.Join(directory, fileLifecycleKeysDirectory, fileLifecycleKeyHash(fileLifecycleGlobalKeyID), fileLifecycleManifestName)
+		// #nosec G703 -- legacyPath contains only fixed names and an internal
+		// SHA-256 encoding beneath the constructor-validated private store root.
 		if _, legacyErr := os.Lstat(legacyPath); legacyErr == nil {
 			return nil, nil, fmt.Errorf("%w: retired lifecycle manifest format", ErrLifecycleCorrupt)
 		} else if !errors.Is(legacyErr, os.ErrNotExist) {
@@ -75,6 +79,8 @@ func openOrCreateFileLifecycleKeyLocked(directory string, passphrase []byte, par
 }
 
 func fileLifecycleEncryptedStateExists(directory string) (bool, error) {
+	// #nosec G703 -- only the fixed root.enc name is appended to the
+	// constructor-validated private store root.
 	if _, err := os.Lstat(filepath.Join(directory, fileLifecycleRootName)); err == nil {
 		return true, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -91,6 +97,8 @@ func fileLifecycleEncryptedStateExists(directory string) (bool, error) {
 	}
 	for _, child := range []string{fileLifecycleSnapshotsDirectory, fileLifecycleIndexesDirectory} {
 		found := false
+		// #nosec G703 -- child is one of the two fixed store directories
+		// validated by the constructor; WalkDir does not follow symlinks.
 		err := filepath.WalkDir(filepath.Join(directory, child), func(_ string, entry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
@@ -142,7 +150,7 @@ func createFileLifecycleMeta(directory, metaPath string, passphrase []byte, para
 		return nil, nil, err
 	}
 	defer clear(encoded)
-	// #nosec G304 -- metaPath is the fixed store.meta name beneath the constructor-validated private store root.
+	// #nosec G304 G703 -- metaPath is the fixed store.meta name beneath the constructor-validated private store root.
 	file, err := os.OpenFile(metaPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if errors.Is(err, os.ErrExist) {
 		clear(dek)
@@ -156,6 +164,8 @@ func createFileLifecycleMeta(directory, metaPath string, passphrase []byte, para
 	defer func() {
 		_ = file.Close()
 		if remove {
+			// #nosec G703 -- remove only the fixed store.meta path created
+			// exclusively above while holding the metadata lock.
 			_ = os.Remove(metaPath)
 		}
 	}()
@@ -194,6 +204,8 @@ func wrapFileLifecycleDEK(passphrase, salt []byte, params tss.PassphraseParams, 
 }
 
 func readFileLifecycleMeta(metaPath string, passphrase []byte) ([]byte, []byte, error) {
+	// #nosec G703 -- the caller constructs metaPath from the validated
+	// private store root and the fixed store.meta name.
 	info, err := os.Lstat(metaPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("inspect lifecycle store metadata: %w", err)
@@ -201,7 +213,7 @@ func readFileLifecycleMeta(metaPath string, passphrase []byte) ([]byte, []byte, 
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 || info.Size() <= 0 || info.Size() > 16<<10 {
 		return nil, nil, fmt.Errorf("%w: invalid lifecycle store metadata file", ErrLifecycleCorrupt)
 	}
-	// #nosec G304 -- metaPath is the fixed store.meta path validated by Lstat above.
+	// #nosec G304 G703 -- metaPath is the fixed store.meta path validated by Lstat above.
 	encoded, err := os.ReadFile(metaPath)
 	if err != nil {
 		return nil, nil, err
